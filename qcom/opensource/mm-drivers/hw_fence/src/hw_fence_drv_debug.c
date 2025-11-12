@@ -118,7 +118,7 @@ static void _trace_queue_header(struct hw_fence_driver_data *drv_data, u32 clien
 {
 	u32 *rd_idx_ptr, *wr_idx_ptr, *tx_wm_ptr;
 
-	if (!drv_data || !queue) {
+	if (!drv_data || !queue || !queue->va_header) {
 		HWFNC_ERR("invalid drv_data:0x%pK queue:0x%pK\n", drv_data, queue);
 		return;
 	}
