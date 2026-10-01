@@ -34,6 +34,10 @@
 #include "debug.h"
 #include "genl.h"
 
+#ifdef OPLUS_FEATURE_WIFI_BDF
+#include <soc/oplus/system/oplus_project.h>
+#endif
+
 #define WLFW_SERVICE_WCN_INS_ID_V01	3
 #define WLFW_SERVICE_INS_ID_V01		0
 #define WLFW_CLIENT_ID			0x4b4e454c
@@ -51,6 +55,31 @@
 
 #define MAX_FIRMWARE_NAME_LEN		50
 #define HW_V1_NUMBER			"v1"
+#ifdef OPLUS_FEATURE_WIFI_BDF
+#define BDF_FILE_CN		"bdwlan.b0c"
+#define BDF_FILE_IN		"bdwlan.b0i"
+#define BDF_FILE_EU		"bdwlan.b0e"
+#define BDF_FILE_US		"bdwlan.b0a"
+
+
+
+#define REG_NAME_IN		"IN"
+#define REG_NAME_EU		"EU"
+#define REG_NAME_CN		"CN"
+#define REG_NAME_US		"US"
+
+enum REGION_VERSION {
+    REGION_UNKNOWN = 0,
+    REGION_CN,
+    REGION_IN,
+    REGION_EU,
+    REGION_US,
+    REGION_APAC,
+    REGION_JP,
+   };
+
+#endif /* OPLUS_FEATURE_WIFI_BDF */
+
 #ifdef CONFIG_ICNSS2_DEBUG
 #define QDSS_FILE_BUILD_STR		"debug_"
 #else
@@ -1112,6 +1141,56 @@ void icnss_dms_deinit(struct icnss_priv *priv)
 	qmi_handle_release(&priv->qmi_dms);
 }
 
+#ifdef OPLUS_FEATURE_WIFI_BDF
+static bool is_prj_support_region_id(void) {
+	int project_id = get_project();
+	icnss_pr_dbg("the project support region id is: %d\n", project_id);
+	//for Macan
+	if (project_id == 24877 || project_id == 24878 || project_id == 24879) {
+		return true;
+	}
+	return false;
+}
+
+static void cnss_get_oplus_bdf_file_name(struct icnss_priv *priv, char* file_name, u32 filename_len) {
+    int reg_id = get_Operator_Version();
+    int rf_id = get_Modem_Version();
+    icnss_pr_info("region id: %d, rf id: %d\n", reg_id, rf_id);
+
+    if (reg_id == REGION_IN) {
+        priv->region_name = REG_NAME_IN;
+    } else if (reg_id == REGION_EU || reg_id == REGION_APAC) {
+        priv->region_name = REG_NAME_EU;
+    } else if (reg_id == REGION_US) {
+        priv->region_name = REG_NAME_US;
+    } else {
+        priv->region_name = REG_NAME_CN;
+    }
+
+    if (is_prj_support_region_id()) {
+        if (reg_id == REGION_CN) {
+            snprintf(file_name, filename_len, BDF_FILE_CN);
+            priv->bdf_name = BDF_FILE_CN;
+        } else if (reg_id == REGION_IN) {
+            snprintf(file_name, filename_len, BDF_FILE_IN);
+            priv->bdf_name = BDF_FILE_IN;
+        } else if (reg_id == REGION_EU || reg_id == REGION_APAC) {
+            snprintf(file_name, filename_len, BDF_FILE_EU);
+            priv->bdf_name = BDF_FILE_EU;
+        } else if (reg_id == REGION_US) {
+            snprintf(file_name, filename_len, BDF_FILE_US);
+            priv->bdf_name = BDF_FILE_US;
+        } else {
+            snprintf(file_name, filename_len, ELF_BDF_FILE_NAME);
+            priv->bdf_name = ELF_BDF_FILE_NAME;
+        }
+    } else {
+        snprintf(file_name, filename_len, ELF_BDF_FILE_NAME);
+        priv->bdf_name = ELF_BDF_FILE_NAME;
+    }
+}
+#endif
+
 static int icnss_get_bdf_file_name(struct icnss_priv *priv,
 				   u32 bdf_type, char *filename,
 				   u32 filename_len)
@@ -1122,9 +1201,13 @@ static int icnss_get_bdf_file_name(struct icnss_priv *priv,
 
 	switch (bdf_type) {
 	case ICNSS_BDF_ELF:
-		if (priv->board_id == 0xFF)
+		if (priv->board_id == 0xFF) {
+#ifdef OPLUS_FEATURE_WIFI_BDF
+			cnss_get_oplus_bdf_file_name(priv, filename_tmp, filename_len);
+#else
 			snprintf(filename_tmp, filename_len, ELF_BDF_FILE_NAME);
-		else if (priv->board_id < 0xFF)
+#endif
+		} else if (priv->board_id < 0xFF)
 			snprintf(filename_tmp, filename_len,
 				 ELF_BDF_FILE_NAME_PREFIX "%02x",
 				 priv->board_id);
