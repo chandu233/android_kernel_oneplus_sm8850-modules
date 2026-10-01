@@ -57,9 +57,9 @@ TRACE_EVENT(sensor_err,
 
 #undef TRACE_INCLUDE_PATH
 #if defined(CFG_OPLUS_ARCH_IS_QCOM)
-#define TRACE_INCLUDE_PATH ../../../vendor/oplus/sensor/kernel/oplus_sensor_err
+#define TRACE_INCLUDE_PATH ../../../vendor/oneplus/sm8850-modules/oplus/sensor/kernel/oplus_sensor_err
 #elif defined(CFG_OPLUS_ARCH_IS_MTK)
-#define TRACE_INCLUDE_PATH ../../../vendor/oplus/sensor/kernel/oplus_sensor_err
+#define TRACE_INCLUDE_PATH ../../../vendor/oneplus/sm8850-modules/oplus/sensor/kernel/oplus_sensor_err
 #endif
 #undef TRACE_INCLUDE_FILE
 #define TRACE_INCLUDE_FILE trace_sensor_err
