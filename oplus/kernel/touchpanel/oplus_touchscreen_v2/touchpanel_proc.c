@@ -3086,6 +3086,9 @@ static ssize_t proc_click_sensitive_level_write(struct file *file, const char __
 		ts->ts_ops->click_sensitive_lv_set(ts->chip_data, raw_level);
 	} else {
 		TS_TP_INFO("%s: TP is_suspended.\n", __func__);
+		TS_TP_INFO("ClickSensitiveLevel:%u, value:%u\n",
+			ts->click_sensitive_level_chosen,
+			ts->click_sensitive_level_array[ts->click_sensitive_level_chosen]);
 	}
 	mutex_unlock(&ts->mutex);
 
