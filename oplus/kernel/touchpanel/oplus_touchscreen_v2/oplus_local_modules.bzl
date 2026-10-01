@@ -30,6 +30,7 @@ def define_oplus_local_modules():
             modules_label("oplus/kernel/device_info/device_info/bazel:device_info"),
             modules_label("oplus/kernel/touchpanel/touchpanel_notify/bazel:oplus_bsp_tp_notify"),
             modules_label("oplus/kernel/touchpanel/kernelFwUpdate/bazel:oplus_bsp_fw_update"),
+            modules_label("oplus/kernel/dft/bazel:oplus_bsp_dft_olc"),
         ]
     else :
         oplusboot_ko_deps = []
@@ -80,12 +81,41 @@ def define_oplus_local_modules():
             tp_common_ko_deps = [
                 modules_label("oplus/kernel/touchpanel/oplus_touchscreen_v2:oplus_bsp_tp_custom"),
             ]
+
+            if bazel_support_platform == "unisoc" :
+                tp_custom_ko_deps = [
+                    modules_label("oplus/kernel/device_info/device_info/bazel:device_info"),
+                ]
+                tp_common_ko_deps += [
+                    modules_label("oplus/kernel/touchpanel/touchpanel_notify/bazel:oplus_bsp_tp_notify"),
+                    modules_label("oplus/kernel/touchpanel/kernelFwUpdate/bazel:oplus_bsp_fw_update"),
+                    modules_label("oplus/kernel/device_info/device_info/bazel:device_info")
+                ]
             oplus_bsp_tp_nt36672c_noflash_ko_deps = [
                 modules_label("oplus/kernel/touchpanel/oplus_touchscreen_v2:oplus_bsp_tp_custom"),
                 modules_label("oplus/kernel/touchpanel/oplus_touchscreen_v2:oplus_bsp_tp_common"),
                 modules_label("oplus/kernel/touchpanel/oplus_touchscreen_v2:oplus_bsp_tp_novatek_common"),
             ]
             copts = []
+
+    if bazel_support_platform == "unisoc" :
+        td4377_ko_deps = [
+            modules_label("oplus/kernel/touchpanel/oplus_touchscreen_v2:oplus_bsp_tp_custom"),
+            modules_label("oplus/kernel/touchpanel/oplus_touchscreen_v2:oplus_bsp_tp_common"),
+            modules_label("oplus/kernel/touchpanel/oplus_touchscreen_v2:oplus_bsp_tp_syna_common"),
+            modules_label("oplus/kernel/touchpanel/touchpanel_notify/bazel:oplus_bsp_tp_notify"),
+            modules_label("oplus/kernel/touchpanel/kernelFwUpdate/bazel:oplus_bsp_fw_update"),
+        ]
+        syna_common_header_deps = [
+            modules_label("oplus/kernel/device_info/device_info/bazel:config_headers"),
+        ]
+    else :
+        td4377_ko_deps = [
+            modules_label("oplus/kernel/touchpanel/oplus_touchscreen_v2:oplus_bsp_tp_custom"),
+            modules_label("oplus/kernel/touchpanel/oplus_touchscreen_v2:oplus_bsp_tp_common"),
+            modules_label("oplus/kernel/touchpanel/oplus_touchscreen_v2:oplus_bsp_tp_syna_common")
+        ]
+        syna_common_header_deps = []
 
     define_oplus_ddk_module(
         name = "oplus_bsp_tp_syna_common",
@@ -100,6 +130,7 @@ def define_oplus_local_modules():
             modules_label("oplus/kernel/touchpanel/oplus_touchscreen_v2:oplus_bsp_tp_custom"),
             modules_label("oplus/kernel/touchpanel/oplus_touchscreen_v2:oplus_bsp_tp_common"),
         ],
+        header_deps = syna_common_header_deps,
 #        local_defines = ["CONFIG_REMOVE_OPLUS_FUNCTION"],
     )
 
@@ -137,7 +168,7 @@ def define_oplus_local_modules():
         ],
         includes = ["."],
         copts = copts,
-#        local_defines = ["CONFIG_REMOVE_OPLUS_FUNCTION"],
+#       local_defines = ["CONFIG_REMOVE_OPLUS_FUNCTION"],
         conditional_defines = {
             "mtk":  ["CONFIG_TOUCHPANEL_MTK_PLATFORM","CONFIG_TOUCHPANEL_MULTI_NOFLASH"],
         },
@@ -217,6 +248,7 @@ def define_oplus_local_modules():
             modules_label("oplus/kernel/touchpanel/oplus_touchscreen_v2:oplus_bsp_tp_custom"),
             modules_label("oplus/kernel/touchpanel/oplus_touchscreen_v2:oplus_bsp_tp_common"),
             modules_label("oplus/kernel/touchpanel/oplus_touchscreen_v2:oplus_bsp_tp_novatek_common"),
+            modules_label("oplus/kernel/touchpanel/touchpanel_notify/bazel:oplus_bsp_tp_notify"),
         ],
         includes = ["."],
         copts = copts,
@@ -432,16 +464,14 @@ def define_oplus_local_modules():
             "Synaptics/TD4377_noflash/synaptics_tcm_recovery.c",
             "Synaptics/TD4377_noflash/synaptics_tcm_zeroflash.c",
         ]),
-        ko_deps = [
-            modules_label("oplus/kernel/touchpanel/oplus_touchscreen_v2:oplus_bsp_tp_custom"),
-            modules_label("oplus/kernel/touchpanel/oplus_touchscreen_v2:oplus_bsp_tp_common"),
-            modules_label("oplus/kernel/touchpanel/oplus_touchscreen_v2:oplus_bsp_tp_syna_common"),
-        ],
+        ko_deps = td4377_ko_deps,
+        header_deps = syna_common_header_deps,
         includes = ["."],
         copts = copts,
 #        local_defines = ["CONFIG_REMOVE_OPLUS_FUNCTION"],
         conditional_defines = {
             "mtk":  ["CONFIG_TOUCHPANEL_MTK_PLATFORM","CONFIG_TOUCHPANEL_MULTI_NOFLASH"],
+            "unisoc":  ["CONFIG_TOUCHPANEL_UNISOC_PLATFORM", "CONFIG_UNISOC_DISPLAY_NOTIFIER"],
         },
     )
 
@@ -452,9 +482,13 @@ def define_oplus_local_modules():
             "touch_custom/touch.c"
         ]),
         ko_deps = tp_custom_ko_deps + oplus_bsp_boot_projectinfo_ko_deps,
+        header_deps = syna_common_header_deps,
         includes = ["."],
         copts = copts,
         local_defines = ["CONFIG_OPLUS_FEATURE_OPROJECT"],
+        conditional_defines = {
+            "unisoc":  ["CONFIG_TOUCHPANEL_UNISOC_PLATFORM", "CONFIG_UNISOC_DISPLAY_NOTIFIER"],
+        },
     )
 
     define_oplus_ddk_module(
@@ -476,12 +510,14 @@ def define_oplus_local_modules():
             "touch_pen/touch_pen_algo.c",
         ]),
         ko_deps = tp_common_ko_deps + oplusboot_ko_deps + oplus_bsp_boot_projectinfo_ko_deps + panel_event_notifier_ko_deps + tp_others_ko_deps,
+        header_deps = syna_common_header_deps,
         includes = ["."],
         copts = copts,
         local_defines = ["CONFIG_TOUCHPANEL_NOTIFY", "CONFIG_TOUCHPANEL_OPLUS_MODULE"],
         conditional_defines = {
-            "qcom":  ["CONFIG_QCOM_PANEL_EVENT_NOTIFIER"],
+            "qcom":  ["CONFIG_QCOM_PANEL_EVENT_NOTIFIER", "CONFIG_OPLUS_FEATURE_OLC"],
             "mtk":  ["CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY", "CONFIG_TOUCHPANEL_MTK_PLATFORM"],
+            "unisoc":  ["CONFIG_TOUCHPANEL_UNISOC_PLATFORM", "CONFIG_UNISOC_DISPLAY_NOTIFIER"],
         },
     )
 

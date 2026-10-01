@@ -14,6 +14,7 @@
 #include "../touch_comon_api/touch_comon_api.h"
 #include "../touchpanel_autotest/touchpanel_autotest.h"
 #include "../touchpanel_healthinfo/touchpanel_healthinfo.h"
+#include "../touch_pen/touch_pen_core.h"
 
 /*********PART2:Define Area**********************/
 struct nvt_testdata {

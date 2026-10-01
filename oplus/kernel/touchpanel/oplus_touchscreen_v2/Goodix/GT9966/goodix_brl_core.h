@@ -150,7 +150,6 @@
 #define GTP_PEN_SET_CMD_CFG_ACK     0x6D
 #define GTP_PEN_SET_CMD_PRESS       0xB9
 #define GTP_PEN_SET_CMD_SPEED_ON    0x6E
-#define GTP_PEN_DOWN_CMD_FRQ        0x6F
 
 #define GTP_SET_CMD_STATUS_OFFSET   0
 #define GTP_SET_CMD_ACK_OFFSET      1
