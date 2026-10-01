@@ -1347,6 +1347,12 @@ static void oplus_chg_dischg_profile_check_work(struct work_struct *work)
 	oplus_chg_check_dischg_profile(chip);
 }
 
+static void oplus_monitor_reset_cycle_derating_trig(struct oplus_monitor *chip)
+{
+	chip->curr_derating_trig = false;
+	chip->tier_derating_trig = false;
+}
+
 static void oplus_monitor_wired_subs_callback(struct mms_subscribe *subs,
 					  enum mms_msg_type type, u32 id, bool sync)
 {
@@ -1364,7 +1370,7 @@ static void oplus_monitor_wired_subs_callback(struct mms_subscribe *subs,
 			if (!chip->wired_online)
 				oplus_chg_track_record_dual_chan_end(chip);
 			else
-				chip->curr_derating_trig = false;
+				oplus_monitor_reset_cycle_derating_trig(chip);
 			oplus_chg_track_update_break_ui_online();
 			schedule_work(&chip->charge_info_update_work);
 			schedule_work(&chip->wired_plugin_work);
@@ -2405,6 +2411,12 @@ static struct mms_item oplus_monitor_item[] = {
 	{
 		.desc = {
 			.item_id = ERR_ITEM_CYCLE_CURRENT_DERATING,
+			.str_data = true,
+		}
+	},
+	{
+		.desc = {
+			.item_id = ERR_ITEM_CYCLE_TIER_DERATING,
 			.str_data = true,
 		}
 	},

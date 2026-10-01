@@ -48,6 +48,8 @@
 #include <oplus_chg_module.h>
 #include <oplus_chg.h>
 #include <oplus_chg_voter.h>
+#include <oplus_strategy.h>
+#include <oplus_chg_ai_cv.h>
 #include <oplus_chg_comm.h>
 #include <oplus_mms.h>
 #include <oplus_mms_wired.h>
@@ -2245,6 +2247,17 @@ static void oplus_comm_track_dec_cv(struct oplus_chg_comm *chip)
 	}
 }
 
+static int oplus_comm_get_ai_fc_thresh_mv(struct oplus_chg_comm *chip)
+{
+	int val;
+
+	if (!chip)
+		return 0;
+	val = oplus_ai_cv_get_fc_thresh_mv();
+	if (val < 0)
+		return 0;
+	return min(val, DEC_VOL_UPDATE_MAX);
+}
 
 #define DEC_VOL_UPDATE_CC_DELTA 20
 #define DEC_VOL_UPDATE_SOH_DELTA 5
@@ -2261,8 +2274,8 @@ static void oplus_comm_get_dec_scv(struct oplus_chg_comm *chip)
 	last_cc = chip->dec_cv_down_info.dec_cc;
 	spec->dec_cv.full.last_cc = last_cc;
 	index = spec->dec_cv.index;
-	vol_fv = (spec->dec_cv.full.spec_fv_mv[index] - spec->dec_cv.dec_delta) > 0 ?
-		(spec->dec_cv.full.spec_fv_mv[index] - spec->dec_cv.dec_delta) : 0;
+	vol_fv = max((spec->dec_cv.full.spec_fv_mv[index] - spec->dec_cv.dec_delta) > 0 ?
+		(spec->dec_cv.full.spec_fv_mv[index] - spec->dec_cv.dec_delta) : 0, oplus_comm_get_ai_fc_thresh_mv(chip));
 	vol_vct = (spec->dec_cv.full.spec_vct_mv[index] - spec->dec_cv.dec_delta) > 0 ?
 		(spec->dec_cv.full.spec_vct_mv[index] - spec->dec_cv.dec_delta) : 0;
 	if (chip->dec_cv_down_info.dec_vol != vol_fv || chip->dec_cv_down_info.dec_vct != vol_vct) {
@@ -2340,7 +2353,7 @@ static void oplus_comm_get_dec_fcv(struct oplus_chg_comm *chip)
 
 	vol_fv = vol_fv > DEC_VOL_UPDATE_MAX ? DEC_VOL_UPDATE_MAX : vol_fv;
 	vol_vct = vol_vct > DEC_VCT_UPDATE_MAX ? DEC_VCT_UPDATE_MAX : vol_vct;
-	spec->dec_cv.dec_vol = vol_fv;
+	spec->dec_cv.dec_vol = max(vol_fv, oplus_comm_get_ai_fc_thresh_mv(chip));
 	if (spec->dec_cv.full.vct_en)
 		spec->dec_cv.full.vct_up = vol_vct;
 
@@ -2402,6 +2415,24 @@ void oplus_comm_get_dec_delta(struct oplus_mms *topic, int *val)
 	}
 
 	*val = chip->spec.dec_cv.dec_delta;
+}
+
+void oplus_comm_notify_ai_cv_changed(struct oplus_mms *topic)
+{
+	struct oplus_chg_comm *chip;
+
+	if (topic == NULL) {
+		chg_err("topic is NULL\n");
+		return;
+	}
+	chip = oplus_mms_get_drvdata(topic);
+	if (!chip) {
+		chg_err("oplus_chg_comm chip is NULL\n");
+		return;
+	}
+
+	chg_info("ai_cv changed, scheduling dec_cv recompute\n");
+	schedule_delayed_work(&chip->dec_cv_check_work, 0);
 }
 
 static int oplus_comm_get_lite_index(struct oplus_chg_comm *chip)
@@ -2467,8 +2498,10 @@ static void oplus_comm_dec_cv_check(struct oplus_chg_comm *chip)
 {
 	struct oplus_comm_spec_config *spec = &chip->spec;
 
-	if (!spec->dec_cv.dec_spec_support)
+	if (spec->dec_cv.dec_spec_support == DEC_CV_SUPPORT_NOT) {
+		spec->dec_cv.dec_vol = oplus_comm_get_ai_fc_thresh_mv(chip);
 		return;
+	}
 
 	oplus_comm_dec_cv_lite(chip);
 	oplus_comm_dec_cv_full(chip);
@@ -7359,6 +7392,12 @@ static void oplus_comm_offline_clean_process(struct oplus_chg_comm *chip)
 }
 
 #define OFFLINE_CLEAN_DELAY 500
+static void oplus_comm_plugin_offline_prepare(struct oplus_chg_comm *chip)
+{
+	chip->low_temp_check_jiffies = jiffies;
+	oplus_ai_cv_clear_curve();
+}
+
 static void oplus_comm_plugin_work(struct work_struct *work)
 {
 	struct oplus_chg_comm *chip =
@@ -7406,7 +7445,7 @@ static void oplus_comm_plugin_work(struct work_struct *work)
 		 */
 		chip->batt_full_jiffies = jiffies;
 	} else {
-		chip->low_temp_check_jiffies = jiffies;
+		oplus_comm_plugin_offline_prepare(chip);
 		if (is_wired_charging_disable_votable_available(chip)) {
 			vote(chip->wired_charging_disable_votable,
 			     CHG_FULL_VOTER, false, 0, false);

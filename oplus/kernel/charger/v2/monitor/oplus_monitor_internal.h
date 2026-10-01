@@ -359,6 +359,7 @@ struct oplus_monitor {
 	unsigned long reverse_end_time;
 	char reverse_str[OPLUS_MONITOR_REVERSE_STR_MAX];
 	bool curr_derating_trig;
+	bool tier_derating_trig;
 };
 
 struct oplus_chg_into_l{

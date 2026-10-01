@@ -9,6 +9,7 @@
 #include <linux/slab.h>
 #include <linux/device.h>
 #include <linux/fs.h>
+#include <linux/sysfs.h>
 #include <linux/nls.h>
 #include <linux/kdev_t.h>
 #include <linux/random.h>
@@ -40,6 +41,9 @@
 #include <linux/mutex.h>
 #include <oplus_sec.h>
 #include <oplus_reverse_chg.h>
+
+#include <oplus_chg_ai_cv.h>
+
 #ifndef CONFIG_DISABLE_OPLUS_FUNCTION
 #include <soc/oplus/system/oplus_project.h>
 #endif
@@ -2812,6 +2816,71 @@ static ssize_t get_three_level_term_volt_show(
 }
 DEVICE_ATTR_RO(get_three_level_term_volt);
 
+static ssize_t ai_cv_curve_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	return oplus_ai_cv_curve_format(buf, PAGE_SIZE);
+}
+
+#define AI_CV_CURVE_STORE_MAX	512
+
+static ssize_t ai_cv_curve_store(struct device *dev,
+				 struct device_attribute *attr,
+				 const char *buf, size_t count)
+{
+	char kbuf[AI_CV_CURVE_STORE_MAX];
+	size_t copy_len;
+	int rc;
+
+	if (!buf || count == 0)
+		return -EINVAL;
+	if (count >= sizeof(kbuf)) {
+		chg_err("ai_cv_curve input too large: %zu (max %zu)\n",
+			count, sizeof(kbuf) - 1);
+		return -EINVAL;
+	}
+
+	/*
+	 * Defense-in-depth: the bound check above already guarantees count
+	 * fits with room for the trailing NUL, but threading the bound
+	 * through the memcpy length keeps it provably safe even if the
+	 * pre-check is ever loosened, and makes the bound obvious to static
+	 * scanners that don't follow the earlier return-on-oversize branch.
+	 */
+	copy_len = min(count, sizeof(kbuf) - 1);
+	memcpy(kbuf, buf, copy_len);
+	kbuf[copy_len] = 0;
+
+	rc = oplus_ai_cv_curve_parse_set(kbuf, copy_len);
+	return rc < 0 ? rc : (ssize_t)count;
+}
+static DEVICE_ATTR_RW(ai_cv_curve);
+
+static ssize_t ai_cv_fc_thresh_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%d\n", oplus_ai_cv_get_fc_thresh_mv());
+}
+
+static ssize_t ai_cv_fc_thresh_store(struct device *dev,
+				     struct device_attribute *attr,
+				     const char *buf, size_t count)
+{
+	int val = 0;
+	int rc;
+
+	rc = kstrtos32(buf, 0, &val);
+	if (rc < 0) {
+		chg_err("invalid buf: %s\n", buf);
+		return rc;
+	}
+	rc = oplus_ai_cv_set_fc_thresh_mv(val);
+	if (rc < 0)
+		return rc;
+	return count;
+}
+static DEVICE_ATTR_RW(ai_cv_fc_thresh);
+
 static struct device_attribute *oplus_battery_attributes[] = {
 	&dev_attr_authenticate,
 	&dev_attr_battery_cc,
@@ -2899,6 +2968,8 @@ static struct device_attribute *oplus_battery_attributes[] = {
 	&dev_attr_gauge_nvram_stress_test,
 	&dev_attr_get_three_level_term_volt,
 	&dev_attr_dual_cells_batt_health,
+	&dev_attr_ai_cv_curve,
+	&dev_attr_ai_cv_fc_thresh,
 	NULL
 };
 
