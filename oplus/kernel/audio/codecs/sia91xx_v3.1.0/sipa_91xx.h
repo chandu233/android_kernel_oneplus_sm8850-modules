@@ -18,8 +18,8 @@
 #include "sipa_common.h"
 #include <linux/version.h>
 
-#define SIA91XX_ENABLE_LEVEL				(0)
-#define SIA91XX_DISABLE_LEVEL				(1)
+#define SIA91XX_LOW_LEVEL				(0)
+#define SIA91XX_HIGH_LEVEL				(1)
 
 #define SIPA_ERROR_OK  						(0)
 #define SIPA_ERROR_I2C						(1)
@@ -30,7 +30,7 @@
 #define SIPA_ERROR_SOFT_MUTE				(6)
 #define SIPA_ERROR_DEV_START				(7)
 
-#define I2C_RETRIES 						(50)
+#define I2C_RETRIES 						(5)
 #define I2C_RETRY_DELAY 					(5) 		/* ms */
 
 #define TRIGGER_RISING						(0)			/* Rising edge trigger   */

@@ -17,6 +17,10 @@
 #include <sound/soc.h>
 #include <sound/soc-dapm.h>
 #include <sound/pcm.h>
+#include <linux/gpio.h>
+#include <linux/of_gpio.h>
+#include <linux/workqueue.h>
+#include <sound/core.h>
 
 #ifndef KERNEL_VERSION
 #define KERNEL_VERSION(a, b, c) (((a) << 16) + ((b) << 8) + ((c) > 255 ? 255 : (c)))
@@ -42,6 +46,7 @@ enum {
 	CODEC_NAME,
 	CODEC_DAI_NAME,
 	CODEC_VENDOR,
+	EMI_GPIO,
 	CODEC_PROP_END,
 	CODEC_PROP_MAX = CODEC_PROP_END,
 };
@@ -61,6 +66,7 @@ static const char *extend_speaker_prop[CODEC_PROP_MAX] = {
 	[CODEC_NAME] = "oplus,speaker-codec-name",
 	[CODEC_DAI_NAME] = "oplus,speaker-codec-dai-name",
 	[CODEC_VENDOR] = "oplus,speaker-vendor",
+	[EMI_GPIO] = "oplus,emi-gpio",
 };
 
 static const char *extend_dac_prop[CODEC_PROP_MAX] = {
@@ -85,6 +91,9 @@ struct codec_prop_info {
 	int spk_i2s_in_index;
 	int spk_i2s_out_index;
 	bool spk_index_support;
+	bool emi_work_pending;
+	int emi_gpio;
+	struct delayed_work emi_work;
 };
 
 struct audio_extend_data {
@@ -192,6 +201,75 @@ static struct snd_soc_dai_link_component tfa98xx_dails_6rd[] = {
 	},
 };
 
+static uint32_t oplus_emi_selector;
+static int oplus_emi_ctl_info(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_info *uinfo)
+{
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+	uinfo->count = 1;
+	uinfo->value.integer.min = 0;
+	uinfo->value.integer.max = 1;
+	return 0;
+}
+
+static int oplus_get_emi_ctl(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	ucontrol->value.integer.value[0] = oplus_emi_selector;
+	pr_info("%s: enter, value %ld\n", __func__, ucontrol->value.integer.value[0]);
+	return 0;
+}
+
+static int oplus_set_emi_ctl(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	if (!g_extend_pdata || !g_extend_pdata->spk_pa_info ||
+		(g_extend_pdata->spk_pa_info->emi_gpio < 0)) {
+		return -EINVAL;
+	}
+
+	int enable = ucontrol->value.integer.value[0];
+
+	pr_info("%s: enable = %d\n", __func__, enable);
+	oplus_emi_selector = enable;
+
+	if (gpio_is_valid(g_extend_pdata->spk_pa_info->emi_gpio)) {
+		if (enable) {
+			pr_info("%s: emi_work pending\n", __func__);
+			g_extend_pdata->spk_pa_info->emi_work_pending = true;
+			schedule_delayed_work(&g_extend_pdata->spk_pa_info->emi_work,
+				msecs_to_jiffies(25));
+		} else {
+			if (g_extend_pdata->spk_pa_info->emi_work_pending) {
+				pr_info("%s: cancel emi_work\n", __func__);
+				cancel_delayed_work_sync(&g_extend_pdata->spk_pa_info->emi_work);
+			}
+			gpio_set_value_cansleep(g_extend_pdata->spk_pa_info->emi_gpio, enable);
+		}
+	}
+
+	return 1;
+}
+
+static const struct snd_kcontrol_new oplus_emi_controls[] = {
+	{
+		.name = "EMI CTL",
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.info = oplus_emi_ctl_info,
+		.get = oplus_get_emi_ctl,
+		.put = oplus_set_emi_ctl,
+	},
+};
+
+static void emi_work_callback(struct work_struct *work)
+{
+	pr_info("%s enter\n", __func__);
+
+	if (gpio_is_valid(g_extend_pdata->spk_pa_info->emi_gpio)) {
+		gpio_set_value_cansleep(g_extend_pdata->spk_pa_info->emi_gpio, 1);
+	}
+	g_extend_pdata->spk_pa_info->emi_work_pending = false;
+}
 
 static int extend_codec_prop_parse(struct device *dev, const char *codec_prop[], struct codec_prop_info *codec_info)
 {
@@ -275,6 +353,11 @@ static int extend_codec_prop_parse(struct device *dev, const char *codec_prop[],
 		pr_warn("%s: Looking up '%s' property in node %s failed\n",
 			__func__, codec_prop[CODEC_DAI_NAME], dev->of_node->full_name);
 		return -EINVAL;
+	}
+
+	codec_info->emi_gpio = of_get_named_gpio(dev->of_node, codec_prop[EMI_GPIO], 0);
+	if (codec_info->emi_gpio < 0) {
+		pr_warn("%s: No EMI GPIO provided!\n", __func__);
 	}
 
 	return 0;
@@ -456,6 +539,24 @@ bool audio_spk_index_support(void)
 }
 EXPORT_SYMBOL(audio_spk_index_support);
 
+void extend_codec_register_control(struct snd_soc_card *card)
+{
+	if (!g_extend_pdata) {
+		pr_err("%s: No extend data, do nothing.\n", __func__);
+		return;
+	}
+
+	if (card && card->dev && g_extend_pdata->use_extern_dailink_spk &&
+		g_extend_pdata->spk_pa_info && gpio_is_valid(g_extend_pdata->spk_pa_info->emi_gpio)) {
+		pr_info("%s: enter snd_soc_add_card_controls\n", __func__);
+		int ret = snd_soc_add_card_controls(card, oplus_emi_controls,
+				ARRAY_SIZE(oplus_emi_controls));
+		if (ret < 0) {
+			dev_err(card->dev, "Failed to add EMI controls: %d\n", ret);
+		}
+	}
+}
+EXPORT_SYMBOL(extend_codec_register_control);
 
 static int audio_extend_probe(struct platform_device *pdev)
 {
@@ -501,6 +602,17 @@ static int audio_extend_probe(struct platform_device *pdev)
 		pr_warn("%s: kzalloc for hp dac info fail!\n", __func__);
 	}
 
+	if (g_extend_pdata->spk_pa_info && gpio_is_valid(g_extend_pdata->spk_pa_info->emi_gpio)) {
+		ret = devm_gpio_request_one(&pdev->dev,
+				g_extend_pdata->spk_pa_info->emi_gpio,
+				GPIOF_OUT_INIT_HIGH, "AUDIO_EMI");
+		if (ret) {
+			dev_err(&pdev->dev, "Failed to request emi gpio\n");
+		}
+	}
+
+	g_extend_pdata->spk_pa_info->emi_work_pending = false;
+	INIT_DELAYED_WORK(&g_extend_pdata->spk_pa_info->emi_work, emi_work_callback);
 	return 0;
 }
 
@@ -509,6 +621,10 @@ static void audio_extend_remove(struct platform_device *pdev)
 {
 	dev_info(&pdev->dev, "%s: dev name %s\n", __func__,
 		dev_name(&pdev->dev));
+	if (g_extend_pdata->spk_pa_info->emi_work_pending) {
+		pr_info("%s: cancel emi_work\n", __func__);
+		cancel_delayed_work_sync(&g_extend_pdata->spk_pa_info->emi_work);
+	}
 }
 
 #else
@@ -517,6 +633,10 @@ static int audio_extend_remove(struct platform_device *pdev)
 	dev_info(&pdev->dev, "%s: dev name %s\n", __func__,
 		dev_name(&pdev->dev));
 
+	if (g_extend_pdata->spk_pa_info->emi_work_pending) {
+		pr_info("%s: cancel emi_work\n", __func__);
+		cancel_delayed_work_sync(&g_extend_pdata->spk_pa_info->emi_work);
+	}
 	return 0;
 }
 #endif

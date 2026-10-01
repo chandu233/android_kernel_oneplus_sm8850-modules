@@ -29,6 +29,10 @@
 #define OPLUS_AUDIO_EVENTID_SMARTPA_ERR    10041
 #endif
 
+#define SRAM_HIGH_WORD_CONTROL(bit)     (1 << bit)
+#define SRAM_BUF_MAX_SIZE               400
+#define BL_ENDIAN_UNIT32(value)         ((value & 0x000000FF) << 24) | ((value & 0x0000FF00) << 8) | ((value & 0x00FF0000) >> 8) | ((value & 0xFF000000) >> 24)
+
 struct reg_map_info {
 	const uint32_t chip_type;
 	const uint32_t reg_addr_width;
@@ -159,6 +163,36 @@ static const struct reg_map_info reg_map_info_table[] = {
 		.chip_id_ranges = {{0x66, 0x68}},
 		.chip_id_range_num = 1
 	},
+	[CHIP_TYPE_SIA9189] = {
+		.chip_type = CHIP_TYPE_SIA9189,
+		.reg_addr_width = 8,
+		.reg_val_width = 16,
+		.chip_id_addr = 0x00,
+		.chip_id_ranges = {{0x5e80, 0x5eFF}},
+		.chip_id_range_num = 1
+	},
+};
+
+struct sram_config_info {
+	const uint32_t chip_type;
+	const uint32_t sram_high_word;
+	const uint32_t sram_need_config;
+	const uint32_t sram_config_addr;
+	const uint32_t sram_config_bit;
+};
+static const struct sram_config_info sram_config_info_table[] = {
+	{
+		.chip_type = CHIP_TYPE_SIA9255,
+		.sram_high_word = 7,
+		.sram_need_config = 0,
+	},
+	{
+		.chip_type = CHIP_TYPE_SIA9189,
+		.sram_high_word = 6,
+		.sram_need_config = 1,
+		.sram_config_addr = 0x19,
+		.sram_config_bit = 8
+	},
 };
 
 int sipa_read_reg(
@@ -173,7 +207,8 @@ int sipa_read_reg(
 retry:
 	ret = regmap_read(regmap, subaddress, &value);
 	if (ret < 0) {
-		pr_warn("i2c read error, addr: 0x%x, retries left: %d\n", subaddress, retries);
+		pr_warn("[ warn][%s] %s:i2c read error, ret = %d. addr: 0x%x, retries left: %d\n",
+			LOG_FLAG, __func__, ret, subaddress, retries);
 		if (retries) {
 			retries--;
 			usleep_range(I2C_RETRY_DELAY*1000, I2C_RETRY_DELAY*1000);
@@ -197,7 +232,8 @@ int sipa_write_reg(
 retry:
 	ret = regmap_write(regmap, subaddr, val);
 	if (ret < 0) {
-		pr_warn("i2c write error, addr: 0x%x, retries left: %d\n", subaddr, retries);
+		pr_warn("[ warn][%s] %s:i2c write error, ret = %d. addr: 0x%x, retries left: %d\n",
+			LOG_FLAG, __func__, ret, subaddr, retries);
 		if (retries) {
 			retries--;
 			usleep_range(I2C_RETRY_DELAY*1000, I2C_RETRY_DELAY*1000);
@@ -928,6 +964,284 @@ void sipa_regmap_check_trimming(
 	}
 }
 
+bool sipa_regmap_read_sram_serial(sipa_dev_t *si_pa, const SIPA_PARAM_LIST *sram_list, SIPA_REG_COMMON *sram_data,
+								  uint32_t cfg_addr, uint32_t data_addr, uint32_t sram_high_word_site)
+{
+	uint32_t i = 0;
+	uint8_t ret;
+	uint32_t val_buffer[SRAM_BUF_MAX_SIZE] = {0};
+	uint32_t sram_size;
+	memset(val_buffer, 0, sizeof(val_buffer));
+
+	if (sram_list->num == 0) {
+		pr_info("[ info][%s] %s: sram_list num = %d \r\n", LOG_FLAG, __func__, sram_list->num);
+		return true;
+	}
+
+	if (sram_list->num > SRAM_BUF_MAX_SIZE) {
+		pr_info("[ info][%s] %s: sram_list num (%d) out range %d \r\n", LOG_FLAG, __func__, sram_list->num, SRAM_BUF_MAX_SIZE);
+		return false;
+	}
+
+	//serial read
+	ret = regmap_write(si_pa->regmap, cfg_addr, (sram_data[0].addr | SRAM_HIGH_WORD_CONTROL(sram_high_word_site)));
+
+	if (0 != ret) {
+		pr_warn("[ warn][%s] %s: ret = %d, chip_type = %u, regmap = %p, addr = 0x%x, value = %d\r\n",
+				LOG_FLAG, __func__, ret, si_pa->chip_type, si_pa->regmap, cfg_addr, sram_data[0].addr);
+		return false;
+	}
+
+	sram_size = sram_list->num * sizeof(val_buffer[0]);
+
+	ret = regmap_raw_read(si_pa->regmap, data_addr, val_buffer, sram_size);
+
+	if (0 != ret) {
+		pr_warn("[ warn][%s] %s: ret = %d, chip_type = %u, regmap = %p, len = %d\r\n",
+				LOG_FLAG, __func__, ret, si_pa->chip_type, si_pa->regmap, sram_size);
+		return false;
+	}
+
+	pr_info("[ info][%s] %s: buffer len = %d \r\n", LOG_FLAG, __func__, sram_size);
+
+	for (i = 0; i < sram_list->num; i++) {
+		val_buffer[i] = BL_ENDIAN_UNIT32(val_buffer[i]);
+		pr_info("[ info][%s] %s: sram_data addr = 0x%02x val 0x%08x\r\n", LOG_FLAG, __func__, sram_data[i].addr, val_buffer[i]);
+	}
+
+	return true;
+}
+
+bool sipa_sram_control(sipa_dev_t *si_pa, uint32_t sram_config_info_site, bool enable)
+{
+	uint8_t ret;
+	unsigned int val;
+	uint32_t addr;
+	uint32_t sram_config_bit;
+
+	if (sram_config_info_table[sram_config_info_site].sram_need_config) {
+		addr = sram_config_info_table[sram_config_info_site].sram_config_addr;
+		sram_config_bit = sram_config_info_table[sram_config_info_site].sram_config_bit;
+		ret = regmap_read(si_pa->regmap, addr, &val);
+
+		if (0 != ret) {
+			pr_warn("[ warn][%s] %s: ret = %d, chip_type = %u, regmap = %p, val = 0x%x\r\n",
+					LOG_FLAG, __func__, ret, si_pa->chip_type, si_pa->regmap, val);
+			return false;
+		}
+
+		if (enable) {
+			val = val & (~SRAM_HIGH_WORD_CONTROL(sram_config_bit));
+		}
+		else {
+			val = (val & (~SRAM_HIGH_WORD_CONTROL(sram_config_bit))) | SRAM_HIGH_WORD_CONTROL(sram_config_bit);
+		}
+
+		ret = regmap_write(si_pa->regmap, addr, val);
+		pr_info("[ info][%s] %s: reg 0x%02x, write val = 0x%x\r\n", LOG_FLAG, __func__, addr, val);
+
+		if (0 != ret) {
+			pr_warn("[ warn][%s] %s: ret = %d, chip_type = %u, regmap = %p, val = 0x%x\r\n",
+					LOG_FLAG, __func__, ret, si_pa->chip_type, si_pa->regmap, val);
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool sipa_regmap_write_sram_serial(sipa_dev_t *si_pa, const SIPA_PARAM_LIST *sram_list, SIPA_REG_COMMON *sram_data,
+								   uint32_t cfg_addr, uint32_t data_addr, uint32_t sram_high_word_site)
+{
+	uint32_t i;
+	uint8_t ret;
+	uint32_t val_buffer[SRAM_BUF_MAX_SIZE] = {0};
+	uint32_t sram_size;
+	memset(val_buffer, 0, sizeof(val_buffer));
+
+	if (sram_list->num == 0) {
+		pr_info("[ info][%s] %s: sram_list num = %d \r\n", LOG_FLAG, __func__, sram_list->num);
+		return true;
+	}
+
+	if (sram_list->num > SRAM_BUF_MAX_SIZE) {
+		pr_info("[ info][%s] %s: sram_list num (%d) out range %d \r\n", LOG_FLAG, __func__, sram_list->num, SRAM_BUF_MAX_SIZE);
+		return false;
+	}
+
+	for (i = 0; i < sram_list->num; i++) {
+		//SRAM data bit width is 32 .  |<----------sram_data--------->|
+		//                              MSB[7:0] - LSB[7:0] - MSB[7:0] - LSB[7:0]
+		val_buffer[i] = BL_ENDIAN_UNIT32(sram_data[i].val[si_pa->scene]);
+	}
+
+	//serial write
+	ret = regmap_write(si_pa->regmap, cfg_addr, (sram_data[0].addr | SRAM_HIGH_WORD_CONTROL(sram_high_word_site)));
+
+	if (0 != ret) {
+		pr_warn("[ warn][%s] %s: ret = %d, chip_type = %u, regmap = %p, addr = 0x%x, value = %d\r\n",
+				LOG_FLAG, __func__, ret, si_pa->chip_type, si_pa->regmap, cfg_addr, sram_data[i].addr);
+		return false;
+	}
+
+	sram_size = sram_list->num * sizeof(val_buffer[0]);
+
+	ret = regmap_raw_write(si_pa->regmap, data_addr, val_buffer, sram_size);
+
+	if (0 != ret) {
+		pr_warn("[ warn][%s] %s: ret = %d, chip_type = %u, regmap = %p, len = %d\r\n",
+				LOG_FLAG, __func__, ret, si_pa->chip_type, si_pa->regmap, sram_size);
+		return false;
+	}
+
+	pr_info("[ info][%s] %s: buffer len = %d \r\n", LOG_FLAG, __func__, sram_size);
+	return true;
+}
+
+bool sipa_regmap_write_sram_single_mode(sipa_dev_t *si_pa, const SIPA_PARAM_LIST *sram_list, SIPA_REG_COMMON *sram_data,
+										uint32_t cfg_addr, uint32_t data_addr, uint32_t sram_high_word_site)
+{
+	uint32_t i;
+	uint8_t ret;
+	uint16_t val_arry[2] = {0};
+
+	for (i = 0; i < sram_list->num; i++) {
+		//SRAM data bit width is 21 .  |<----------sram_data--------->|
+		//                              MSB[7:0] - LSB[7:0] - MSB[7:0] - LSB[7:0]
+		//eg.   val = 80e2d000
+		memset(val_arry, 0, sizeof(val_arry));
+		val_arry[0] = sram_data[i].val[si_pa->scene] >> 16;
+		val_arry[1] = sram_data[i].val[si_pa->scene];
+		//high word write
+		ret = regmap_write(si_pa->regmap, cfg_addr, (sram_data[i].addr | SRAM_HIGH_WORD_CONTROL(sram_high_word_site)));
+
+		if (0 != ret) {
+			pr_warn("[ warn][%s] %s: ret = %d, chip_type = %u, regmap = %p, addr = 0x%x, value = %d\r\n",
+					LOG_FLAG, __func__, ret, si_pa->chip_type, si_pa->regmap, cfg_addr, sram_data[i].addr);
+			continue;
+		}
+
+		ret = regmap_write(si_pa->regmap, data_addr, val_arry[0]);
+
+		if (0 != ret) {
+			pr_warn("[ warn][%s] %s: ret = %d, chip_type = %u, regmap = %p, val = 0x%x\r\n",
+					LOG_FLAG, __func__, ret, si_pa->chip_type, si_pa->regmap, val_arry[0]);
+			continue;
+		}
+
+		//low word write
+		ret = regmap_write(si_pa->regmap, cfg_addr, sram_data[i].addr);
+
+		if (0 != ret) {
+			pr_warn("[ warn][%s] %s: ret = %d, chip_type = %u, regmap = %p, addr = 0x%x, value = %d\r\n",
+					LOG_FLAG, __func__, ret, si_pa->chip_type, si_pa->regmap, cfg_addr, sram_data[i].addr);
+			continue;
+		}
+
+		ret = regmap_write(si_pa->regmap, data_addr, val_arry[1]);
+
+		if (0 != ret) {
+			pr_warn("[ warn][%s] %s: ret = %d, chip_type = %u, regmap = %p, val = 0x%x\r\n",
+					LOG_FLAG, __func__, ret, si_pa->chip_type, si_pa->regmap, val_arry[1]);
+			continue;
+		}
+	}
+
+	return true;
+}
+
+bool sipa_regmap_read_sram(sipa_dev_t *si_pa)
+{
+	SIPA_CHIP_CFG chip_cfg;
+	uint8_t *data;
+	const SIPA_PARAM_LIST *sram_list;
+	SIPA_REG_COMMON *sram_data = NULL;
+	uint32_t cfg_addr;
+	uint32_t data_addr;
+	uint32_t sram_high_word_site = 0;
+	uint32_t sram_config_info_site = 0;
+	bool ret_sram;
+	int i;
+
+	if (NULL == si_pa) {
+		return false;
+	}
+
+	if (NULL == si_pa->regmap) {
+		pr_warn("[ warn][%s] %s: NULL == regmap \r\n",
+				LOG_FLAG, __func__);
+		return false;
+	}
+
+	if (AUDIO_SCENE_NUM <= si_pa->scene) {
+		pr_err("[  err][%s] %s: scene = %u, AUDIO_SCENE_NUM = %u \r\n",
+			   LOG_FLAG, __func__, si_pa->scene, AUDIO_SCENE_NUM);
+		return false;
+	}
+
+	if (SIPA_CHANNEL_NUM <= si_pa->channel_num) {
+		pr_err("[  err][%s] %s: channel_num = %u, SIPA_CHANNEL_NUM = %u \r\n",
+			   LOG_FLAG, __func__, si_pa->channel_num, SIPA_CHANNEL_NUM);
+		return false;
+	}
+
+	if (0 != verify_chip_type(si_pa->channel_num, si_pa->chip_type)) {
+		return false;
+	}
+
+	if (!IS_NEED_SIPA_SRAM_TYPE(si_pa->chip_type)) {
+		return true;
+	}
+
+	data = sipa_param_read_chip_cfg(si_pa->channel_num, si_pa->chip_type, &chip_cfg);
+
+	if (NULL == data) {
+		pr_err("[  err][%s] %s: fw unloaded \r\n",
+			   LOG_FLAG, __func__);
+		return false;
+	}
+
+	sram_list = &chip_cfg.sram_ops.sram;
+	cfg_addr  = chip_cfg.sram_ops.cfg_addr;
+	data_addr = chip_cfg.sram_ops.data_addr;
+	sram_data = (SIPA_REG_COMMON *)(data + sram_list->offset);
+
+	if ((cfg_addr == 0) | (data_addr == 0)) {
+		pr_err("[  err][%s] %s: channel %d cfg_addr or data_addr is 0 \r\n",
+			   LOG_FLAG, __func__, si_pa->channel_num);
+		return false;
+	}
+
+	if (sram_data == NULL) {
+		pr_err("[  err][%s] %s: channel %d sram_data is NULL \r\n",
+			   LOG_FLAG, __func__, si_pa->channel_num);
+		return false;
+	}
+
+	pr_info("[ info][%s] %s: sram_list->num = %u \r\n", LOG_FLAG, __func__, sram_list->num);
+
+	for (i = 0 ; i < ARRAY_SIZE(sram_config_info_table); i++) {
+		if (si_pa->chip_type == sram_config_info_table[i].chip_type) {
+			sram_high_word_site = sram_config_info_table[i].sram_high_word;
+			sram_config_info_site = i;
+			break;
+		}
+	}
+
+	if (sram_high_word_site == 0) {
+		pr_warn("[ warn][%s] %s: sram_high_word_site = %d, chip_type = %u sram config not found\r\n",
+				LOG_FLAG, __func__, sram_high_word_site, si_pa->chip_type);
+		return false;
+	}
+
+	pr_info("[ info][%s] %s: sram_high_word_site = %d, chip_type = %u \r\n",
+			LOG_FLAG, __func__, sram_high_word_site, si_pa->chip_type);
+	sipa_sram_control(si_pa, sram_config_info_site, true);
+	ret_sram = sipa_regmap_read_sram_serial(si_pa, sram_list, sram_data, cfg_addr, data_addr, sram_high_word_site);
+	sipa_sram_control(si_pa, sram_config_info_site, false);
+	return ret_sram;
+}
+
 bool sipa_regmap_write_sram(
 	sipa_dev_t *si_pa)
 {
@@ -935,95 +1249,98 @@ bool sipa_regmap_write_sram(
 	uint8_t *data;
 	const SIPA_PARAM_LIST *sram_list;
 	SIPA_REG_COMMON *sram_data = NULL;
-	uint8_t ret, i;
 	uint32_t cfg_addr;
 	uint32_t data_addr;
-	uint16_t val_arry[2] = {0};
+	bool write_sram_serial_en = true;
+	uint32_t sram_high_word_site = 0;
+	uint32_t sram_config_info_site = 0;
+	bool ret_sram;
+	int i;
 
-	if (NULL == si_pa)
+	if (NULL == si_pa) {
 		return false;
+	}
 
 	if (NULL == si_pa->regmap) {
 		pr_warn("[ warn][%s] %s: NULL == regmap \r\n",
-			LOG_FLAG, __func__);
+				LOG_FLAG, __func__);
 		return false;
 	}
 
 	if (AUDIO_SCENE_NUM <= si_pa->scene) {
 		pr_err("[  err][%s] %s: scene = %u, AUDIO_SCENE_NUM = %u \r\n",
-			LOG_FLAG, __func__, si_pa->scene, AUDIO_SCENE_NUM);
+			   LOG_FLAG, __func__, si_pa->scene, AUDIO_SCENE_NUM);
 		return false;
 	}
 
 	if (SIPA_CHANNEL_NUM <= si_pa->channel_num) {
 		pr_err("[  err][%s] %s: channel_num = %u, SIPA_CHANNEL_NUM = %u \r\n",
-			LOG_FLAG, __func__, si_pa->channel_num, SIPA_CHANNEL_NUM);
+			   LOG_FLAG, __func__, si_pa->channel_num, SIPA_CHANNEL_NUM);
 		return false;
 	}
 
-	if (0 != verify_chip_type(si_pa->channel_num, si_pa->chip_type))
+	if (0 != verify_chip_type(si_pa->channel_num, si_pa->chip_type)) {
 		return false;
+	}
 
-	if (si_pa->chip_type != CHIP_TYPE_SIA9255)
+	if (!IS_NEED_SIPA_SRAM_TYPE(si_pa->chip_type)) {
 		return true;
+	}
 
 	data = sipa_param_read_chip_cfg(si_pa->channel_num, si_pa->chip_type, &chip_cfg);
+
 	if (NULL == data) {
 		pr_err("[  err][%s] %s: fw unloaded \r\n",
-			LOG_FLAG, __func__);
+			   LOG_FLAG, __func__);
 		return false;
 	}
 
 	sram_list = &chip_cfg.sram_ops.sram;
 	cfg_addr  = chip_cfg.sram_ops.cfg_addr;
 	data_addr = chip_cfg.sram_ops.data_addr;
-
 	sram_data = (SIPA_REG_COMMON *)(data + sram_list->offset);
+
+	if ((cfg_addr == 0) | (data_addr == 0)) {
+		pr_err("[  err][%s] %s: channel %d cfg_addr or data_addr is 0 \r\n",
+			   LOG_FLAG, __func__, si_pa->channel_num);
+		return false;
+	}
+
 	if (sram_data == NULL) {
 		pr_err("[  err][%s] %s: channel %d sram_data is NULL \r\n",
-			LOG_FLAG, __func__, si_pa->channel_num);
+			   LOG_FLAG, __func__, si_pa->channel_num);
+		return false;
 	}
-	for (i = 0; i < sram_list->num; i++) {
-		//SRAM data bit width is 21 .  |<----------sram_data--------->|
-		//								MSB[7:0] - LSB[7:0] - MSB[7:0] - LSB[7:0]
-		//eg.   val = 80e2d000
 
-		memset(val_arry, 0, sizeof(val_arry));
-		val_arry[0] = sram_data[i].val[si_pa->scene] >> 16;
-		val_arry[1] = sram_data[i].val[si_pa->scene];
+	pr_info("[ info][%s] %s: sram_list->num = %u \r\n", LOG_FLAG, __func__, sram_list->num);
 
-		//high word write
-		ret = regmap_write(si_pa->regmap, cfg_addr, (sram_data[i].addr | 0x80));
-		if (0 != ret) {
-			pr_warn("[ warn][%s] %s: ret = %d, chip_type = %u, regmap = %p, addr = 0x%x, value = %d\r\n",
-				LOG_FLAG, __func__, ret, si_pa->chip_type, si_pa->regmap, cfg_addr, sram_data[i].addr);
-			continue;
-		}
-
-		ret = regmap_write(si_pa->regmap, data_addr, val_arry[0]);
-		if (0 != ret) {
-			pr_warn("[ warn][%s] %s: ret = %d, chip_type = %u, regmap = %p, val = 0x%x\r\n",
-				LOG_FLAG, __func__, ret, si_pa->chip_type, si_pa->regmap, val_arry[0]);
-			continue;
-		}
-
-		//low word write
-		ret = regmap_write(si_pa->regmap, cfg_addr, sram_data[i].addr);
-		if (0 != ret) {
-			pr_warn("[ warn][%s] %s: ret = %d, chip_type = %u, regmap = %p, addr = 0x%x, value = %d\r\n",
-				LOG_FLAG, __func__, ret, si_pa->chip_type, si_pa->regmap, cfg_addr, sram_data[i].addr);
-			continue;
-		}
-
-		ret = regmap_write(si_pa->regmap, data_addr, val_arry[1]);
-		if (0 != ret) {
-			pr_warn("[ warn][%s] %s: ret = %d, chip_type = %u, regmap = %p, val = 0x%x\r\n",
-				LOG_FLAG, __func__, ret, si_pa->chip_type, si_pa->regmap, val_arry[1]);
-			continue;
+	for (i = 0 ; i < ARRAY_SIZE(sram_config_info_table); i++) {
+		if (si_pa->chip_type == sram_config_info_table[i].chip_type) {
+			sram_high_word_site = sram_config_info_table[i].sram_high_word;
+			sram_config_info_site = i;
+			break;
 		}
 	}
 
-	return true;
+	if (sram_high_word_site == 0) {
+		pr_warn("[ warn][%s] %s: sram_high_word_site = %d, chip_type = %u sram config not found\r\n",
+				LOG_FLAG, __func__, sram_high_word_site, si_pa->chip_type);
+		return false;
+	}
+
+	pr_info("[ info][%s] %s: sram_high_word_site = %d, chip_type = %u \r\n",
+			LOG_FLAG, __func__, sram_high_word_site, si_pa->chip_type);
+	sipa_sram_control(si_pa, sram_config_info_site, true);
+
+	if (write_sram_serial_en) {
+		ret_sram = sipa_regmap_write_sram_serial(si_pa, sram_list, sram_data, cfg_addr, data_addr, sram_high_word_site);
+	}
+	else {
+		ret_sram = sipa_regmap_write_sram_single_mode(si_pa, sram_list, sram_data, cfg_addr, data_addr, sram_high_word_site);
+	}
+
+	sipa_sram_control(si_pa, sram_config_info_site, false);
+	return ret_sram;
 }
 /********************************************************************
  * end - sia81xx reg map opt functions
