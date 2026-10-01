@@ -45,6 +45,9 @@
 #define OTG_OUTPUT_LEVEL_MAX			5
 #define DEFAULT_BATT_REAL_TEMP			250
 
+#define VOOCPHY_DISCHARG_RETRY_CNT_MAX		15
+#define VOOCPHY_DISCHARG_RETRY_DELAY		1000
+
 enum oplus_usbtemp_timer_stage {
 	OPLUS_USBTEMP_TIMER_STAGE0 = 0,
 	OPLUS_USBTEMP_TIMER_STAGE1,
@@ -203,6 +206,7 @@ struct oplus_mms_wired {
 	struct delayed_work typec_state_notify_work;
 	struct delayed_work svid_handler_work;
 	struct delayed_work power_changed_work;
+	struct delayed_work voocphy_dischg_work;
 	struct work_struct err_handler_work;
 	struct work_struct plugin_handler_work;
 	struct work_struct chg_type_change_handler_work;
@@ -249,6 +253,8 @@ struct oplus_mms_wired {
 	int usbtemp_curr_status;
 	int usbtemp_batt_current;
 	int usbtemp_pre_batt_current;
+	int voocphy_dischg_retry_cnt;
+	spinlock_t voocphy_dischg_enable_lock;
 
 	bool wired_present;
 	bool wired_online;
@@ -267,6 +273,7 @@ struct oplus_mms_wired {
 	bool charging_disable;
 	bool bc12_completed;
 	bool cc_detect_support;
+	bool voocphy_dischg_enable;
 	int pdo_volt;
 	pd_msg_data pdo[PPS_PDO_MAX];
 	unsigned int vooc_sid;
@@ -792,6 +799,9 @@ bool oplus_wired_is_gamepad_active(void)
 	struct oplus_mms_wired *chip = g_mms_wired;
 	u32 vdm_info[VDM_INFO_MAX] = {0};
 	int vdm_cnt = VDM_INFO_MAX;
+	int i = 0;
+	bool cert_vdo = false;
+	bool product_vdo = false;
 
 	if (chip == NULL) {
 		chg_err("chip is NULL\n");
@@ -804,12 +814,19 @@ bool oplus_wired_is_gamepad_active(void)
 
 	rc = oplus_chg_ic_func(chip->buck_ic, OPLUS_IC_FUNC_BUCK_GET_VDM_INFO,
 			       vdm_info, &vdm_cnt);
-	if (rc < 0) {
+	if (rc < 0 && rc != -ENOTSUPP) {
 		chg_err("get vdm info failed, rc=%d\n", rc);
 		return false;
 	}
 
-	if (vdm_cnt == 3 && vdm_info[1] == 0x22d9 && vdm_info[2] == 0x10007)
+	for (i = 0; i < vdm_cnt && i < ARRAY_SIZE(vdm_info); i++) {
+		if (vdm_info[i] == 0x22d9)
+			cert_vdo = true;
+		if (vdm_info[i] == 0x10007)
+			product_vdo = true;
+	}
+
+	if (cert_vdo && product_vdo)
 		return true;
 
 	return false;
@@ -831,10 +848,8 @@ int oplus_wired_send_get_sink_cap(void)
 	}
 
 	rc = oplus_chg_ic_func(chip->buck_ic, OPLUS_IC_FUNC_BUCK_SEND_GET_SINK_CAP);
-	if (rc < 0)
+	if (rc < 0 && rc != -ENOTSUPP)
 		chg_err("can't send get sink cap, rc=%d\n", rc);
-	else
-		chg_info("send get sink cap success\n");
 
 	return rc;
 }
@@ -2517,31 +2532,54 @@ static void oplus_set_usbtemp_wakelock(struct oplus_mms_wired *chip, bool value)
 	}
 }
 
-static int oplus_chg_voocphy_ic_func(struct oplus_mms_wired *chip, bool value)
+static void oplus_voocphy_dischg_work(struct work_struct *work)
 {
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct oplus_mms_wired *chip =
+		container_of(dwork, struct oplus_mms_wired, voocphy_dischg_work);
+	bool enable = false;
+	int retry_cnt = 0;
 	int rc = 0;
 
 	if (!is_voocphy_ic_available(chip)) {
 		chg_err("voocphy ic is not found\n");
-		return -ENODEV;
+		return;
 	}
 	if (!chip->voocphy_ic) {
 		chg_err("voocphy ic is NULL\n");
-		return -ENODEV;
+		return;
 	}
 
-	rc = oplus_chg_ic_func(chip->voocphy_ic,
-			OPLUS_IC_FUNC_VOOCPHY_SET_USB_DISCHG_ENABLE, value);
-	if (rc < 0)
-		chg_err("voocphy set usb dischg failed, rc=%d\n", rc);
+	spin_lock(&chip->voocphy_dischg_enable_lock);
+	enable = chip->voocphy_dischg_enable;
+	retry_cnt = chip->voocphy_dischg_retry_cnt;
+	spin_unlock(&chip->voocphy_dischg_enable_lock);
 
-	return rc;
+	/*wait for voocphy ic online 15s when startup*/
+	if (!chip->voocphy_ic->online) {
+		if (retry_cnt < VOOCPHY_DISCHARG_RETRY_CNT_MAX) {
+			chg_err("wait for voocphy ic online, retry = %d\n", retry_cnt);
+			spin_lock(&chip->voocphy_dischg_enable_lock);
+			chip->voocphy_dischg_retry_cnt++;
+			spin_unlock(&chip->voocphy_dischg_enable_lock);
+			schedule_delayed_work(&chip->voocphy_dischg_work, msecs_to_jiffies(VOOCPHY_DISCHARG_RETRY_DELAY));
+		} else {
+			chg_err("voocphy ic still offline after %d retrys, return\n", VOOCPHY_DISCHARG_RETRY_CNT_MAX);
+		}
+	} else {
+		rc = oplus_chg_ic_func(chip->voocphy_ic,
+			OPLUS_IC_FUNC_VOOCPHY_SET_USB_DISCHG_ENABLE, enable);
+		if (rc < 0)
+			chg_err("failed to %s usb dischg protect, rc=%d\n",
+				enable ? "enable" : "disable", rc);
+		else
+			chg_info("oplus_usbtemp_dischg_action en=%d\n", enable);
+	}
 }
 
+/* Must be called in sleepable context (contains cancel_delayed_work_sync) */
 static void set_usbtemp_discharge_enable(struct oplus_mms_wired *chip, bool enable)
 {
-	int rc;
-
 	if (chip == NULL || chip->buck_ic == NULL) {
 		chg_err("chip is NULL");
 		return;
@@ -2550,11 +2588,12 @@ static void set_usbtemp_discharge_enable(struct oplus_mms_wired *chip, bool enab
 	(void)oplus_chg_ic_func(chip->buck_ic,
 			  OPLUS_IC_FUNC_SET_USB_DISCHG_ENABLE, enable);
 	if (chip->support_usbtemp_discharge_protect) {
-		rc = oplus_chg_voocphy_ic_func(chip, enable);
-		if (rc < 0)
-			chg_err("failed to disable usb dischg protect, rc=%d\n", rc);
-		else
-			chg_info("oplus_usbtemp_dischg_action en=%d\n", enable);
+		cancel_delayed_work_sync(&chip->voocphy_dischg_work);
+		spin_lock(&chip->voocphy_dischg_enable_lock);
+		chip->voocphy_dischg_enable = enable;
+		chip->voocphy_dischg_retry_cnt = 0;
+		spin_unlock(&chip->voocphy_dischg_enable_lock);
+		schedule_delayed_work(&chip->voocphy_dischg_work, 0);
 	}
 }
 
@@ -4827,7 +4866,7 @@ static void oplus_mms_wired_init_work(struct work_struct *work)
 	mutex_init(&chip->fcc_lock);
 	oplus_mms_wired_virq_register(chip);
 	g_mms_wired = chip;
-	if (!oplus_chg_get_boot_reset_adapter_support_flags())
+	if (!oplus_chg_get_boot_reset_adapter_support_flags() && !oplus_chg_get_fcs_support_flags())
 		oplus_wired_input_enable(false);
 	oplus_wired_output_enable(false);
 	cc_detect = oplus_wired_get_hw_detect();
@@ -7289,6 +7328,42 @@ static void oplus_mms_wired_value_init(struct oplus_mms_wired *chip)
 	oplus_mms_wired_bcc_parms_reset(chip);
 }
 
+static void oplus_mms_wired_work_init(struct oplus_mms_wired *chip)
+{
+	INIT_DELAYED_WORK(&chip->mms_wired_init_work,
+			  oplus_mms_wired_init_work);
+	INIT_DELAYED_WORK(&chip->usbtemp_recover_work, oplus_usbtemp_recover_work);
+	INIT_DELAYED_WORK(&chip->ccdetect_work, oplus_mms_wired_ccdetect_work);
+	INIT_DELAYED_WORK(&chip->typec_state_notify_work, oplus_mms_wired_typec_state_notify_work);
+	INIT_DELAYED_WORK(&chip->typec_state_change_work, oplus_mms_wired_typec_state_change_work);
+	INIT_DELAYED_WORK(&chip->power_role_change_work, oplus_mms_wired_power_role_change_work);
+	INIT_DELAYED_WORK(&chip->svid_handler_work, oplus_mms_wired_svid_handler_work);
+	INIT_DELAYED_WORK(&chip->wam.online_status_err_work, oplus_mms_wired_online_status_err_work);
+	INIT_DELAYED_WORK(&chip->power_changed_work, oplus_mms_wired_power_changed_work);
+	INIT_WORK(&chip->err_handler_work, oplus_mms_wired_err_handler_work);
+	INIT_WORK(&chip->plugin_handler_work,
+		  oplus_mms_wired_plugin_handler_work);
+	INIT_WORK(&chip->chg_type_change_handler_work,
+		  oplus_mms_wired_chg_type_change_handler_work);
+	INIT_WORK(&chip->cpa_chg_type_change_handler_work,
+		  oplus_mms_wired_cpa_chg_type_change_handler_work);
+	INIT_WORK(&chip->gauge_update_work, oplus_wired_gauge_update_work);
+	INIT_DELAYED_WORK(&chip->otg_enable_handler_work, oplus_wired_otg_enable_handler_work);
+	INIT_DELAYED_WORK(&chip->lpd_info_update_work, oplus_wired_lpd_info_update_work);
+	INIT_DELAYED_WORK(&chip->voocphy_dischg_work, oplus_voocphy_dischg_work);
+	INIT_WORK(&chip->voltage_change_work, oplus_wired_voltage_change_work);
+	INIT_WORK(&chip->current_change_work, oplus_wired_current_change_work);
+	INIT_WORK(&chip->bc12_completed_work, oplus_wired_bc12_completed_work);
+	INIT_WORK(&chip->data_role_changed_handler_work,
+		  oplus_wired_data_role_changed_handler_work);
+	INIT_WORK(&chip->back_ui_soc_work, oplus_back_ui_soc_work);
+	INIT_WORK(&chip->otg_enable_pending_work, oplus_wired_otg_enable_pending_work);
+	INIT_WORK(&chip->wls_upgrading_work, oplus_wls_upgrading_work);
+	INIT_WORK(&chip->pd_completed_handler_work, oplus_wired_pd_completed_work);
+	INIT_WORK(&chip->icl_done_handler_work, oplus_wired_icl_done_work);
+	INIT_WORK(&chip->reverse_usbtemp_check_work, oplus_reverse_usbtemp_check_work);
+}
+
 static int oplus_mms_wired_probe(struct platform_device *pdev)
 {
 	struct oplus_mms_wired *chip;
@@ -7327,38 +7402,9 @@ static int oplus_mms_wired_probe(struct platform_device *pdev)
 		chip->adc_vol_temp_info = &adc_vol_temp_info_table[0];
 	}
 
-	INIT_DELAYED_WORK(&chip->mms_wired_init_work,
-			  oplus_mms_wired_init_work);
-	INIT_DELAYED_WORK(&chip->usbtemp_recover_work, oplus_usbtemp_recover_work);
-	INIT_DELAYED_WORK(&chip->ccdetect_work, oplus_mms_wired_ccdetect_work);
-	INIT_DELAYED_WORK(&chip->typec_state_notify_work, oplus_mms_wired_typec_state_notify_work);
-	INIT_DELAYED_WORK(&chip->typec_state_change_work, oplus_mms_wired_typec_state_change_work);
-	INIT_DELAYED_WORK(&chip->power_role_change_work, oplus_mms_wired_power_role_change_work);
-	INIT_DELAYED_WORK(&chip->svid_handler_work, oplus_mms_wired_svid_handler_work);
-	INIT_DELAYED_WORK(&chip->wam.online_status_err_work, oplus_mms_wired_online_status_err_work);
-	INIT_DELAYED_WORK(&chip->power_changed_work, oplus_mms_wired_power_changed_work);
-	INIT_WORK(&chip->err_handler_work, oplus_mms_wired_err_handler_work);
-	INIT_WORK(&chip->plugin_handler_work,
-		  oplus_mms_wired_plugin_handler_work);
-	INIT_WORK(&chip->chg_type_change_handler_work,
-		  oplus_mms_wired_chg_type_change_handler_work);
-	INIT_WORK(&chip->cpa_chg_type_change_handler_work,
-		  oplus_mms_wired_cpa_chg_type_change_handler_work);
-	INIT_WORK(&chip->gauge_update_work, oplus_wired_gauge_update_work);
-	INIT_DELAYED_WORK(&chip->otg_enable_handler_work, oplus_wired_otg_enable_handler_work);
-	INIT_DELAYED_WORK(&chip->lpd_info_update_work, oplus_wired_lpd_info_update_work);
-	INIT_WORK(&chip->voltage_change_work, oplus_wired_voltage_change_work);
-	INIT_WORK(&chip->current_change_work, oplus_wired_current_change_work);
-	INIT_WORK(&chip->bc12_completed_work, oplus_wired_bc12_completed_work);
-	INIT_WORK(&chip->data_role_changed_handler_work,
-		  oplus_wired_data_role_changed_handler_work);
-	INIT_WORK(&chip->back_ui_soc_work, oplus_back_ui_soc_work);
-	INIT_WORK(&chip->otg_enable_pending_work, oplus_wired_otg_enable_pending_work);
-	INIT_WORK(&chip->wls_upgrading_work, oplus_wls_upgrading_work);
-	INIT_WORK(&chip->pd_completed_handler_work, oplus_wired_pd_completed_work);
-	INIT_WORK(&chip->icl_done_handler_work, oplus_wired_icl_done_work);
-	INIT_WORK(&chip->reverse_usbtemp_check_work, oplus_reverse_usbtemp_check_work);
-
+	/* spinlock must be initialized before work_init, as voocphy_dischg_work handler uses this lock */
+	spin_lock_init(&chip->voocphy_dischg_enable_lock);
+	oplus_mms_wired_work_init(chip);
 	oplus_mms_wired_value_init(chip);
 	chg_info("probe success\n");
 	return 0;
@@ -7383,6 +7429,7 @@ static int oplus_mms_wired_remove(struct platform_device *pdev)
 		destroy_votable(chip->flash_mode_votable);
 	if (chip->otg_disable_votable != NULL)
 		destroy_votable(chip->otg_disable_votable);
+	cancel_delayed_work_sync(&chip->voocphy_dischg_work);
 	devm_kfree(&pdev->dev, chip);
 	platform_set_drvdata(pdev, NULL);
 
@@ -7396,6 +7443,7 @@ static void oplus_mms_wired_shutdown(struct platform_device *pdev)
 	struct oplus_mms_wired *chip = platform_get_drvdata(pdev);
 	int rc;
 
+	cancel_delayed_work_sync(&chip->voocphy_dischg_work);
 	if (chip->ship_mode && chip->pre_ship_mode_support == 0) {
 		rc = oplus_chg_ic_func(chip->buck_ic,
 				       OPLUS_IC_FUNC_BUCK_SHIPMODE_ENABLE,

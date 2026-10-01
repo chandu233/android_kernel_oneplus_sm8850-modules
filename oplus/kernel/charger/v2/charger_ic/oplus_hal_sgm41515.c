@@ -23,16 +23,21 @@
 #include <linux/pinctrl/consumer.h>
 #include <soc/oplus/device_info.h>
 #include <soc/oplus/system/boot_mode.h>
+#include <linux/iio/consumer.h>
+#include <linux/iio/iio.h>
+#include <linux/thermal.h>
 
 #include <oplus_chg_module.h>
 #include <oplus_chg_ic.h>
 #include <oplus_mms.h>
 #include <oplus_mms_wired.h>
+#include <oplus_mms_gauge.h>
 #include "oplus_hal_sgm41515.h"
 #include <oplus_chg_comm.h>
 #include <oplus_chg_voter.h>
 #include <tcpm.h>
 #include <oplus_chg_vooc.h>
+#include <linux/of_platform.h>
 
 #ifdef CONFIG_OPLUS_CHARGER_MTK
 #include <mtk_boot_common.h>
@@ -54,10 +59,14 @@
 
 static atomic_t i2c_err_count;
 
+#define CHG_NTC_TEMP_COUNT 292
+static int chg_ntc_temp_table[CHG_NTC_TEMP_COUNT];
+
 struct sgm41515_chip {
 	struct i2c_client *client;
 	struct device *dev;
 	struct oplus_chg_ic_dev *ic_dev;
+	struct oplus_chg_ic_dev *reverse_chg_ic_dev;
 #ifdef CONFIG_OPLUS_CHARGER_MTK
 	const char *chg_dev_name;
 	struct charger_device *chg_dev;
@@ -70,6 +79,8 @@ struct sgm41515_chip {
 	struct pinctrl_state *event_default;
 	struct pinctrl_state *dis_vbus_active;
 	struct pinctrl_state *dis_vbus_sleep;
+	struct pinctrl_state *usbtemp_dischg_enable;
+	struct pinctrl_state *usbtemp_dischg_disable;
 	struct mutex i2c_lock;
 	struct regmap *regmap;
 
@@ -88,12 +99,18 @@ struct sgm41515_chip {
 	struct oplus_mms *vooc_topic;
 	struct mms_subscribe *wired_subs;
 
+	struct iio_channel *chg_temp_adc;
+	struct thermal_zone_device *tz_dev;
+	int ntcctrl_gpio_amux;
+
 	int event_gpio;
 	int event_irq;
 	int dis_vbus_gpio;
+	int usbtemp_dischg_gpio;
 
 	atomic_t charger_suspended;
 	atomic_t is_suspended;
+	atomic_t shutdown_mask;
 
 	bool is_hvdcp;
 	bool vbus_present;
@@ -107,6 +124,7 @@ struct sgm41515_chip {
 	int bc12_delay_cnt;
 	int hw_aicl_point;
 	int sw_aicl_point;
+	int pre_aicl_index;
 	int part_id;
 	int bc12_retried;
 	int bc12_hw_detect_count;
@@ -115,6 +133,7 @@ struct sgm41515_chip {
 	struct votable *wired_icl_votable;
 	struct work_struct rerun_votable_work;
 	struct tcpc_device *tcpc;
+	struct completion resume_done;
 	struct completion bc12_complete_comp;
 };
 
@@ -128,10 +147,29 @@ enum {
 	CHARGE_TYPE_OTG,
 };
 
+struct SGM41515_VINDPM_THR {
+	int vbat_thr;
+	int hw_voltage;
+	int sw_voltage;
+};
+#define AICL_POINT_INDEX_MAX 4
+
+static struct SGM41515_VINDPM_THR sgm41515_vindpm_vol[AICL_POINT_INDEX_MAX] =
+{
+	{4200, 4500, 4520},
+	{4350, 4600, 4620},
+	{4500, 4700, 4700},
+	{10000, 4700, 4750},
+};
+
 static int sgm41515_hw_init(struct sgm41515_chip *chip);
 static void sgm41515_get_bc12(struct sgm41515_chip *chip);
 static int sgm41515_set_wdt_timer(struct sgm41515_chip *chip, int reg);
 static void sgm41515_bc12_clear_detection_status(struct sgm41515_chip *chip);
+static int sgm41515_get_charger_type(struct oplus_chg_ic_dev *ic_dev, int *type);
+static int sgm41515_set_aicl_point(struct oplus_chg_ic_dev *ic_dev, int vbatt);
+static bool is_sgm41515_dpdm_detection_done(struct sgm41515_chip *chip);
+static int sgm41515_input_current_limit_without_aicl(struct sgm41515_chip *chip, int current_ma);
 #ifdef CONFIG_OPLUS_CHARGER_MTK
 extern void Charger_Detect_Init(void);
 extern void Charger_Detect_Release(void);
@@ -176,13 +214,12 @@ static void sgm41515_enable_irq(struct sgm41515_chip *chip, bool en)
 	}
 }
 
-static int sgm41515_read_byte(struct sgm41515_chip *chip, u8 addr, u8 *data)
+static int _sgm41515_read_byte(struct sgm41515_chip *chip, u8 addr, u8 *data)
 {
 	int rc;
 	bool is_err = false;
 	int retry = 3;
 
-	mutex_lock(&chip->i2c_lock);
 	do {
 		if (is_err)
 			usleep_range(5000, 5000);
@@ -208,13 +245,20 @@ static int sgm41515_read_byte(struct sgm41515_chip *chip, u8 addr, u8 *data)
 	if (is_err)
 		goto error;
 
-	mutex_unlock(&chip->i2c_lock);
 	sgm41515_i2c_err_clr();
 	return 0;
 
 error:
-	mutex_unlock(&chip->i2c_lock);
 	sgm41515_i2c_err_inc(chip);
+	return rc;
+}
+
+static int sgm41515_read_byte(struct sgm41515_chip *chip, u8 addr, u8 *data)
+{
+	int rc = 0;
+	mutex_lock(&chip->i2c_lock);
+	rc = _sgm41515_read_byte(chip, addr, data);
+	mutex_unlock(&chip->i2c_lock);
 	return rc;
 }
 
@@ -261,14 +305,13 @@ error:
 	return rc;
 }
 
-static int sgm41515_write_byte(struct sgm41515_chip *chip, u8 addr, u8 data)
+static int _sgm41515_write_byte(struct sgm41515_chip *chip, u8 addr, u8 data)
 {
 	u8 buf_temp[2] = { addr, data };
 	int rc;
 	bool is_err = false;
 	int retry = 3;
 
-	mutex_lock(&chip->i2c_lock);
 	do {
 		if (is_err)
 			usleep_range(5000, 5000);
@@ -286,13 +329,20 @@ static int sgm41515_write_byte(struct sgm41515_chip *chip, u8 addr, u8 data)
 	if (is_err)
 		goto error;
 
-	mutex_unlock(&chip->i2c_lock);
 	sgm41515_i2c_err_clr();
 	return 0;
 
 error:
-	mutex_unlock(&chip->i2c_lock);
 	sgm41515_i2c_err_inc(chip);
+	return rc;
+}
+
+__maybe_unused static int sgm41515_write_byte(struct sgm41515_chip *chip, u8 addr, u8 data)
+{
+	int rc = 0;
+	mutex_lock(&chip->i2c_lock);
+	rc = _sgm41515_write_byte(chip, addr, data);
+	mutex_unlock(&chip->i2c_lock);
 	return rc;
 }
 
@@ -366,15 +416,28 @@ __maybe_unused static int sgm41515_write_byte_mask(struct sgm41515_chip *chip,
 	u8 temp;
 	int rc;
 
-	rc = sgm41515_read_byte(chip, addr, &temp);
-	if (rc < 0)
-		return rc;
-	temp = (data & mask) | (temp & (~mask));
-	rc = sgm41515_write_byte(chip, addr, temp);
-	if (rc < 0)
-		return rc;
+	mutex_lock(&chip->i2c_lock);
+	rc = _sgm41515_read_byte(chip, addr, &temp);
 
+	if (rc < 0) {
+		chg_err("read addr = %u failed, rc=%d\n", addr, rc);
+		goto error;
+	}
+	temp = (data & mask) | (temp & (~mask));
+	rc = _sgm41515_write_byte(chip, addr, temp);
+
+	if (rc < 0) {
+		chg_err("write addr = %u failed, rc=%d\n", addr, rc);
+		goto error;
+	}
+
+	mutex_unlock(&chip->i2c_lock);
+	chg_debug("sgm41515_write_byte_mask write:  addr = %u, temp = %u\n", addr, temp);
 	return 0;
+
+error:
+	mutex_unlock(&chip->i2c_lock);
+	return rc;
 }
 
 static int sgm41515_request_dpdm(struct sgm41515_chip *chip, bool enable)
@@ -387,7 +450,10 @@ static int sgm41515_request_dpdm(struct sgm41515_chip *chip, bool enable)
 			Charger_Detect_Init();
 	} else {
 		Charger_Detect_Release();
-		oplus_chg_pullup_dp_set(false);
+		if (chip->charge_type == POWER_SUPPLY_TYPE_USB_CDP)
+			oplus_chg_pullup_dp_set(true);
+		else
+			oplus_chg_pullup_dp_set(false);
 	}
 #else
 	/* fetch the DPDM regulator */
@@ -427,6 +493,11 @@ static int sgm41515_enable_hiz_mode(struct sgm41515_chip *chip, bool en)
 {
 	int rc;
 
+	if(atomic_read(&chip->shutdown_mask) == 1){
+		chg_err("shutdown_mask=1, system is in shutdown state, skip hiz mode setting.\n");
+		return 0;
+	}
+
 	rc = sgm41515_write_byte_mask(chip, REG00_SGM41515_ADDRESS, REG00_SGM41515_HIZ_MODE_MASK,
 				      en ? REG00_SGM41515_HIZ_MODE_ENABLE : REG00_SGM41515_HIZ_MODE_DISABLE);
 	if (rc < 0) {
@@ -435,17 +506,11 @@ static int sgm41515_enable_hiz_mode(struct sgm41515_chip *chip, bool en)
 		return rc;
 	}
 
-	cancel_delayed_work_sync(&chip->bc12_timeout_work);
-	if (!en)
-		schedule_delayed_work(&chip->bc12_timeout_work,
-				      BC12_TIMEOUT_MS);
-
 	return 0;
 }
 
 static void sgm41515_bc12_boot_check(struct sgm41515_chip *chip)
 {
-	u8 data;
 	int rc;
 
 	/* set vindpm thr to 4V */
@@ -469,32 +534,14 @@ static void sgm41515_bc12_boot_check(struct sgm41515_chip *chip)
 	if (rc < 0)
 		chg_err("disable charge error, rc=%d\n", rc);
 
-	rc = sgm41515_read_byte_mask(chip, REG08_SGM41515_ADDRESS, REG08_SGM41515_VBUS_STAT_MASK,
-				     &data);
-	if (rc < 0) {
-		chg_err("can't read charge type, rc=%d\n", rc);
-		data = 0;
-	}
 	sgm41515_enable_irq(chip, true);
 
 	/* BC1.2 result bit is bit5-7*/
-	data = data >> 5;
-	chg_info("chg_type=%u\n", data);
-	if (data == CHARGE_TYPE_CDP) {
-		chg_info("bc1.2 result is no input\n");
-		chip->charge_type = CHARGE_TYPE_CDP;
-		chip->bc12_complete = true;
-		oplus_chg_ic_virq_trigger(chip->ic_dev,
-					  OPLUS_IC_VIRQ_BC12_COMPLETED);
-		return;
-	}
-
 	chip->bc12_retry = false;
 	WRITE_ONCE(chip->auto_bc12, false);
-	rc = sgm41515_write_byte_mask(chip, REG07_SGM41515_ADDRESS, REG07_SGM41515_IINDET_EN_MASK,
-				      REG07_SGM41515_IINDET_EN_FORCE_DET);
-	if (rc < 0)
-		chg_err("can't rerun bc1.2, rc=%d", rc);
+	chip->bc12_retried = 0;
+	chip->bc12_hw_detect_count = 0;
+	schedule_delayed_work(&chip->bc12_plugin_work, BC12_RE_CHECK_MS);
 }
 
 static void sgm41515_bc12_timeout_work(struct work_struct *work)
@@ -502,13 +549,9 @@ static void sgm41515_bc12_timeout_work(struct work_struct *work)
 	struct delayed_work *dwork = to_delayed_work(work);
 	struct sgm41515_chip *chip =
 		container_of(dwork, struct sgm41515_chip, bc12_timeout_work);
-	int rc;
 
 	chg_err("BC1.2 check timeout\n");
-	rc = sgm41515_write_byte_mask(chip, REG00_SGM41515_ADDRESS, REG00_SGM41515_HIZ_MODE_MASK,
-				      REG00_SGM41515_HIZ_MODE_ENABLE);
-	if (rc < 0)
-		chg_err("can't enable hiz mode, rc=%d\n", rc);
+	sgm41515_enable_hiz_mode(chip, true);
 }
 
 static bool sgm41515_get_bus_gd(struct sgm41515_chip *chip)
@@ -628,28 +671,6 @@ static int sgm41515_set_iindet(struct sgm41515_chip *chip)
 	return rc;
 }
 
-static bool sgm41515_get_iindet(struct sgm41515_chip *chip)
-{
-	int rc = 0;
-	u8 reg_val = 0;
-	bool is_complete = false;
-
-	if (!chip)
-		return 0;
-
-	if(atomic_read(&chip->charger_suspended) == 1)
-		return 0;
-
-	rc = sgm41515_read_byte(chip, REG07_SGM41515_ADDRESS, &reg_val);
-	if (rc) {
-		chg_err("Couldn't read REG07_SGM41515_ADDRESS rc = %d\n", rc);
-		return false;
-	}
-
-	is_complete = ((reg_val & REG07_SGM41515_IINDET_EN_MASK) == REG07_SGM41515_IINDET_EN_DET_COMPLETE) ? 1 : 0;
-	return is_complete;
-}
-
 #ifdef CONFIG_OPLUS_CHARGER_MTK
 static int sgm41515_inform_charger_type(struct sgm41515_chip *chip)
 {
@@ -690,6 +711,7 @@ static void sgm41515_bc12_retry_work(struct work_struct *work)
 {
 	struct delayed_work *dwork = to_delayed_work(work);
 	struct sgm41515_chip *chip = container_of(dwork, struct sgm41515_chip, bc12_retry_work);
+	bool bc12_detect_done = is_sgm41515_dpdm_detection_done(chip);
 
 	if (!sgm41515_get_bus_gd(chip)) {
 		chg_err("plugout during BC1.2, delay_cnt=%d,return\n", chip->bc12_delay_cnt);
@@ -703,7 +725,8 @@ static void sgm41515_bc12_retry_work(struct work_struct *work)
 	}
 	chip->bc12_delay_cnt++;
 
-	if (sgm41515_get_iindet(chip)) {
+	if (bc12_detect_done) {
+		sgm41515_input_current_limit_without_aicl(chip, REG00_SGM41515_INIT_INPUT_CURRENT_LIMIT_500MA);
 		chg_err("BC1.2 complete, delay_cnt=%d\n", chip->bc12_delay_cnt);
 		sgm41515_get_bc12(chip);
 		sgm41515_request_dpdm(chip, false);
@@ -902,7 +925,8 @@ static bool is_sgm41515_dpdm_detection_done(struct sgm41515_chip *chip)
 {
 	bool det_done = false;
 	int rc = 0;
-	u8 reg_val = 0;
+	u8 reg07_val = 0;
+	u8 reg0e_val = 0;
 
 	if (!chip) {
 		chg_err("Couldn't get chip");
@@ -914,13 +938,20 @@ static bool is_sgm41515_dpdm_detection_done(struct sgm41515_chip *chip)
 		return false;
 	}
 
-	rc = sgm41515_read_byte(chip, REG0E_SGM41515_ADDRESS, &reg_val);
+	rc = sgm41515_read_byte(chip, REG07_SGM41515_ADDRESS, &reg07_val);
+	if (rc) {
+		chg_err("Couldn't read REG07_SGM41515_ADDRESS rc = %d\n", rc);
+		return false;
+	}
+
+	rc = sgm41515_read_byte(chip, REG0E_SGM41515_ADDRESS, &reg0e_val);
 	if (rc) {
 		chg_err("Couldn't read REG0E_SGM41515_ADDRESS rc = %d\n", rc);
 		return false;
 	}
 
-	det_done = (reg_val & REG0E_SGM41515_REG_INPUT_DET_MASK)?(true):(false);
+	det_done = (((reg07_val & REG07_SGM41515_IINDET_EN_MASK) == REG07_SGM41515_IINDET_EN_DET_COMPLETE) &&
+		    ((reg0e_val & REG0E_SGM41515_REG_INPUT_DET_MASK) == REG0E_SGM41515_REG_INPUT_DET_MASK));
 
 	return det_done;
 }
@@ -934,10 +965,11 @@ static void sgm41515_bc12_plugin_work(struct work_struct *work)
 {
 	struct delayed_work *dwork = to_delayed_work(work);
 	struct sgm41515_chip *chip = container_of(dwork, struct sgm41515_chip, bc12_plugin_work);
-	bool cur_detect_done = is_sgm41515_dpdm_detection_done(chip);
+	bool bc12_detect_done = is_sgm41515_dpdm_detection_done(chip);
 
-	if (chip->bc12_hw_detect_count >= BC12_HW_DET_CNT_MAX || cur_detect_done) {
+	if (chip->bc12_hw_detect_count >= BC12_HW_DET_CNT_MAX || bc12_detect_done) {
 		chip->bc12_retried++;
+		sgm41515_input_current_limit_without_aicl(chip, REG00_SGM41515_INIT_INPUT_CURRENT_LIMIT_500MA);
 		chg_info("first bc12 is done, run bc12 retry\n");
 		sgm41515_get_bc12(chip);
 	} else {
@@ -1140,7 +1172,10 @@ static int sgm41515_reg_dump(struct oplus_chg_ic_dev *ic_dev)
 	}
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
 
+	mutex_lock(&chip->i2c_lock);
 	rc = regmap_bulk_read(chip->regmap, 0x00, buf, ARRAY_SIZE(buf));
+	mutex_unlock(&chip->i2c_lock);
+
 	if (rc < 0) {
 		chg_err("can't dump register, rc=%d", rc);
 		return rc;
@@ -1189,6 +1224,63 @@ static int sgm41515_set_wdt_timer(struct sgm41515_chip *chip, int reg)
 	return 0;
 }
 
+static int sgm41512sd_otg_ilim_set_current(struct sgm41515_chip *chip, int ilim)
+{
+	int rc;
+	u8 reg_val;
+
+	if (ilim >= REG10_SGM41512_BOOST_2000MA) {
+		rc = sgm41515_write_byte_mask(chip, REG10_SGM41512_ADDRESS,
+				REG10_SGM41512_OTG_CURRENT_LIMIT_MASK,
+				REG10_SGM41512_OTG_CURRENT_2000MA_EN);
+		if (rc) {
+			chg_info("sgm41512sd set otg ilim failed\n");
+			return rc;
+		}
+	} else {
+		rc = sgm41515_write_byte_mask(chip, REG10_SGM41512_ADDRESS,
+				REG10_SGM41512_OTG_CURRENT_LIMIT_MASK,
+				REG10_SGM41512_OTG_CURRENT_2000MA_DIS);
+		if (rc)
+			return rc;
+		if (ilim < REG02_SGM41515_BOOSTI_1200MA)
+			reg_val = REG02_SGM41515_OTG_CURRENT_LIMIT_500MA;
+		else
+			reg_val = REG02_SGM41515_OTG_CURRENT_LIMIT_1200MA;
+		rc = sgm41515_write_byte_mask(chip, REG02_SGM41515_ADDRESS,
+				REG02_SGM41515_OTG_CURRENT_LIMIT_MASK,
+				reg_val);
+		if (rc)
+			return rc;
+	}
+	return 0;
+}
+
+static int sgm41512sd_otg_ilim_set(struct sgm41515_chip *chip, int ilim)
+{
+	int rc;
+
+	if (atomic_read(&chip->charger_suspended) == 1)
+		return 0;
+
+	chg_info("set otg ilim %d\n", ilim);
+	rc = sgm41512sd_otg_ilim_set_current(chip, ilim);
+	if (rc < 0) {
+		chg_err("sgm41512sd set otg ilim error!\n");
+		return rc;
+	}
+
+	rc = sgm41515_write_byte_mask(chip, REG10_SGM41512_ADDRESS,
+			REG10_SGM41512_OTG_FREQ_MASK,
+			REG10_SGM41512_OTG_FREQ_1_5MHZ);
+	if (rc) {
+		chg_err("set otg freq error!\n");
+		return rc;
+	}
+
+	return 0;
+}
+
 static int sgm41515_otg_ilim_set(struct sgm41515_chip *chip, int ilim)
 {
 	int rc;
@@ -1199,19 +1291,44 @@ static int sgm41515_otg_ilim_set(struct sgm41515_chip *chip, int ilim)
 
 	if (atomic_read(&chip->charger_suspended) == 1)
 		return 0;
+	if (chip->part_id == SGM41512SD_PART_ID) {
+		rc = sgm41512sd_otg_ilim_set(chip, ilim);
+	} else {
+		if (ilim < REG02_SGM41515_BOOSTI_1200MA)
+			reg_val = REG02_SGM41515_OTG_CURRENT_LIMIT_500MA;
+		else
+			reg_val = REG02_SGM41515_OTG_CURRENT_LIMIT_1200MA;
 
-	if (ilim < REG02_SGM41515_BOOSTI_1200MA)
-		reg_val = REG02_SGM41515_OTG_CURRENT_LIMIT_500MA;
-	else
-		reg_val = REG02_SGM41515_OTG_CURRENT_LIMIT_1200MA;
-
-	rc = sgm41515_write_byte_mask(chip, REG02_SGM41515_ADDRESS,
-			REG02_SGM41515_OTG_CURRENT_LIMIT_MASK,
-			reg_val);
+		rc = sgm41515_write_byte_mask(chip, REG02_SGM41515_ADDRESS,
+				REG02_SGM41515_OTG_CURRENT_LIMIT_MASK,
+				reg_val);
+	}
 	if (rc < 0)
 		chg_err("Couldn't sgm41515_otg_ilim_set  rc = %d\n", rc);
 
 	return rc;
+}
+
+static int sgm41515_wait_for_resume(struct sgm41515_chip *chip)
+{
+	unsigned long timeout = 0;
+
+	if (atomic_read(&chip->charger_suspended) != 1)
+		return 0;
+
+	timeout = wait_for_completion_timeout(&chip->resume_done, msecs_to_jiffies(OPLUS_WAIT_RESUME_TIME));
+	if (timeout == 0) {
+		chg_err("Timeout (%dms) waiting for resume signal\n", OPLUS_WAIT_RESUME_TIME);
+		return -ETIMEDOUT;
+	}
+
+	if (atomic_read(&chip->charger_suspended) == 1) {
+		chg_err("Signal received, but charger_suspended is still 1 (Race condition?)\n");
+		return -EAGAIN;
+	}
+
+	chg_info("Resumed successfully, waited %dms\n", OPLUS_WAIT_RESUME_TIME - jiffies_to_msecs(timeout));
+	return 0;
 }
 
 static int sgm41515_otg_enable(struct sgm41515_chip *chip)
@@ -1221,14 +1338,11 @@ static int sgm41515_otg_enable(struct sgm41515_chip *chip)
 	if (!chip)
 		return 0;
 
-	if (atomic_read(&chip->charger_suspended) == 1)
-		return 0;
-
-	sgm41515_set_wdt_timer(chip, REG05_SGM41515_WATCHDOG_TIMER_DISABLE);
-
-	rc = sgm41515_otg_ilim_set(chip, REG02_SGM41515_OTG_CURRENT_LIMIT_1200MA);
-	if (rc < 0)
-		chg_err("Couldn't sgm41515_otg_ilim_set rc = %d\n", rc);
+	rc = sgm41515_wait_for_resume(chip);
+	if (rc < 0) {
+		chg_err("System suspended, I2C transfer rejected, rc=%d\n", rc);
+		return rc;
+	}
 
 	rc = sgm41515_write_byte_mask(chip, REG01_SGM41515_ADDRESS,
 			REG01_SGM41515_OTG_MASK,
@@ -1236,6 +1350,25 @@ static int sgm41515_otg_enable(struct sgm41515_chip *chip)
 	if (rc < 0)
 		chg_err("Couldn't sgm41515_otg_enable  rc = %d\n", rc);
 
+	if (chip->part_id == SGM41515D_PART_ID) {
+		chg_err("Set otg_freq to 1.5MHZ\n");
+		rc = sgm41515_write_byte_mask(chip, REG0D_SGM41515_ADDRESS,
+				REG0D_SGM41515_OTG_CTRL_MASK,
+				REG0D_SGM41515_OTG_CTRL_DISABLE);
+		if (rc < 0)
+			chg_err("Couldn't set otg_freq to 1.5MHZ rc = %d\n", rc);
+	}
+
+
+	if (chip->part_id == SGM41512SD_PART_ID) {
+		rc = sgm41515_write_byte_mask(chip, REG10_SGM41512_ADDRESS,
+			REG10_SGM41512_OTG_FREQ_MASK,
+			REG10_SGM41512_OTG_FREQ_1_5MHZ);
+		if (rc < 0) {
+			chg_err("Couldn't set OTG_FREQ to 1.5MHZ rc = %d\n", rc);
+			return rc;
+		}
+	}
 	return rc;
 }
 
@@ -1246,17 +1379,38 @@ static int sgm41515_otg_disable(struct sgm41515_chip *chip)
 	if (!chip)
 		return 0;
 
-	if (atomic_read(&chip->charger_suspended) == 1)
-		return 0;
+	rc = sgm41515_wait_for_resume(chip);
+	if (rc < 0) {
+		chg_err("System suspended, I2C transfer rejected, rc=%d\n", rc);
+		return rc;
+	}
 
 	rc = sgm41515_write_byte_mask(chip, REG01_SGM41515_ADDRESS,
 			REG01_SGM41515_OTG_MASK,
 			REG01_SGM41515_OTG_DISABLE);
-	if (rc < 0)
+	if (rc < 0) {
 		chg_err("Couldn't sgm41515_otg_disable rc = %d\n", rc);
+		return rc;
+	}
 
-	sgm41515_set_wdt_timer(chip, REG05_SGM41515_WATCHDOG_TIMER_DISABLE);
+	if (chip->part_id == SGM41515D_PART_ID) {
+		chg_err("Set otg_freq to 500KHZ\n");
+		rc = sgm41515_write_byte_mask(chip, REG0D_SGM41515_ADDRESS,
+				REG0D_SGM41515_OTG_CTRL_MASK,
+				REG0D_SGM41515_OTG_CTRL_ENABLE);
+		if (rc < 0)
+			chg_err("Couldn't set otg_freq to 500KHZ rc = %d\n", rc);
+	}
 
+	if (chip->part_id == SGM41512SD_PART_ID) {
+		int temp_rc = sgm41515_write_byte_mask(chip, REG10_SGM41512_ADDRESS,
+			REG10_SGM41512_OTG_FREQ_MASK,
+			REG10_SGM41512_OTG_FREQ_500KHZ);
+		if (temp_rc < 0) {
+			chg_err("Couldn't set OTG_FREQ to 500KHZ rc = %d\n", temp_rc);
+			rc = temp_rc;
+		}
+	}
 	return rc;
 }
 
@@ -1377,9 +1531,9 @@ static int sgm41515_set_vindpm_vol(struct sgm41515_chip *chip)
 	if (atomic_read(&chip->charger_suspended) == 1)
 		return 0;
 
+	vindpm = chip->hw_aicl_point;
 	chg_info("vindpm = %d\n", vindpm);
 
-	vindpm = chip->hw_aicl_point;
 	if(vindpm < SGM41515_VINDPM_THRESHOLD_5900MV) {
 		offset = VINDPM_OS_3900mV;
 		offset_val = SGM41515_VINDPM_THRESHOLD_3900MV;
@@ -1408,15 +1562,161 @@ static int sgm41515_set_vindpm_vol(struct sgm41515_chip *chip)
 	return rc;
 }
 
+static void oplus_chg_get_batt_volt(int *batt_volt)
+{
+	union mms_msg_data data = {0};
+	struct oplus_mms *gauge_topic;
+
+	gauge_topic = oplus_mms_get_by_name("gauge");
+	if (gauge_topic) {
+		oplus_mms_get_item_data(gauge_topic, GAUGE_ITEM_VOL_MAX, &data, false);
+		*batt_volt = data.intval;
+	} else {
+		chg_info("gauge_topic is null\n");
+		*batt_volt = 0;
+	}
+}
+
+static int oplus_chg_usb_set_input_current(struct sgm41515_chip *chip, int current_ma,
+	int aicl_point)
+{
+	int rc = 0;
+	int i = 0;
+	int chg_vol = 0;
+
+	bool pre_step = false;
+
+	for (i = 1; i <= current_ma / 100; i++) {
+		rc = sgm41515_input_current_limit_without_aicl(chip, i * 100);
+		if (rc) {
+			chg_err("set icl to %d uA fail, rc=%d\n", i * 100, rc);
+			return rc;
+		} else {
+			chg_err("set icl to %d mA\n", i * 100);
+		}
+		msleep(90);
+		chg_vol = oplus_wired_get_vbus();
+		if (chg_vol < aicl_point) {
+			chg_err("chg_vol < aicl_point break here\n");
+			i = i - 1;
+			pre_step = true;
+			break;
+		}
+		if (i == current_ma / 100) {
+			chg_err("current_ma / 100 break here\n");
+			break;
+		}
+	}
+	if (i <= 0)
+		i = 1;
+	if (pre_step) {
+		rc = sgm41515_input_current_limit_without_aicl(chip, i  * 100);
+		if (rc) {
+			chg_err("set icl 2 to %d uA fail, rc=%d\n", i * 100, rc);
+			return rc;
+		} else {
+			chg_err("set icl 2 to %d uA\n", i * 100);
+		}
+	}
+	chg_info("usb input max current limit aicl chg_vol=%d j[%d]=%d sw_aicl_point:%d aicl_end\n",
+		 chg_vol, i, i * 100, aicl_point);
+
+	return rc;
+}
+
+#define AICL_QUICK_CHECK_INTERVAL_MS	5
+#define AICL_QUICK_CHECK_UV_THD_MV		120
+static bool sgm41515_aicl_voltage_quick_check(struct sgm41515_chip *chip,
+		int pre_step_vbus_mv, int collapse_icl_ma, int time_out_ms)
+{
+	int check_count = time_out_ms / AICL_QUICK_CHECK_INTERVAL_MS;
+	int cur_vbus_mv = pre_step_vbus_mv;
+	int i;
+	bool quick_check_uv_st = false;
+
+	for (i = 0; i < check_count; i++) {
+		cur_vbus_mv = oplus_wired_get_vbus();
+		if (cur_vbus_mv < pre_step_vbus_mv - AICL_QUICK_CHECK_UV_THD_MV) {
+			sgm41515_input_current_limit_without_aicl(chip, collapse_icl_ma);
+			chg_info("cur_vbus_mv collapse(%d), cur_vbus_mv = %d, pre_step_vbus_mv = %d, set icl to %dmA",
+					i, cur_vbus_mv, pre_step_vbus_mv, collapse_icl_ma);
+			quick_check_uv_st = true;
+			break;
+		}
+		usleep_range(AICL_QUICK_CHECK_INTERVAL_MS * 1000,
+				(AICL_QUICK_CHECK_INTERVAL_MS + 1) * 1000);
+	}
+
+	return quick_check_uv_st;
+}
+
 static int sgm41515_usb_icl[] = {
-	300, 500, 900, 1200, 1350, 1500, 1750, 2000, 3000,
+	300, 500, 900, 1000, 1200, 1350, 1500, 1750, 2000, 2300, 2600, 3000,
 };
+
+static int sgm41515_icl_aicl_enhance_shortcut(struct sgm41515_chip *chip, int current_ma)
+{
+	bool present = false;
+	int charger_type, batt_volt = 0, rc;
+	int sw_aicl_point;
+
+	if (!chip->usb_aicl_enhance)
+		return -ENOENT;
+
+	sgm41515_input_present(chip->ic_dev, &present);
+	rc = sgm41515_get_charger_type(chip->ic_dev, &charger_type);
+
+	if (rc < 0 || !present)
+		return -ENOENT;
+
+	if (charger_type == OPLUS_CHG_USB_TYPE_SDP ||
+		charger_type == OPLUS_CHG_USB_TYPE_CDP ||
+		(charger_type == OPLUS_CHG_USB_TYPE_UNKNOWN && current_ma == 500))
+		goto apply;
+
+	return -ENOENT;
+
+apply:
+	oplus_chg_get_batt_volt(&batt_volt);
+	sgm41515_set_aicl_point(chip->ic_dev, batt_volt);
+	sw_aicl_point = chip->sw_aicl_point;
+	return oplus_chg_usb_set_input_current(chip, current_ma, sw_aicl_point);
+}
+
+static void sgm41515_icl_ramp_down(struct sgm41515_chip *chip)
+{
+	int i, rc, pre_icl, pre_icl_index;
+
+	/* first: icl down to 500mA_index+1, step from real_pre_icl_index-1 */
+	pre_icl = sgm41515_get_usb_icl(chip);
+	for (pre_icl_index = ARRAY_SIZE(sgm41515_usb_icl) - 1;
+		pre_icl_index > 0; pre_icl_index--) {
+		if (sgm41515_usb_icl[pre_icl_index] < pre_icl)
+			break;
+	}
+	chg_info("pre_icl: %d, pre_icl_index: %d\n", pre_icl, pre_icl_index);
+	/* pre_icl_index = real_pre_icl_index-1; down to 500mA_index+1(2) */
+	for (i = pre_icl_index; i > 1; i--) {
+		if (atomic_read(&chip->charger_suspended) == 1 ||
+			atomic_read(&chip->is_suspended) == 1)
+			break;
+		rc = sgm41515_input_current_limit_without_aicl(chip, sgm41515_usb_icl[i]);
+		if (rc)
+			chg_err("icl_down: set icl to %d mA fail, rc=%d\n", sgm41515_usb_icl[i], rc);
+		else
+			chg_info("icl_down: set icl to %d mA\n", sgm41515_usb_icl[i]);
+		msleep(50);
+	}
+}
+
 static int sgm41515_input_current_limit_write(struct sgm41515_chip *chip, int current_ma)
 {
 	int i = 0, rc = 0;
+	int vbus_stat = 0;
 	int chg_vol = 0;
 	int sw_aicl_point = 0;
-	int pre_icl_index = 0, pre_icl = 0;
+	bool quick_check_uv_st = false;
+	int pre_step_vbus_mv = 0;
 
 	if (!chip)
 		return 0;
@@ -1429,22 +1729,12 @@ static int sgm41515_input_current_limit_write(struct sgm41515_chip *chip, int cu
 		return 0;
 	}
 
-	/* first: icl down to 500mA, step from pre icl */
-	pre_icl = sgm41515_get_usb_icl(chip);
-	for (pre_icl_index = ARRAY_SIZE(sgm41515_usb_icl) - 1; pre_icl_index >= 0; pre_icl_index--) {
-		if (sgm41515_usb_icl[pre_icl_index] < pre_icl)
-			break;
-	}
-	chg_err("icl_set: %d, pre_icl: %d, pre_icl_index: %d\n", current_ma, pre_icl, pre_icl_index);
+	rc = sgm41515_icl_aicl_enhance_shortcut(chip, current_ma);
+	if (rc >= 0)
+		return rc;
 
-	for (i = pre_icl_index; i > 1; i--) {
-		rc = sgm41515_input_current_limit_without_aicl(chip, sgm41515_usb_icl[i]);
-		if (rc)
-			chg_err("icl_down: set icl to %d mA fail, rc=%d\n", sgm41515_usb_icl[i], rc);
-		else
-			chg_err("icl_down: set icl to %d mA\n", sgm41515_usb_icl[i]);
-		msleep(50);
-	}
+	vbus_stat = sgm41515_get_vbus_stat(chip);
+	sgm41515_icl_ramp_down(chip);
 
 	/*second: aicl process, step from 500ma*/
 	if (current_ma < 500) {
@@ -1470,9 +1760,18 @@ static int sgm41515_input_current_limit_write(struct sgm41515_chip *chip, int cu
 	if (chg_vol < sw_aicl_point) {
 		i = i - 1;
 		goto aicl_pre_step;
+	} else if (current_ma < 1000)
+		goto aicl_end;
+	i = 3; /* 1000 */
+	rc = sgm41515_input_current_limit_without_aicl(chip, sgm41515_usb_icl[i]);
+	usleep_range(90000, 91000);
+	chg_vol = oplus_wired_get_vbus();
+	if (chg_vol < sw_aicl_point) {
+		i = i - 1;
+		goto aicl_pre_step;
 	} else if (current_ma < 1200)
 		goto aicl_end;
-	i = 3; /* 1200 */
+	i = 4; /* 1200 */
 	rc = sgm41515_input_current_limit_without_aicl(chip, sgm41515_usb_icl[i]);
 	usleep_range(90000, 91000);
 	chg_vol = oplus_wired_get_vbus();
@@ -1480,23 +1779,23 @@ static int sgm41515_input_current_limit_write(struct sgm41515_chip *chip, int cu
 		i = i - 1;
 		goto aicl_pre_step;
 	}
-	i = 4; /* 1350 */
-	rc = sgm41515_input_current_limit_without_aicl(chip, sgm41515_usb_icl[i]);
-	usleep_range(90000, 91000);
-	chg_vol = oplus_wired_get_vbus();
-	if (chg_vol < sw_aicl_point) {
-		i = i - 2; /*We DO NOT use 1.2A here*/
-		goto aicl_pre_step;
-	} else if (current_ma < 1350) {
-		i = i - 1; /*We use 1.2A here*/
-		goto aicl_end;
-	}
-	i = 5; /* 1500 */
+	i = 5; /* 1350 */
 	rc = sgm41515_input_current_limit_without_aicl(chip, sgm41515_usb_icl[i]);
 	usleep_range(90000, 91000);
 	chg_vol = oplus_wired_get_vbus();
 	if (chg_vol < sw_aicl_point) {
 		i = i - 3; /*We DO NOT use 1.2A here*/
+		goto aicl_pre_step;
+	} else if (current_ma < 1350) {
+		i = i - 1; /*We use 1.2A here*/
+		goto aicl_end;
+	}
+	i = 6; /* 1500 */
+	rc = sgm41515_input_current_limit_without_aicl(chip, sgm41515_usb_icl[i]);
+	usleep_range(90000, 91000);
+	chg_vol = oplus_wired_get_vbus();
+	if (chg_vol < sw_aicl_point) {
+		i = i - 4; /*We DO NOT use 1.2A here*/
 		goto aicl_pre_step;
 	} else if (current_ma < 1500) {
 		i = i - 2; /*We use 1.2A here*/
@@ -1504,7 +1803,7 @@ static int sgm41515_input_current_limit_write(struct sgm41515_chip *chip, int cu
 	} else if (current_ma < 2000) {
 		goto aicl_end;
 	}
-	i = 6; /* 1750 */
+	i = 7; /* 1750 */
 	rc = sgm41515_input_current_limit_without_aicl(chip, sgm41515_usb_icl[i]);
 	usleep_range(90000, 91000);
 	chg_vol = oplus_wired_get_vbus();
@@ -1512,31 +1811,56 @@ static int sgm41515_input_current_limit_write(struct sgm41515_chip *chip, int cu
 		i = i - 3; /*1.2*/
 		goto aicl_pre_step;
 	}
-	i = 7; /* 2000 */
+	i = 8; /* 2000 */
 	rc = sgm41515_input_current_limit_without_aicl(chip, sgm41515_usb_icl[i]);
 	usleep_range(90000, 91000);
 	chg_vol = oplus_wired_get_vbus();
+	pre_step_vbus_mv = chg_vol;
 	if (chg_vol < sw_aicl_point) {
 		i = i - 2; /*1.5*/
+		goto aicl_pre_step;
+	} else if ((current_ma < 2300) || (vbus_stat == REG08_SGM41515_VBUS_STAT_FLOAT)) {
+		goto aicl_end;
+	}
+	i = 9; /* 2300 */
+	rc = sgm41515_input_current_limit_without_aicl(chip, sgm41515_usb_icl[i]);
+	quick_check_uv_st = sgm41515_aicl_voltage_quick_check(chip, pre_step_vbus_mv, sgm41515_usb_icl[i - 1], 90);
+	chg_vol = oplus_wired_get_vbus();
+	pre_step_vbus_mv = chg_vol;
+	if (quick_check_uv_st || chg_vol < sw_aicl_point) {
+		i = i - 1; /*2.0*/
+		goto aicl_pre_step;
+	} else if (current_ma < 2600) {
+		goto aicl_end;
+	}
+	i = 10; /* 2600 */
+	rc = sgm41515_input_current_limit_without_aicl(chip, sgm41515_usb_icl[i]);
+	quick_check_uv_st = sgm41515_aicl_voltage_quick_check(chip, pre_step_vbus_mv, sgm41515_usb_icl[i - 2], 90);
+	chg_vol = oplus_wired_get_vbus();
+	pre_step_vbus_mv = chg_vol;
+	if (quick_check_uv_st || chg_vol < sw_aicl_point) {
+		i = i - 2; /*2.0*/
 		goto aicl_pre_step;
 	} else if (current_ma < 3000) {
 		goto aicl_end;
 	}
-	i = 8; /* 3000 */
+	i = 11; /* 3000 */
 	rc = sgm41515_input_current_limit_without_aicl(chip, sgm41515_usb_icl[i]);
-	usleep_range(90000, 91000);
+	quick_check_uv_st = sgm41515_aicl_voltage_quick_check(chip, pre_step_vbus_mv, sgm41515_usb_icl[i - 1], 90);
 	chg_vol = oplus_wired_get_vbus();
-	if (chg_vol < sw_aicl_point) {
+	if (quick_check_uv_st || chg_vol < sw_aicl_point) {
 		i = i -1;
 		goto aicl_pre_step;
 	} else if (current_ma >= 3000) {
 		goto aicl_end;
 	}
 aicl_pre_step:
-	chg_debug("usb input max current limit aicl chg_vol=%d j[%d]=%d sw_aicl_point:%d aicl_pre_step\n", chg_vol, i, sgm41515_usb_icl[i], sw_aicl_point);
+	chg_info("usb input max current limit aicl chg_vol=%d j[%d]=%d sw_aicl_point:%d current_ma=%d, aicl_pre_step\n",
+			chg_vol, i, sgm41515_usb_icl[i], sw_aicl_point, current_ma);
 	goto aicl_rerun;
 aicl_end:
-	chg_debug("usb input max current limit aicl chg_vol=%d j[%d]=%d sw_aicl_point:%d aicl_end\n", chg_vol, i, sgm41515_usb_icl[i], sw_aicl_point);
+	chg_info("usb input max current limit aicl chg_vol=%d j[%d]=%d sw_aicl_point:%d current_ma=%d, aicl_end\n",
+		chg_vol, i, sgm41515_usb_icl[i], sw_aicl_point, current_ma);
 	goto aicl_rerun;
 aicl_rerun:
 	/* aicl_result = sgm41515_usb_icl[i]; */
@@ -1578,6 +1902,15 @@ int sgm41515_set_prechg_current(struct sgm41515_chip *chip, int ipre_mA)
 	if (atomic_read(&chip->charger_suspended) == 1)
 		return 0;
 
+	if (chip->part_id == SGM41515D_PART_ID || chip->part_id == SGM41515_PART_ID) {
+		/* Disable IPRECHG x6 mode */
+		rc = sgm41515_write_byte_mask(chip, REG0D_SGM41515_ADDRESS,
+			REG0D_SGM41515_IPRECHG_MASK, REG0D_SGM41515_IPRECHG_X6_DISABLE);
+		if (rc < 0) {
+			chg_err("Couldn't disable IPRECHG x6 mode rc = %d\n", rc);
+			return rc;
+		}
+	}
 	if (chip->part_id == SGM41515D_PART_ID) {
 		chg_err("sgm41515d prechg_current = %d\n", ipre_mA);
 		for(tmp = 0; tmp < 16; tmp++) {
@@ -1595,7 +1928,7 @@ int sgm41515_set_prechg_current(struct sgm41515_chip *chip, int ipre_mA)
 			REG03_SGM41515_PRE_CHG_CURRENT_LIMIT_MASK,
 			(tmp + 1) << REG03_SGM41515_PRE_CHG_CURRENT_LIMIT_SHIFT);
 
-	return 0;
+	return rc;
 }
 
 static int sgm41515_set_chging_term_disable(struct sgm41515_chip *chip)
@@ -1752,6 +2085,11 @@ static int sgm41515_set_icl(struct oplus_chg_ic_dev *ic_dev, bool vooc_mode, boo
 	}
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
 
+	if (!chip->bc12_complete && step) {
+		chg_info("bc12_complete = %d, skip aicl\n", chip->bc12_complete);
+		return rc;
+	}
+
 	if (step)
 		rc = sgm41515_input_current_limit_write(chip, icl_ma);
 	else
@@ -1819,8 +2157,76 @@ static int sgm41515_set_fcc(struct oplus_chg_ic_dev *ic_dev, int fcc_ma)
 		return -ENODEV;
 	}
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
+	if (!chip->bc12_complete && fcc_ma > REG02_SGM41515_FAST_CHG_CURRENT_LIMIT_500MA) {
+		chg_info("bc12_complete = %d, fcc_ma = %d, force fcc_ma to %d\n",
+				chip->bc12_complete, fcc_ma, REG02_SGM41515_FAST_CHG_CURRENT_LIMIT_500MA);
+		fcc_ma = REG02_SGM41515_FAST_CHG_CURRENT_LIMIT_500MA;
+	}
 
 	return sgm41515_charging_current_write_fast(chip, fcc_ma);
+}
+
+static int sgm41515_set_vreg_fine_tuning(struct sgm41515_chip *chip, int tuning_mv)
+{
+	int tuning_val = REG0F_SGM41515_VREG_FT_DISABLE;
+
+	if (!chip || atomic_read(&chip->charger_suspended) == 1)
+		return -ENODEV;
+
+	if (tuning_mv >= 4 && tuning_mv < 12) {
+		tuning_val = REG0F_SGM41515_VREG_FT_PLUS_8MV;
+	} else if (tuning_mv >= -12 && tuning_mv < -4) {
+		tuning_val = REG0F_SGM41515_VREG_FT_MINUS_8MV;
+	} else if (tuning_mv >= -20 && tuning_mv < -12) {
+		tuning_val = REG0F_SGM41515_VREG_FT_MINUS_16MV;
+	}
+
+	chg_info("fine_tuning = %dmV, tuning_val = 0x%02x\n", tuning_mv, tuning_val);
+	return sgm41515_write_byte_mask(chip, REG0F_SGM41515_ADDRESS,
+				       REG0F_SGM41515_VREG_FT_MASK,
+				       tuning_val << REG0F_SGM41515_VREG_FT_SHIFT);
+}
+
+static int sgm41515_smart_voltage_adjustment(struct sgm41515_chip *chip, int vfloat_mv)
+{
+	int rc = 0;
+	int coarse_tmp, coarse_voltage, fine_tuning_mv;
+
+	if (!chip || atomic_read(&chip->charger_suspended) == 1)
+		return -ENODEV;
+
+	if (vfloat_mv < 3856 || vfloat_mv > 4624) {
+		chg_err("Failed to set vfloat_mv, vfloat_mv %d below minimum (3856) or exceeds maximum (4624)\n", vfloat_mv);
+		return -EINVAL;
+	}
+
+	coarse_tmp = (vfloat_mv - REG04_SGM41515_CHG_VOL_LIMIT_OFFSET) / REG04_SGM41515_CHG_VOL_LIMIT_STEP;
+	coarse_voltage = REG04_SGM41515_CHG_VOL_LIMIT_OFFSET + coarse_tmp * REG04_SGM41515_CHG_VOL_LIMIT_STEP;
+	fine_tuning_mv = vfloat_mv - coarse_voltage;
+
+	if (fine_tuning_mv > SMART_TUNING_MAX_ADJUSTMENT) {
+		coarse_tmp += 1;
+		coarse_voltage = REG04_SGM41515_CHG_VOL_LIMIT_OFFSET + coarse_tmp * REG04_SGM41515_CHG_VOL_LIMIT_STEP;
+		fine_tuning_mv = vfloat_mv - coarse_voltage;
+	}
+
+	chg_info("vfloat=%dmV, coarse=%dmV, fine_tuning=%dmV\n", vfloat_mv, coarse_voltage, fine_tuning_mv);
+
+	rc = sgm41515_write_byte_mask(chip, REG04_SGM41515_ADDRESS,
+				      REG04_SGM41515_CHG_VOL_LIMIT_MASK,
+				      coarse_tmp << REG04_SGM41515_CHG_VOL_LIMIT_SHIFT);
+	if (rc < 0) {
+		chg_err("Failed to set coarse voltage: %d\n", rc);
+		return rc;
+	}
+
+	rc = sgm41515_set_vreg_fine_tuning(chip, fine_tuning_mv);
+	if (rc < 0) {
+		chg_err("Failed to set fine tuning: %d\n", rc);
+		return rc;
+	}
+
+	return rc;
 }
 
 static int sgm41515_float_voltage_write(struct sgm41515_chip *chip, int vfloat_mv)
@@ -1831,18 +2237,22 @@ static int sgm41515_float_voltage_write(struct sgm41515_chip *chip, int vfloat_m
 	if (!chip)
 		return 0;
 
-	if(atomic_read(&chip->charger_suspended) == 1)
+	if (atomic_read(&chip->charger_suspended) == 1)
 		return 0;
 
 	chg_err("vfloat_mv = %d\n", vfloat_mv);
 
-	tmp = vfloat_mv - REG04_SGM41515_CHG_VOL_LIMIT_OFFSET;
+	if (chip->part_id == SGM41512SD_PART_ID) {
+		rc = sgm41515_smart_voltage_adjustment(chip, vfloat_mv);
+	} else {
+		tmp = vfloat_mv - REG04_SGM41515_CHG_VOL_LIMIT_OFFSET;
 
-	tmp = tmp / REG04_SGM41515_CHG_VOL_LIMIT_STEP;
+		tmp = tmp / REG04_SGM41515_CHG_VOL_LIMIT_STEP;
 
-	rc = sgm41515_write_byte_mask(chip, REG04_SGM41515_ADDRESS,
-			REG04_SGM41515_CHG_VOL_LIMIT_MASK,
-			tmp << REG04_SGM41515_CHG_VOL_LIMIT_SHIFT);
+		rc = sgm41515_write_byte_mask(chip, REG04_SGM41515_ADDRESS,
+				REG04_SGM41515_CHG_VOL_LIMIT_MASK,
+				tmp << REG04_SGM41515_CHG_VOL_LIMIT_SHIFT);
+	}
 
 	return rc;
 }
@@ -1955,9 +2365,31 @@ static int sgm41515_get_input_curr(struct oplus_chg_ic_dev *ic_dev, int *curr_ma
 	return 0;
 }
 
+static bool sgm41515_get_vindpm_status(struct sgm41515_chip *chip)
+{
+	int rc = 0;
+	u8 reg_val = 0;
+	bool in_vindpm = false;
+
+	if (!chip)
+		return false;
+
+	if (atomic_read(&chip->charger_suspended) == 1)
+		return false;
+
+	rc = sgm41515_read_byte(chip, REG0A_SGM41515_ADDRESS, &reg_val);
+	if (rc) {
+		chg_err("Couldn't read regeister, rc = %d\n", rc);
+		return false;
+	}
+
+	in_vindpm = ((reg_val & REG0A_SGM41515_VINDPM_MASK) == REG0A_SGM41515_IN_VINDPM) ? 1 : 0;
+	return in_vindpm;
+}
+
 static int sgm41515_get_input_vol(struct oplus_chg_ic_dev *ic_dev, int *vol_mv)
 {
-	/* Not support vbus only sgm41515 */
+	/* Not support vbus only sgm41515 without ADC */
 	struct sgm41515_chip *chip;
 
 	if (ic_dev == NULL) {
@@ -1966,14 +2398,29 @@ static int sgm41515_get_input_vol(struct oplus_chg_ic_dev *ic_dev, int *vol_mv)
 	}
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
 
-	*vol_mv = chip->sw_aicl_point;
+	if (!chip || !chip->vbus_present) {
+		*vol_mv = 0;
+		return 0;
+	}
+
+	if (sgm41515_get_vindpm_status(chip)) {
+		*vol_mv = chip->hw_aicl_point;
+	} else if (chip->sw_aicl_point < SGM41515_FAKE_VBUS_5V) {
+		*vol_mv = SGM41515_FAKE_VBUS_5V;
+	} else {
+		*vol_mv = SGM41515_FAKE_VBUS_9V;
+	}
+
 	return 0;
 }
 
 static int sgm41515_set_aicl_point(struct oplus_chg_ic_dev *ic_dev, int vbatt)
 {
 	int rc = 0;
+	int index = 0;
 	struct sgm41515_chip *chip;
+	bool present = false;
+	int charger_type;
 
 	if (ic_dev == NULL) {
 		chg_err("ic_dev is NULL");
@@ -1981,15 +2428,36 @@ static int sgm41515_set_aicl_point(struct oplus_chg_ic_dev *ic_dev, int vbatt)
 	}
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
 
-	if (chip->hw_aicl_point == SGM41515_INP_VOL_4V44 && vbatt > SGM41515_BATT_VOL_4V14) {
-		chip->hw_aicl_point = SGM41515_INP_VOL_4V52;
-		chip->sw_aicl_point = SGM41515_INP_VOL_4V535;
-		rc = sgm41515_set_vindpm_vol(chip);
-	} else if (chip->hw_aicl_point == SGM41515_INP_VOL_4V52 && vbatt < SGM41515_BATT_VOL_4V14) {
-		chip->hw_aicl_point = SGM41515_INP_VOL_4V44;
-		chip->sw_aicl_point = SGM41515_INP_VOL_4V5;
-		rc = sgm41515_set_vindpm_vol(chip);
+	if (chip->usb_aicl_enhance) {
+		sgm41515_input_present(chip->ic_dev, &present);
+		rc = sgm41515_get_charger_type(chip->ic_dev, &charger_type);
+		if (rc >= 0 && charger_type == OPLUS_CHG_USB_TYPE_SDP && present) {
+			chip->hw_aicl_point = USB_HW_AICL_POINT;
+			chip->sw_aicl_point = USB_SW_AICL_POINT;
+			chip->pre_aicl_index = 0;
+			rc = sgm41515_set_vindpm_vol(chip);
+			return rc;
+		}
 	}
+
+	for (index = 0; index < AICL_POINT_INDEX_MAX; index++) {
+		if (vbatt <= sgm41515_vindpm_vol[index].vbat_thr) {
+			chip->sw_aicl_point = sgm41515_vindpm_vol[index].sw_voltage;
+			chip->hw_aicl_point = sgm41515_vindpm_vol[index].hw_voltage;
+			break;
+		}
+	}
+	if (index == AICL_POINT_INDEX_MAX) {
+		chip->hw_aicl_point = HW_AICL_POINT_DEFAULT;
+		chip->sw_aicl_point = SW_AICL_POINT_DEFAULT;
+		index = 0;
+	}
+
+	if (chip->pre_aicl_index != index) {
+		rc = sgm41515_set_vindpm_vol(chip);
+		chip->pre_aicl_index = index;
+	}
+
 	return rc;
 }
 
@@ -2011,6 +2479,8 @@ static int sgm41515_otg_boost_enable(struct oplus_chg_ic_dev *ic_dev, bool en)
 	else
 		rc = sgm41515_otg_disable(chip);
 
+	sgm41515_set_wdt_timer(chip, REG05_SGM41515_WATCHDOG_TIMER_DISABLE);
+
 	if (rc < 0)
 		chg_err("can't %s otg boost, rc=%d\n", en ? "enable" : "disable", rc);
 	return rc;
@@ -2026,17 +2496,15 @@ static int sgm41515_set_otg_voltage(struct sgm41515_chip *chip, int vol_mv)
 
 	if (atomic_read(&chip->charger_suspended) == 1)
 		return 0;
-
 	if (vol_mv < REG06_SGM41515_OTG_VLIM_OFFSET)
 		vol_mv = REG06_SGM41515_OTG_VLIM_OFFSET;
 	else if (vol_mv > REG06_SGM41515_OTG_VLIM_MAXMV)
 		vol_mv = REG06_SGM41515_OTG_VLIM_MAXMV;
-
 	reg_val = (vol_mv - REG06_SGM41515_OTG_VLIM_OFFSET) / REG06_SGM41515_OTG_VLIM_STEP;
 
 	rc = sgm41515_write_byte_mask(chip, REG06_SGM41515_ADDRESS,
 			REG06_SGM41515_OTG_VLIM_MASK,
-			reg_val);
+			reg_val << REG06_SGM41515_OTG_VLIM_SHIFT);
 
 	return rc;
 }
@@ -2064,12 +2532,15 @@ static int sgm41515_set_otg_boost_curr_limit(struct oplus_chg_ic_dev *ic_dev, in
 		return -ENODEV;
 	}
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
-
+	if(!chip) {
+		chg_err("chip is NULL");
+		return -ENODEV;
+	}
 
 	rc = sgm41515_otg_ilim_set(chip, curr_mA);
 	if (rc)
 		chg_err("failed to set boost current, ret = %d\n", rc);
-	return 0;
+	return rc;
 }
 
 static int sgm41515_aicl_enable(struct oplus_chg_ic_dev *ic_dev, bool en)
@@ -2116,7 +2587,8 @@ static int sgm41515_hardware_init(struct oplus_chg_ic_dev *ic_dev)
 	}
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
 
-	sgm41515_hw_init(chip);
+	if (!oplus_is_rf_ftm_mode())
+		sgm41515_hw_init(chip);
 	return 0;
 }
 
@@ -2550,6 +3022,73 @@ static int sgm41515_kick_wdt(struct oplus_chg_ic_dev *ic_dev)
 	return sgm41515_kick_watchdog(chip);
 }
 
+static int sgm41515_get_usb_aicl_enhance(struct oplus_chg_ic_dev *ic_dev, bool *enable)
+{
+	struct sgm41515_chip *chip;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_chg_ic_get_drvdata(ic_dev);
+	*enable = chip->usb_aicl_enhance;
+
+	chg_info("usb_aicl_enhance: %d", *enable);
+
+	return 0;
+}
+
+static int sgm41515_vbus_dischg_enable(struct sgm41515_chip *chip, bool en)
+{
+	int rc;
+
+	if (chip == NULL) {
+		chg_err("chip is NULL");
+		return -ENODEV;
+	}
+
+	if (!gpio_is_valid(chip->usbtemp_dischg_gpio)) {
+		chg_info("Not support dischg_gpio");
+		return 0;
+	}
+
+	mutex_lock(&chip->pinctrl_lock);
+	if (en)
+		rc = pinctrl_select_state(chip->pinctrl, chip->usbtemp_dischg_enable);
+	else
+		rc = pinctrl_select_state(chip->pinctrl, chip->usbtemp_dischg_disable);
+	mutex_unlock(&chip->pinctrl_lock);
+	if (rc < 0)
+		chg_err("can't set dischg gpio to %s, rc=%d\n",
+			en ? "active" : "sleep", rc);
+	else
+		chg_err("set dischg gpio to %s\n",
+			en ? "active" : "sleep");
+
+	return rc;
+}
+
+static int sgm41515_set_usb_dischg_enable(struct oplus_chg_ic_dev *ic_dev, bool en)
+{
+	struct sgm41515_chip *chip;
+	int rc = 0;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_chg_ic_get_drvdata(ic_dev);
+
+	rc = sgm41515_write_byte_mask(chip, REG00_SGM41515_ADDRESS, REG00_SGM41515_HIZ_MODE_MASK,
+		en ? REG00_SGM41515_HIZ_MODE_ENABLE : REG00_SGM41515_HIZ_MODE_DISABLE);
+	if (rc < 0)
+		chg_err("can't %s hiz mode, rc=%d\n", en ? "enable" : "disable", rc);
+	msleep(10); /*vsw_dis->gpio_high need 5-60ms*/
+	rc = sgm41515_vbus_dischg_enable(chip, en);
+	chg_info("set_usbtemp_dischg_enable=%d\n", en);
+	return rc;
+}
+
 static int sgm41515_set_shipmode(struct sgm41515_chip *chip, bool enable)
 {
 	int rc = 0;
@@ -2743,6 +3282,12 @@ static void *oplus_chg_get_func(struct oplus_chg_ic_dev *ic_dev,
 	case OPLUS_IC_FUNC_BUCK_KICK_WDT:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BUCK_KICK_WDT, sgm41515_kick_wdt);
 		break;
+	case OPLUS_IC_FUNC_BUCK_GET_USB_AICL_ENHANCE:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BUCK_GET_USB_AICL_ENHANCE, sgm41515_get_usb_aicl_enhance);
+		break;
+	case OPLUS_IC_FUNC_SET_USB_DISCHG_ENABLE:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_SET_USB_DISCHG_ENABLE, sgm41515_set_usb_dischg_enable);
+		break;
 	default:
 		chg_err("this func(=%d) is not supported\n", func_id);
 		func = NULL;
@@ -2787,16 +3332,40 @@ static int sgm41515_gpio_init(struct sgm41515_chip *chip)
 		chg_err("dis_vbus_gpio not specified\n");
 	}
 
+	chip->usbtemp_dischg_gpio = of_get_named_gpio(node, "oplus,dischg-gpio", 0);
+	if (gpio_is_valid(chip->usbtemp_dischg_gpio)) {
+		rc = gpio_request(chip->usbtemp_dischg_gpio, "sgm41515_dischg-gpio");
+		if (rc < 0) {
+			chg_err("event_gpio request error, rc=%d\n", rc);
+			goto free_dis_vbus_gpio;
+		}
+		chip->usbtemp_dischg_enable =
+			pinctrl_lookup_state(chip->pinctrl, "dischg_enable");
+		if (IS_ERR_OR_NULL(chip->usbtemp_dischg_enable)) {
+			chg_err("get usbtemp_dischg_enable fail\n");
+			goto free_usbtemp_dischg_gpio;
+		}
+		chip->usbtemp_dischg_disable =
+			pinctrl_lookup_state(chip->pinctrl, "dischg_disable");
+		if (IS_ERR_OR_NULL(chip->usbtemp_dischg_disable)) {
+			chg_err("get usbtemp_dischg_disable fail\n");
+			goto free_usbtemp_dischg_gpio;
+		}
+		pinctrl_select_state(chip->pinctrl, chip->usbtemp_dischg_disable);
+	} else {
+		chg_err("usbtemp_dischg_gpio not specified\n");
+	}
+
 	chip->event_gpio = of_get_named_gpio(node, "oplus,event-gpio", 0);
 	if (!gpio_is_valid(chip->event_gpio)) {
 		chg_err("event_gpio not specified\n");
 		rc = -ENODEV;
-		goto free_dis_vbus_gpio;
+		goto free_usbtemp_dischg_gpio;
 	}
 	rc = gpio_request(chip->event_gpio, "sgm41515_event-gpio");
 	if (rc < 0) {
 		chg_err("event_gpio request error, rc=%d\n", rc);
-		goto free_dis_vbus_gpio;
+		goto free_usbtemp_dischg_gpio;
 	}
 	chip->event_default =
 		pinctrl_lookup_state(chip->pinctrl, "event_default");
@@ -2820,11 +3389,20 @@ static int sgm41515_gpio_init(struct sgm41515_chip *chip)
 	return 0;
 
 free_event_gpio:
-	if (gpio_is_valid(chip->event_gpio))
+	if (gpio_is_valid(chip->event_gpio)) {
 		gpio_free(chip->event_gpio);
+		chip->event_gpio =  -EINVAL;
+	}
+free_usbtemp_dischg_gpio:
+	if (gpio_is_valid(chip->usbtemp_dischg_gpio)) {
+		gpio_free(chip->usbtemp_dischg_gpio);
+		chip->usbtemp_dischg_gpio =  -EINVAL;
+	}
 free_dis_vbus_gpio:
-	if (gpio_is_valid(chip->dis_vbus_gpio))
+	if (gpio_is_valid(chip->dis_vbus_gpio)) {
 		gpio_free(chip->dis_vbus_gpio);
+		chip->dis_vbus_gpio =  -EINVAL;
+	}
 
 	return rc;
 }
@@ -2869,7 +3447,7 @@ static bool sgm41515_get_deivce_online(struct sgm41515_chip *chip)
 	chg_err("sgm41515 part_id=0x%02X\n", chip->part_id);
 
 	if (chip->part_id == SGM41541_PART_ID || chip->part_id == SGM41515_PART_ID ||
-	    chip->part_id == SGM41515D_PART_ID)
+	    chip->part_id == SGM41515D_PART_ID || chip->part_id == SGM41512SD_PART_ID)
 		return true;
 
 	return false;
@@ -2948,8 +3526,6 @@ static int sgm41515_set_stat_dis(struct sgm41515_chip *chip, bool enable)
 	return rc;
 }
 
-#define HW_AICL_POINT_OFFSET 4440
-#define SW_AICL_POINT_OFFSET 4500
 static int sgm41515_hw_init(struct sgm41515_chip *chip)
 {
 	chg_err("init sgm41515 hardware! \n");
@@ -2958,11 +3534,11 @@ static int sgm41515_hw_init(struct sgm41515_chip *chip)
 		return 0;
 
 	/*must be before set_vindpm_vol and set_input_current*/
-	chip->hw_aicl_point = HW_AICL_POINT_OFFSET;
-	chip->sw_aicl_point = SW_AICL_POINT_OFFSET;
+	chip->hw_aicl_point = HW_AICL_POINT_DEFAULT;
+	chip->sw_aicl_point = SW_AICL_POINT_DEFAULT;
+	chip->pre_aicl_index = 0;
 
-
-	sgm41515_set_stat_dis(chip, false);
+	sgm41515_set_stat_dis(chip, true);
 	sgm41515_set_int_mask(chip, REG0A_SGM41515_VINDPM_INT_NOT_ALLOW | REG0A_SGM41515_IINDPM_INT_NOT_ALLOW);
 	sgm41515_set_chg_timer(chip, false);
 	sgm41515_disable_charging(chip);
@@ -2972,7 +3548,7 @@ static int sgm41515_hw_init(struct sgm41515_chip *chip)
 	sgm41515_otg_ilim_set(chip, REG02_SGM41515_BOOSTI_1200MA);
 	sgm41515_set_prechg_voltage_threshold(chip);
 	sgm41515_set_prechg_current(chip, SGM41515_DEFAULT_PRECHG_CURRENT);
-	sgm41515_charging_current_write_fast(chip, REG02_SGM41515_FAST_CHG_CURRENT_LIMIT_2000MA);
+	sgm41515_charging_current_write_fast(chip, REG02_SGM41515_FAST_CHG_CURRENT_LIMIT_500MA);
 	sgm41515_set_termchg_current(chip, 200);
 	sgm41515_input_current_limit_without_aicl(chip, REG00_SGM41515_INIT_INPUT_CURRENT_LIMIT_500MA);
 	sgm41515_set_rechg_voltage(chip, 1);
@@ -2981,7 +3557,8 @@ static int sgm41515_hw_init(struct sgm41515_chip *chip)
 	sgm41515_batfet_reset_disable(chip, true);
 	sgm41515_unsuspend_charger(chip);
 	sgm41515_enable_charging(chip);
-	sgm41515_set_wdt_timer(chip, REG05_SGM41515_WATCHDOG_TIMER_40S);
+	sgm41515_set_wdt_timer(chip, REG05_SGM41515_WATCHDOG_TIMER_DISABLE);
+	sgm41515_enable_hiz_mode(chip, false);
 
 	return 0;
 }
@@ -3156,6 +3733,9 @@ static int sgm41515_parse_dt(struct sgm41515_chip *chip)
 		chip->chg_dev_name = "primary_chg";
 		chg_err("no charger name\n");
 	}
+
+	chip->usb_aicl_enhance = of_property_read_bool(chip->client->dev.of_node, "oplus,usb_aicl_enhance");
+	chg_info("usb_aicl_enhance:%d", chip->usb_aicl_enhance);
 	return 0;
 }
 #endif
@@ -3379,6 +3959,21 @@ static void sgm41515_free_wakeup_source(struct sgm41515_chip *chip)
 	}
 }
 
+static void sgm41515_chip_state_init(struct sgm41515_chip *chip)
+{
+	if (!chip)
+		return;
+
+	atomic_set(&chip->charger_suspended, 0);
+	atomic_set(&chip->is_suspended, 0);
+	atomic_set(&chip->shutdown_mask, 0);
+	chip->charge_type = POWER_SUPPLY_TYPE_UNKNOWN;
+	chip->power_good = false;
+	chip->bc12_complete = false;
+	chip->bc12_retried = 0;
+	chip->bc12_delay_cnt = 0;
+}
+
 static void sgm41515_work_init(struct sgm41515_chip *chip)
 {
 	INIT_DELAYED_WORK(&chip->event_work, sgm41515_event_work);
@@ -3393,6 +3988,151 @@ static void sgm41515_completion_init(struct sgm41515_chip *chip)
 {
 	init_completion(&chip->bc12_complete_comp);
 	reinit_completion(&chip->bc12_complete_comp);
+	init_completion(&chip->resume_done);
+}
+
+struct oplus_chg_ic_virq sgm41515_reverse_chg_virq_table[] = {
+	{.virq_id = OPLUS_IC_VIRQ_ERR },
+	{.virq_id = OPLUS_IC_VIRQ_ONLINE },
+	{.virq_id = OPLUS_IC_VIRQ_OFFLINE },
+};
+
+static int sgm41515_reverse_chg_init(struct oplus_chg_ic_dev *ic_dev)
+{
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	ic_dev->online = true;
+	oplus_chg_ic_virq_trigger(ic_dev, OPLUS_IC_VIRQ_ONLINE);
+	return 0;
+}
+
+static int sgm41515_reverse_chg_exit(struct oplus_chg_ic_dev *ic_dev)
+{
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	if (!ic_dev->online)
+		return 0;
+
+	ic_dev->online = false;
+	oplus_chg_ic_virq_trigger(ic_dev, OPLUS_IC_VIRQ_OFFLINE);
+	return 0;
+}
+
+static void *sgm41515_reverse_chg_get_func(struct oplus_chg_ic_dev *ic_dev, enum oplus_chg_ic_func func_id)
+{
+	void *func = NULL;
+
+	if (!ic_dev->online && (func_id != OPLUS_IC_FUNC_INIT) && (func_id != OPLUS_IC_FUNC_EXIT)) {
+		chg_err("%s is offline\n", ic_dev->name);
+		return NULL;
+	}
+
+	switch (func_id) {
+	case OPLUS_IC_FUNC_INIT:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_INIT, sgm41515_reverse_chg_init);
+		break;
+	case OPLUS_IC_FUNC_EXIT:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_EXIT, sgm41515_reverse_chg_exit);
+		break;
+	case OPLUS_IC_FUNC_SET_NORMAL_REVERSE_HW_OCP:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_SET_NORMAL_REVERSE_HW_OCP, sgm41515_set_otg_boost_curr_limit);
+		break;
+	default:
+		chg_err("this func(=%d) is not supported\n", func_id);
+		func = NULL;
+		break;
+	}
+
+	return func;
+}
+
+static int oplus_pd_parse_child_node_ic_info(struct device_node *child,
+					      enum oplus_chg_ic_type *ic_type,
+					      int *ic_index)
+{
+	int ret;
+
+	ret = of_property_read_u32(child, "oplus,ic_type", ic_type);
+	if (ret >= 0) {
+		ret = of_property_read_u32(child, "oplus,ic_index", ic_index);
+		if (ret >= 0)
+			chg_info("node %s, ic_type = %d, ic_index = %d\n", child->name, *ic_type, *ic_index);
+		else
+			chg_err("can't get %s ic index, ret=%d\n", child->name, ret);
+	} else {
+		chg_err("can't get %s ic type, ret=%d\n", child->name, ret);
+	}
+	return ret;
+}
+
+static void sgm41515_register_child_ic(struct sgm41515_chip *chip,
+					     struct device_node *child)
+{
+	int ret;
+	enum oplus_chg_ic_type ic_type;
+	int ic_index;
+	struct oplus_chg_ic_dev *ic_dev;
+	struct oplus_chg_ic_cfg ic_cfg = { 0 };
+
+	ret = oplus_pd_parse_child_node_ic_info(child, &ic_type, &ic_index);
+	if(ret < 0)
+		return;
+
+	ic_cfg.name = child->name;
+	ic_cfg.index = ic_index;
+	ic_cfg.type = ic_type;
+	ic_cfg.of_node = child;
+
+	switch (ic_type) {
+	case OPLUS_CHG_IC_REVERSE:
+		snprintf(ic_cfg.manu_name, OPLUS_CHG_IC_MANU_NAME_MAX - 1, "reverse-sgm41515");
+		snprintf(ic_cfg.fw_id, OPLUS_CHG_IC_FW_ID_MAX - 1, "0x00");
+		ic_cfg.get_func = sgm41515_reverse_chg_get_func;
+		ic_cfg.virq_data = sgm41515_reverse_chg_virq_table;
+		ic_cfg.virq_num = ARRAY_SIZE(sgm41515_reverse_chg_virq_table);
+		break;
+	default:
+		chg_err("not support ic_type(=%d)\n", ic_type);
+		return;
+	}
+
+	ic_dev = devm_oplus_chg_ic_register(chip->dev, &ic_cfg);
+	if (!ic_dev) {
+		ret = -ENODEV;
+		chg_err("register %s error\n", child->name);
+		return;
+	}
+	chg_info("register %s success.\n", child->name);
+
+	switch (ic_type) {
+	case OPLUS_CHG_IC_REVERSE:
+		chip->reverse_chg_ic_dev = ic_dev;
+		oplus_chg_ic_func(ic_dev, OPLUS_IC_FUNC_INIT);
+		break;
+	default:
+		chg_err("not support ic_type(=%d) ...\n", ic_type);
+		return;
+	}
+	of_platform_populate(child, NULL, NULL, chip->dev);
+}
+
+
+static void sgm41515_init_locks(struct sgm41515_chip *chip)
+{
+	mutex_init(&chip->i2c_lock);
+	mutex_init(&chip->dpdm_lock);
+	mutex_init(&chip->pinctrl_lock);
+}
+
+static void sgm41515_destroy_locks(struct sgm41515_chip *chip)
+{
+	mutex_destroy(&chip->pinctrl_lock);
+	mutex_destroy(&chip->dpdm_lock);
+	mutex_destroy(&chip->i2c_lock);
 }
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
@@ -3408,6 +4148,7 @@ static int sgm41515_driver_probe(struct i2c_client *client,
 	struct oplus_chg_ic_cfg ic_cfg = { 0 };
 	enum oplus_chg_ic_type ic_type;
 	int ic_index;
+	struct device_node *child;
 
 	chip = devm_kzalloc(&client->dev, sizeof(struct sgm41515_chip),
 			    GFP_KERNEL);
@@ -3419,9 +4160,7 @@ static int sgm41515_driver_probe(struct i2c_client *client,
 	chip->client = client;
 	chip->dev = &client->dev;
 	i2c_set_clientdata(client, chip);
-	mutex_init(&chip->i2c_lock);
-	mutex_init(&chip->dpdm_lock);
-	mutex_init(&chip->pinctrl_lock);
+	sgm41515_init_locks(chip);
 	sgm41515_work_init(chip);
 	sgm41515_completion_init(chip);
 
@@ -3438,16 +4177,10 @@ static int sgm41515_driver_probe(struct i2c_client *client,
 		goto regmap_init_err;
 	}
 
-	atomic_set(&chip->charger_suspended, 0);
-	atomic_set(&chip->is_suspended, 0);
+	sgm41515_chip_state_init(chip);
 	oplus_chg_awake_init(chip);
 	init_waitqueue_head(&chip->wait);
 	oplus_keep_resume_awake_init(chip);
-	chip->charge_type = POWER_SUPPLY_TYPE_UNKNOWN;
-	chip->power_good = false;
-	chip->bc12_complete = false;
-	chip->bc12_retried = 0;
-	chip->bc12_delay_cnt = 0;
 
 	rc = sgm41515_get_deivce_online(chip);
 	if (rc < 0) {
@@ -3460,6 +4193,10 @@ static int sgm41515_driver_probe(struct i2c_client *client,
 		chg_err("gpio init error, rc=%d\n", rc);
 		goto gpio_init_err;
 	}
+
+	oplus_v2_ntc_switch_gpio_init(chip);
+	if (!IS_ERR_OR_NULL(chip->chg_temp_adc))
+		register_charger_thermal(chip);
 
 	sgm41515_hw_init(chip);
 
@@ -3505,7 +4242,8 @@ static int sgm41515_driver_probe(struct i2c_client *client,
 		chg_err("register %s error\n", node->name);
 		goto reg_ic_err;
 	}
-
+	for_each_child_of_node(node, child)
+		sgm41515_register_child_ic(chip, child);
 	oplus_mms_wait_topic("wired", sgm41515_subscribe_wired_topic, chip);
 
 	sgm41515_enable_irq(chip, true);
@@ -3514,16 +4252,21 @@ static int sgm41515_driver_probe(struct i2c_client *client,
 	return rc;
 
 reg_ic_err:
-	sgm41515_enable_irq(chip, false);
-	if (gpio_is_valid(chip->event_gpio))
-		gpio_free(chip->event_gpio);
 #ifdef CONFIG_OPLUS_CHARGER_MTK
+	if (chip->chg_dev)
+		charger_device_unregister(chip->chg_dev);
 err_device_register:
 #endif
+	release_charger_thermal_resource(chip);
+	sgm41515_free_gpio(chip);
 gpio_init_err:
+	sgm41515_free_wakeup_source(chip);
 regmap_init_err:
+	cancel_work_sync(&chip->rerun_votable_work);
+	sgm41515_destroy_locks(chip);
 	i2c_set_clientdata(client, NULL);
 	devm_kfree(&client->dev, chip);
+	chip = NULL;
 	chg_err("probe error, rc=%d\n", rc);
 	return rc;
 }
@@ -3537,23 +4280,20 @@ static int sgm41515_driver_remove(struct i2c_client *client)
 	struct sgm41515_chip *chip = i2c_get_clientdata(client);
 
 	if (chip) {
-		sgm41515_enable_irq(chip, false);
+		cancel_work_sync(&chip->rerun_votable_work);
+		sgm41515_free_gpio(chip);
 #ifdef CONFIG_OPLUS_CHARGER_MTK
 		if (chip->chg_dev)
 			charger_device_unregister(chip->chg_dev);
 #endif
+		release_charger_thermal_resource(chip);
 		if (!IS_ERR_OR_NULL(chip->wired_subs))
 			oplus_mms_unsubscribe(chip->wired_subs);
 		if (chip->ic_dev)
 			devm_oplus_chg_ic_unregister(chip->dev, chip->ic_dev);
 		chip->ic_dev = NULL;
-		if (chip->suspend_ws)
-			wakeup_source_unregister(chip->suspend_ws);
-		chip->suspend_ws = NULL;
-		if (chip->event_irq)
-			free_irq(chip->event_irq, chip);
-		if (gpio_is_valid(chip->event_gpio))
-			gpio_free(chip->event_gpio);
+		sgm41515_free_wakeup_source(chip);
+		mutex_destroy(&chip->pinctrl_lock);
 		mutex_destroy(&chip->dpdm_lock);
 		mutex_destroy(&chip->i2c_lock);
 		i2c_set_clientdata(client, NULL);
@@ -3576,6 +4316,7 @@ static int sgm41515_pm_resume(struct device *dev)
 	}
 
 	atomic_set(&chip->charger_suspended, 0);
+	complete_all(&chip->resume_done);
 	return 0;
 }
 
@@ -3589,6 +4330,7 @@ static int sgm41515_pm_suspend(struct device *dev)
 		return 0;
 	}
 
+	reinit_completion(&chip->resume_done);
 	atomic_set(&chip->charger_suspended, 1);
 	return 0;
 }
@@ -3608,6 +4350,7 @@ static int sgm41515_resume(struct i2c_client *client)
 	}
 
 	atomic_set(&chip->charger_suspended, 0);
+	complete_all(&chip->resume_done);
 	return 0;
 }
 
@@ -3620,6 +4363,7 @@ static int sgm41515_suspend(struct i2c_client *client, pm_message_t mesg)
 		return 0;
 	}
 
+	reinit_completion(&chip->resume_done);
 	atomic_set(&chip->charger_suspended, 1);
 	return 0;
 }
@@ -3634,11 +4378,14 @@ static void sgm41515_shutdown(struct i2c_client *client)
 		return;
 	}
 
+	sgm41515_charging_current_write_fast(chip, REG02_SGM41515_FAST_CHG_CURRENT_LIMIT_500MA);
+
 	if(oplus_wired_shipmode_is_enabled()) {
 		chg_info("oplus_wired_shipmode_is_enabled\n");
 		sgm41515_set_shipmode(chip, true);
 	}
 
+	atomic_set(&chip->shutdown_mask, 1);
 	/*
 	 * HIZ mode needs to be disabled on shutdown to ensure activation
 	 * signal is available.
@@ -3646,6 +4393,8 @@ static void sgm41515_shutdown(struct i2c_client *client)
 	if (READ_ONCE(chip->vbus_present))
 		(void)sgm41515_write_byte_mask(chip, REG00_SGM41515_ADDRESS, REG00_SGM41515_HIZ_MODE_MASK,
 						REG00_SGM41515_HIZ_MODE_DISABLE);
+	sgm41515_set_stat_dis(chip, true);
+	sgm41515_enable_charging(chip);
 }
 
 static const struct of_device_id sgm41515_match[] = {
@@ -3700,3 +4449,4 @@ oplus_chg_module_register(sgm41515_driver);
 MODULE_DESCRIPTION("Driver for sgm41515 charger chip");
 MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("i2c:sgm41515-charger");
+MODULE_SOFTDEP("pre: qcom-spmi-adc5");

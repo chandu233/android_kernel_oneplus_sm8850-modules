@@ -691,6 +691,11 @@ static int oplus_smart_charge_parse_dt(struct oplus_smart_charge *smart_chg)
 	int smart_chg_soh_support;
 	int batt_sn_support;
 
+	if (!node) {
+		chg_err("device tree node is NULL, cannot parse dt properties\n");
+		return -ENODEV;
+	}
+
 	vooc_topic = g_smart_chg->vooc_topic;
 
 	bcc_support = oplus_vooc_get_bcc_support_for_smartchg(vooc_topic);

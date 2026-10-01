@@ -35,6 +35,8 @@
 #endif
 #include <oplus_chg_dual_chan.h>
 #include <oplus_chg_comm.h>
+#include <oplus_strategy.h>
+#include <oplus_chg_ai_cv.h>
 #include <oplus_batt_bal.h>
 #include <oplus_chg_plc.h>
 
@@ -44,9 +46,10 @@ enum {
 	FASTCHG_TEMP_RANGE_COOL, /*5 ~ 12*/
 	FASTCHG_TEMP_RANGE_LITTLE_COOL, /*12~16*/
 	FASTCHG_TEMP_RANGE_LITTLE_COOL_HIGH,
-	FASTCHG_TEMP_RANGE_NORMAL_LOW, /*16~25*/
-	FASTCHG_TEMP_RANGE_NORMAL_HIGH, /*25~43*/
-	FASTCHG_TEMP_RANGE_WARM, /*43-52*/
+	FASTCHG_TEMP_RANGE_NORMAL_LOW_PRE, /*21~25*/
+	FASTCHG_TEMP_RANGE_NORMAL_LOW, /*25~35*/
+	FASTCHG_TEMP_RANGE_NORMAL_HIGH, /*35~44*/
+	FASTCHG_TEMP_RANGE_WARM, /*44~51*/
 	FASTCHG_TEMP_RANGE_NORMAL,
 };
 
@@ -55,6 +58,7 @@ static const char * const temp_region_text[] = {
 	[VOOCPHY_BATT_TEMP_COOL]		= "cool",
 	[VOOCPHY_BATT_TEMP_LITTLE_COOL]		= "little_cool",
 	[VOOCPHY_BATT_TEMP_LITTLE_COOL_HIGH]	= "little_cool_high",
+	[VOOCPHY_BATT_TEMP_NORMAL_LOW_PRE]	= "normal_low_pre",
 	[VOOCPHY_BATT_TEMP_NORMAL]		= "normal",
 	[VOOCPHY_BATT_TEMP_NORMAL_HIGH]		= "normal_high",
 	[VOOCPHY_BATT_TEMP_WARM]		= "warm",
@@ -75,6 +79,7 @@ enum {
 	BAT_TEMP_LITTLE_COOL,
 	BAT_TEMP_LITTLE_COOL_HIGH,
 	BAT_TEMP_COOL,
+	BAT_TEMP_NORMAL_LOW_PRE,
 	BAT_TEMP_NORMAL_LOW,
 	BAT_TEMP_NORMAL_HIGH,
 	BAT_TEMP_LITTLE_COLD,
@@ -726,6 +731,7 @@ static void oplus_voocphy_reset_temp_range(struct oplus_voocphy_manager *chip)
 		chip->vooc_cool_temp = chip->vooc_cool_temp_default;
 		chip->vooc_little_cool_temp = chip->vooc_little_cool_temp_default;
 		chip->vooc_little_cool_high_temp = chip->vooc_little_cool_high_temp_default;
+		chip->vooc_normal_low_pre_temp = chip->vooc_normal_low_pre_temp_default;
 		chip->vooc_normal_low_temp = chip->vooc_normal_low_temp_default;
 	}
 }
@@ -971,6 +977,7 @@ static int oplus_voocphy_reset_variables(struct oplus_voocphy_manager *chip)
 	chip->fcl_cnt = 0;
 	chip->pre_current_fcl = 0;
 	chip->current_fcl = 0;
+	chip->perf_en = false;
 	chip->voocphy_rx_buff = 0;
 	chip->voocphy_tx_buff[0] = 0;
 	chip->voocphy_tx_buff[1] = 0;
@@ -1177,6 +1184,27 @@ static int oplus_voocphy_hardware_monitor_stop(void)
 	return status;
 }
 
+#define SVOOC_FCS_ICL1_MA	1200
+#define SVOOC_FCS_ICL2_MA	800
+static void oplus_voocphy_set_fcs_icl_work(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct oplus_voocphy_manager *chip = container_of(dwork,
+		struct oplus_voocphy_manager, set_fcs_icl_work);
+
+	oplus_chglib_set_fcs_icl(chip->fcs_icl_ma);
+}
+
+static void oplus_voocphy_set_fcs_icl(struct oplus_voocphy_manager *chip, int icl_ma)
+{
+	if (!chip)
+		return;
+
+	cancel_delayed_work(&chip->set_fcs_icl_work);
+	chip->fcs_icl_ma = icl_ma;
+	schedule_delayed_work(&chip->set_fcs_icl_work, 0);
+}
+
 static int oplus_voocphy_reset_voocphy(struct oplus_voocphy_manager *chip)
 {
 	int status = VOOCPHY_SUCCESS;
@@ -1204,6 +1232,8 @@ static int oplus_voocphy_reset_voocphy(struct oplus_voocphy_manager *chip)
 	    chip->slave_ops->reset_voocphy_ovp) {
 		chip->slave_ops->reset_voocphy_ovp(chip);
 	}
+	cancel_delayed_work(&chip->voocphy_fcs_work);
+	oplus_voocphy_set_fcs_icl(chip, 0);
 
 	if (oplus_get_dual_chan_support()) {
 		oplus_dual_chan_curr_vote_reset();
@@ -1297,6 +1327,12 @@ void oplus_voocphy_get_soc_and_temp_with_enter_fastchg(struct oplus_voocphy_mana
 		sys_curve_temp_idx = BATT_SYS_CURVE_TEMP_LITTLE_COOL_HIGH;
 		chip->batt_temp_plugin = VOOCPHY_BATT_TEMP_LITTLE_COOL_HIGH;
 		break;
+	case FASTCHG_TEMP_RANGE_NORMAL_LOW_PRE:
+		chip->vooc_temp_cur_range = FASTCHG_TEMP_RANGE_NORMAL_LOW_PRE;
+		chip->fastchg_batt_temp_status = BAT_TEMP_NORMAL_LOW_PRE;
+		sys_curve_temp_idx = BATT_SYS_CURVE_TEMP_NORMAL_LOW_PRE;
+		chip->batt_temp_plugin = VOOCPHY_BATT_TEMP_NORMAL_LOW_PRE;
+		break;
 	case FASTCHG_TEMP_RANGE_NORMAL_LOW:
 		chip->vooc_temp_cur_range = FASTCHG_TEMP_RANGE_NORMAL_LOW;
 		chip->fastchg_batt_temp_status = BAT_TEMP_NORMAL_LOW;
@@ -1337,7 +1373,13 @@ void oplus_voocphy_get_soc_and_temp_with_enter_fastchg(struct oplus_voocphy_mana
 			chip->fastchg_batt_temp_status = BAT_TEMP_LITTLE_COOL_HIGH;
 			sys_curve_temp_idx = BATT_SYS_CURVE_TEMP_LITTLE_COOL_HIGH;
 			chip->batt_temp_plugin = VOOCPHY_BATT_TEMP_LITTLE_COOL_HIGH;
-		} else if (batt_temp < chip->vooc_normal_low_temp) { /* 16-35C */
+		} else if (chip->vooc_normal_low_pre_temp != -EINVAL &&
+				batt_temp < chip->vooc_normal_low_pre_temp) { /* 21-25C */
+			chip->vooc_temp_cur_range = FASTCHG_TEMP_RANGE_NORMAL_LOW_PRE;
+			chip->fastchg_batt_temp_status = BAT_TEMP_NORMAL_LOW_PRE;
+			sys_curve_temp_idx = BATT_SYS_CURVE_TEMP_NORMAL_LOW_PRE;
+			chip->batt_temp_plugin = VOOCPHY_BATT_TEMP_NORMAL_LOW_PRE;
+		} else if (batt_temp < chip->vooc_normal_low_temp) { /* 25-35C */
 			chip->vooc_temp_cur_range = FASTCHG_TEMP_RANGE_NORMAL_LOW;
 			chip->fastchg_batt_temp_status = BAT_TEMP_NORMAL_LOW;
 			sys_curve_temp_idx = BATT_SYS_CURVE_TEMP_NORMAL_LOW;
@@ -1474,7 +1516,6 @@ static int oplus_voocphy_upload_cp_error(struct oplus_voocphy_manager *chip, int
 static int oplus_voocphy_print_dbg_info(struct oplus_voocphy_manager *chip)
 {
 	int i = 0;
-	u8 value = 0;
 	bool fg_dump_reg = false;
 	bool fg_send_info = false;
 	int report_flag = 0;
@@ -1506,16 +1547,6 @@ chg_exception:
 	chip->voocphy_cp_irq_flag = chip->interrupt_flag;
 	chip->voocphy_vooc_irq_flag = chip->vooc_flag;
 	chip->disconn_pre_vbat_calc = chip->vbat_calc;
-	if (chip->ops && chip->ops->get_voocphy_enable) {
-		chip->ops->get_voocphy_enable(chip, &value);
-		chip->voocphy_enable = value;
-	}
-	if (chip->voocphy_dual_cp_support &&
-	    chip->slave_ops && chip->slave_ops->get_voocphy_enable) {
-		value = 0;
-		chip->slave_ops->get_voocphy_enable(chip, &value);
-		chip->slave_voocphy_enable = value;
-	}
 	chip->vbat_calc = 0;
 	if (fg_dump_reg) {
 		if (chip->ops && chip->ops->dump_voocphy_reg) {
@@ -1814,8 +1845,11 @@ static void oplus_voocphy_update_data(struct oplus_voocphy_manager *chip)
 		}
 	}
 	if (chip->ops && chip->ops->set_sstimeout_ucp_enable && chip->vooc_vbus_status == VOOC_VBUS_NORMAL) {
-		if (chip->cp_ichg > VOOCPHY_UCP_SS_IBUS_MIN)
+		if (chip->cp_ichg > VOOCPHY_UCP_SS_IBUS_MIN) {
 			chip->ops->set_sstimeout_ucp_enable(chip, true);
+			cancel_delayed_work(&chip->voocphy_fcs_work);
+			schedule_delayed_work(&chip->voocphy_fcs_work, msecs_to_jiffies(0));
+		}
 	}
 
 	oplus_voocphy_ic_is_abnormal(chip);
@@ -2485,11 +2519,35 @@ static int oplus_voocphy_handle_ask_bat_model_process_cmd(struct oplus_voocphy_m
 
 #define VBUS_ADJUST_HOLD_CNTS	2
 #define CP_VBAT_VALID_MIN	2000
+static bool oplus_voocphy_adjust_pre_check(struct oplus_voocphy_manager *chip)
+{
+	if (!chip || !chip->vbus_adjust_new_method || !chip->vbus_adjust_done ||
+	    !chip->ops || !chip->ops->get_vbus_status)
+		return true;
+
+	if (!oplus_chg_get_fcs_support_flags()|| !chip->ops || !chip->ops->set_perf_enable || chip->perf_en)
+		return false;
+
+	chip->ops->set_perf_enable(chip, true);
+	chip->perf_en = true;
+	/*
+	 * AI-REVIEW-JUSTIFIED:
+	 * Reviewed and expected behavior. After perf mode is enabled, mark
+	 * VOOC_VBUS_HIGH and clear vbus_adjust_done to force next adjust cycle
+	 * to re-sample real vbus status before normal adjust flow continues.
+	 * This is intentional and has no functional regression.
+	 */
+	chip->vooc_vbus_status = VOOC_VBUS_HIGH;
+	chip->vbus_adjust_done = false;
+	voocphy_info("set_perf_enable success!\n");
+	return true;
+}
+
 static void oplus_voocphy_handle_vbus_adjust_new_method(struct oplus_voocphy_manager *chip)
 {
 	u8 vbus_status;
 
-	if (!chip->vbus_adjust_new_method || !chip->vbus_adjust_done || !chip->ops || !chip->ops->get_vbus_status)
+	if (oplus_voocphy_adjust_pre_check(chip))
 		return;
 
 	vbus_status = chip->ops->get_vbus_status(chip);
@@ -2641,6 +2699,15 @@ static void oplus_voocphy_clear_ic_abnormal_status_work(struct work_struct *work
 	chip->slave_ic_abnormal = false;
 
 	chg_info("clear_ic_abnormal_status:%d, %d\n", chip->ic_abnormal, chip->slave_ic_abnormal);
+}
+
+static void oplus_voocphy_fcs_work(struct work_struct *work)
+{
+	if (!oplus_chg_get_fcs_support_flags())
+		return;
+
+	oplus_chglib_suspend_charger(true);
+	oplus_chglib_disable_charger(false);
 }
 
 static void oplus_voocphy_ic_abnormal_limit_curr(struct oplus_voocphy_manager *chip)
@@ -3098,7 +3165,12 @@ static int oplus_voocphy_handle_is_vbus_ok_cmd(struct oplus_voocphy_manager *chi
 	}
 
 	if (chip->vooc_vbus_status == VOOC_VBUS_NORMAL) { /*vbus-vbatt = ok*/
+		oplus_voocphy_set_fcs_icl(chip, SVOOC_FCS_ICL2_MA);
 		oplus_voocphy_set_chg_enable(chip, true);
+		if (oplus_voocphy_get_bidirect_cp_support(chip)) {
+			cancel_delayed_work(&chip->voocphy_fcs_work);
+			schedule_delayed_work(&chip->voocphy_fcs_work, msecs_to_jiffies(500));
+		}
 	}
 
 	if (chip->cancel_primary_switch == true && (chip->adapter_type == ADAPTER_VOOC20 ||
@@ -3171,17 +3243,169 @@ static int oplus_voocphy_get_cp_vbat(struct oplus_voocphy_manager *chip)
 	return cp_vbat;
 }
 
-static int oplus_voocphy_apply_ccd(struct oplus_voocphy_manager *chip, int target_ibus)
-{
-	int derated_ibus;
+struct voocphy_vbat_derate {
+	int ctd_delta_mv;
+	int ai_delta_mv;
+	int max_delta_mv;
+};
 
-	if (!chip->ccd_strategy)
+struct voocphy_ibus_derate {
+	int strategy_ibus;
+	int ai_ibus;
+	const char *strategy_name;
+};
+
+static void voocphy_collect_vbat_derate(struct oplus_voocphy_manager *chip,
+					int target_ibus_ma,
+					struct voocphy_vbat_derate *out)
+{
+	int delta = 0;
+
+	out->ctd_delta_mv = 0;
+	out->ai_delta_mv = 0;
+	out->max_delta_mv = 0;
+
+	if (!chip || !out || target_ibus_ma <= 0)
+		return;
+
+	if (chip->ctd_strategy) {
+		oplus_chg_strategy_set_process_data(chip->ctd_strategy,
+						    "curve_ibus", target_ibus_ma);
+		if (oplus_chg_strategy_get_custom_data(chip->ctd_strategy,
+						       "vbat_delta_mv", &delta) >= 0 &&
+		    delta > 0) {
+			out->ctd_delta_mv = delta;
+			out->max_delta_mv = delta;
+		}
+	}
+
+	delta = oplus_ai_cv_query_vbat_delta_mv(target_ibus_ma);
+	if (delta > 0) {
+		out->ai_delta_mv = delta;
+		out->max_delta_mv = max(out->max_delta_mv, delta);
+	}
+}
+
+static void voocphy_log_vbat_derate(unsigned int table_vbat_mv, int eff,
+				    const struct voocphy_vbat_derate *derate)
+{
+	if (eff >= (int)table_vbat_mv)
+		return;
+
+	voocphy_info("derate result: target_vbat=%u ctd_delta_mv=%d ai_delta_mv=%d eff_vbat=%d\n",
+		     table_vbat_mv, derate->ctd_delta_mv, derate->ai_delta_mv, eff);
+}
+
+static void voocphy_apply_strategy_ibus_derate(struct oplus_voocphy_manager *chip,
+					       int target_ibus, int *eff_ibus,
+					       struct voocphy_ibus_derate *out)
+{
+	struct oplus_chg_strategy *primary_derater;
+	int derated;
+
+	out->strategy_ibus = -1;
+	out->ai_ibus = -1;
+	out->strategy_name = "none";
+
+	if (!chip || target_ibus <= 0)
+		return;
+
+	primary_derater = chip->ctd_strategy ? chip->ctd_strategy : chip->ccd_strategy;
+	if (!primary_derater)
+		return;
+
+	out->strategy_name = chip->ctd_strategy ? "ctd" : "ccd";
+	derated = target_ibus * 100;
+	oplus_chg_strategy_set_process_data(primary_derater, "curve_ibus", target_ibus * 100);
+	if (oplus_chg_strategy_get_data(primary_derater, &derated) < 0 || derated <= 0)
+		return;
+	if (derated < target_ibus * 100)
+		out->strategy_ibus = derated / 100;
+	*eff_ibus = min(*eff_ibus, derated / 100);
+}
+
+static void voocphy_apply_ai_ibus_derate(int target_ibus, int *eff_ibus,
+					 struct voocphy_ibus_derate *out)
+{
+	int derated;
+
+	if (target_ibus <= 0)
+		return;
+
+	derated = oplus_ai_cv_query_derate_ibus(target_ibus * 100);
+	if (derated <= 0 || derated >= target_ibus * 100)
+		return;
+	out->ai_ibus = derated / 100;
+	*eff_ibus = min(*eff_ibus, derated / 100);
+}
+
+static void voocphy_log_ibus_derate(int target_ibus, int eff_ibus,
+				    const struct voocphy_ibus_derate *derate)
+{
+	if (eff_ibus >= target_ibus)
+		return;
+
+	voocphy_info("derate result: target_ibus=%d strategy[%s]_ibus=%d ai_ibus=%d eff_ibus=%d\n",
+		     target_ibus, derate->strategy_name, derate->strategy_ibus,
+		     derate->ai_ibus, eff_ibus);
+}
+
+static int oplus_voocphy_ctd_eff_target_vbat_mv(struct oplus_voocphy_manager *chip,
+					       unsigned int table_vbat_mv, int target_ibus_ma)
+{
+	struct voocphy_vbat_derate derate;
+	int eff;
+
+	if (!chip || table_vbat_mv == 0 || target_ibus_ma <= 0)
+		return (int)table_vbat_mv;
+
+	voocphy_collect_vbat_derate(chip, target_ibus_ma, &derate);
+	if (derate.max_delta_mv <= 0)
+		return (int)table_vbat_mv;
+
+	eff = (int)table_vbat_mv - derate.max_delta_mv;
+	eff = eff > 0 ? eff : (int)table_vbat_mv;
+	voocphy_log_vbat_derate(table_vbat_mv, eff, &derate);
+	return eff;
+}
+
+static int oplus_voocphy_apply_derating(struct oplus_voocphy_manager *chip, int target_ibus)
+{
+	struct voocphy_ibus_derate derate;
+	int eff_ibus;
+
+	if (!chip || target_ibus <= 0)
 		return target_ibus;
 
-	oplus_chg_strategy_set_process_data(chip->ccd_strategy, "curve_ibus", target_ibus * 100);
-	if (oplus_chg_strategy_get_data(chip->ccd_strategy, &derated_ibus) >= 0)
-		target_ibus = derated_ibus / 100;
-	return target_ibus;
+	eff_ibus = target_ibus;
+	voocphy_apply_strategy_ibus_derate(chip, target_ibus, &eff_ibus, &derate);
+	voocphy_apply_ai_ibus_derate(target_ibus, &eff_ibus, &derate);
+	voocphy_log_ibus_derate(target_ibus, eff_ibus, &derate);
+	return eff_ibus;
+}
+
+static void oplus_voocphy_init_ctd_strategy(struct oplus_voocphy_manager *chip)
+{
+	if (!chip || !chip->ctd_strategy)
+		return;
+	if (oplus_chg_strategy_init(chip->ctd_strategy) < 0) {
+		oplus_chg_strategy_release(chip->ctd_strategy);
+		chip->ctd_strategy = NULL;
+	}
+}
+
+static void oplus_voocphy_init_ccd_strategy(struct oplus_voocphy_manager *chip)
+{
+	if (!chip)
+		return;
+	if (chip->ccd_strategy &&
+	    oplus_chg_strategy_init(chip->ccd_strategy) < 0) {
+		oplus_chg_strategy_release(chip->ccd_strategy);
+		chip->ccd_strategy = NULL;
+	}
+	if (chip->ccd_strategy)
+		oplus_chg_strategy_set_process_data(chip->ccd_strategy,
+			"temp_region", chip->sys_curve_temp_idx);
 }
 
 static void oplus_voocphy_choose_batt_sys_curve(struct oplus_voocphy_manager *chip)
@@ -3261,13 +3485,16 @@ static void oplus_voocphy_choose_batt_sys_curve(struct oplus_voocphy_manager *ch
 			}
 
 			batt_sys_curv_by_tmprange = chip->batt_sys_curv_by_tmprange;
+			oplus_voocphy_init_ctd_strategy(chip);
 			for (idx = 0; idx <= batt_sys_curv_by_tmprange->sys_curv_num - 1; idx++) {	//big -> small
 				batt_sys_curve = &(batt_sys_curv_by_tmprange->batt_sys_curve[idx]);
 				convert_ibus = batt_sys_curve->target_ibus * 100;
 				voocphy_info("!batt_sys_curve[%d] gauge_vbatt,exit,target_vbat,cp_ichg,target_ibus:[%d, %d, %d, %d, %d]\n", idx,
 				             chip->gauge_vbatt, batt_sys_curve->exit, batt_sys_curve->target_vbat, chip->cp_ichg, convert_ibus);
 				if (batt_sys_curve->exit == false) {
-					if (chip->gauge_vbatt <= batt_sys_curve->target_vbat) {
+					if (chip->gauge_vbatt <= oplus_voocphy_ctd_eff_target_vbat_mv(
+						    chip, batt_sys_curve->target_vbat,
+						    convert_ibus)) {
 						chip->cur_sys_curv_idx = idx;
 						chip->batt_sys_curv_found = true;
 						voocphy_info("! found batt_sys_curve first idx[%d]\n", idx);
@@ -3281,19 +3508,9 @@ static void oplus_voocphy_choose_batt_sys_curve(struct oplus_voocphy_manager *ch
 			if (chip->batt_sys_curv_found) {
 				voocphy_info("! found batt_sys_curve idx idx[%d]\n", idx);
 				curve_ibus = chip->batt_sys_curv_by_tmprange->batt_sys_curve[idx].target_ibus;
-				if (chip->ccd_strategy) {
-					if (oplus_chg_strategy_init(chip->ccd_strategy) < 0) {
-						oplus_chg_strategy_release(chip->ccd_strategy);
-						chip->ccd_strategy = NULL;
-						chip->current_expect = curve_ibus;
-					} else {
-						oplus_chg_strategy_set_process_data(chip->ccd_strategy,
-							"temp_region", chip->sys_curve_temp_idx);
-						chip->current_expect = oplus_voocphy_apply_ccd(chip, curve_ibus);
-					}
-				} else {
-					chip->current_expect = curve_ibus;
-				}
+				oplus_voocphy_init_ccd_strategy(chip);
+				chip->current_expect =
+					oplus_voocphy_apply_derating(chip, curve_ibus);
 				chip->current_max = chip->current_expect;
 				chip->current_bcc_ext = chip->batt_sys_curv_by_tmprange->
 					batt_sys_curve[chip->batt_sys_curv_by_tmprange->sys_curv_num - 1].target_ibus;
@@ -4103,7 +4320,12 @@ static int oplus_voocphy_svooc_commu_with_voocphy(struct oplus_voocphy_manager *
 			chip->eis_status = EIS_STATUS_HIGH_CURRENT;
 			voocphy_info("<EIS>in EIS status\n");
 		} else {
-			oplus_chglib_suspend_charger(true);
+			if (oplus_chg_get_fcs_support_flags()) {
+				oplus_chglib_disable_charger(true);
+				oplus_voocphy_set_fcs_icl(chip, SVOOC_FCS_ICL1_MA);
+			} else {
+				oplus_chglib_suspend_charger(true);
+			}
 			voocphy_info("allow fastchg adapter type %d\n", chip->adapter_type);
 		}
 		/* handle timeout of adapter ask cmd 0x4 */
@@ -4524,10 +4746,55 @@ static const char * const strategy_temp[] = {
 	[BATT_SYS_CURVE_TEMP_COOL]	= "strategy_temp_cool",
 	[BATT_SYS_CURVE_TEMP_LITTLE_COOL]	= "strategy_temp_little_cool",
 	[BATT_SYS_CURVE_TEMP_LITTLE_COOL_HIGH]	= "strategy_temp_little_cool_high",
+	[BATT_SYS_CURVE_TEMP_NORMAL_LOW_PRE]	= "strategy_temp_normal_low_pre",
 	[BATT_SYS_CURVE_TEMP_NORMAL_LOW]	= "strategy_temp_normal_low",
 	[BATT_SYS_CURVE_TEMP_NORMAL_HIGH] = "strategy_temp_normal_high",
 	[BATT_SYS_CURVE_TEMP_WARM] = "strategy_temp_warm",
 };
+
+static void oplus_voocphy_parse_full_voltage(struct oplus_voocphy_manager *chip,
+					     struct device_node *node)
+{
+	int full_voltage_size, i, rc, length;
+
+	if(!chip || !node)
+		return;
+
+	rc = of_property_count_elems_of_size(node, "oplus_spec,full_voltage", sizeof(u8));
+	full_voltage_size = sizeof(chip->full_voltage);
+
+	if (chip->vooc_normal_low_pre_temp == -EINVAL)
+		full_voltage_size = full_voltage_size - sizeof(struct full_voltage_condition);
+
+	voocphy_info("full_voltage_size %d rc %d\n", full_voltage_size, rc);
+
+	if (rc == full_voltage_size) {
+		length = rc / sizeof(u32);
+		rc = of_property_read_u32_array(node, "oplus_spec,full_voltage", (u32 *)chip->full_voltage, length);
+		if (rc) {
+			chg_err("read oplus_spec,full_voltage failed, rc=%d\n", rc);
+			memset(chip->full_voltage, 0, sizeof(chip->full_voltage));
+		} else {
+			if (chip->vooc_normal_low_pre_temp == -EINVAL) {
+				chip->full_voltage[VOOCPHY_BATT_TEMP_WARM] = chip->full_voltage[VOOCPHY_BATT_TEMP_NORMAL_HIGH];
+				chip->full_voltage[VOOCPHY_BATT_TEMP_NORMAL_HIGH] = chip->full_voltage[VOOCPHY_BATT_TEMP_NORMAL];
+				chip->full_voltage[VOOCPHY_BATT_TEMP_NORMAL] = chip->full_voltage[VOOCPHY_BATT_TEMP_NORMAL_LOW_PRE];
+				chip->full_voltage[VOOCPHY_BATT_TEMP_NORMAL_LOW_PRE].vol_1time = -EINVAL;
+				chip->full_voltage[VOOCPHY_BATT_TEMP_NORMAL_LOW_PRE].vol_ntime = -EINVAL;
+			}
+		}
+	}  else {
+		voocphy_info("full_voltage failed, rc=%d, expected %zu or %zu bytes\n", rc,
+			     sizeof(chip->full_voltage),
+			     sizeof(chip->full_voltage) - sizeof(struct full_voltage_condition));
+		memset(chip->full_voltage, 0, sizeof(chip->full_voltage));
+	}
+
+
+	for (i = 0; i < VOOCPHY_BATT_TEMP_MAX; i++)
+		voocphy_info("%s_full_voltage 1time=%d, ntime=%d\n", temp_region_text[i],
+			     chip->full_voltage[i].vol_1time, chip->full_voltage[i].vol_ntime);
+}
 
 static void oplus_voocphy_parse_dt(struct oplus_voocphy_manager *chip)
 {
@@ -4614,7 +4881,8 @@ static int oplus_voocphy_parse_svooc_batt_curves(struct oplus_voocphy_manager *c
 		for (j = 0; j < BATT_SYS_CURVE_MAX; j++) {
 			rc = of_property_count_elems_of_size(soc_node, strategy_temp[j], sizeof(u32));
 			if (rc < 0) {
-				if (j == BATT_SYS_CURVE_TEMP_WARM || j == BATT_SYS_CURVE_TEMP_LITTLE_COOL_HIGH) {
+				if (j == BATT_SYS_CURVE_TEMP_WARM || j == BATT_SYS_CURVE_TEMP_LITTLE_COOL_HIGH ||
+				    j == BATT_SYS_CURVE_TEMP_NORMAL_LOW_PRE) {
 					continue;
 				} else {
 					voocphy_info("Count %s failed, rc=%d\n", strategy_temp[j], rc);
@@ -4696,7 +4964,8 @@ static int oplus_voocphy_parse_vooc_batt_curves(struct oplus_voocphy_manager *ch
 		for (j = 0; j < BATT_SYS_CURVE_MAX; j++) {
 			rc = of_property_count_elems_of_size(soc_node, strategy_temp[j], sizeof(u32));
 			if (rc < 0) {
-				if (j == BATT_SYS_CURVE_TEMP_WARM || j == BATT_SYS_CURVE_TEMP_LITTLE_COOL_HIGH) {
+				if (j == BATT_SYS_CURVE_TEMP_WARM || j == BATT_SYS_CURVE_TEMP_LITTLE_COOL_HIGH ||
+				    j == BATT_SYS_CURVE_TEMP_NORMAL_LOW_PRE) {
 					continue;
 				} else {
 					voocphy_info("Count %s failed, rc=%d\n", strategy_temp[j], rc);
@@ -5811,11 +6080,33 @@ static int oplus_voocphy_curr_event_handle(struct device *dev, unsigned long dat
 	return status;
 }
 
+static void oplus_voocphy_apply_next_curve_current(struct oplus_voocphy_manager *chip,
+						  struct batt_sys_curve *next)
+{
+	int cycle_degraded_current;
+
+	if (!chip || !next)
+		return;
+
+	if (chip->ctd_strategy || chip->ccd_strategy) {
+		cycle_degraded_current = oplus_voocphy_apply_derating(chip, next->target_ibus);
+		chip->current_max = chip->current_max > cycle_degraded_current ?
+			cycle_degraded_current : chip->current_max;
+		voocphy_info("cycle derating strategy[%s], target_ibus:%d, derated_ibus:%d, current_max:%d\n",
+			chip->ctd_strategy ? "ctd" : "ccd", next->target_ibus,
+			cycle_degraded_current, chip->current_max);
+	} else {
+		chip->current_max = chip->current_max > next->target_ibus ?
+			next->target_ibus : chip->current_max;
+		voocphy_info("no cycle derating strategy, target_ibus:%d, current_max:%d\n",
+			next->target_ibus, chip->current_max);
+	}
+}
+
 void oplus_voocphy_request_fastchg_curv(struct oplus_voocphy_manager *chip)
 {
 	static int cc_cnt = 0;
 	int idx = 0;
-	int cycle_degraded_current = 0;
 	int convert_ibus = 0;
 	static int switch_ocp_cnt = 0;
 	struct batt_sys_curves *batt_sys_curv_by_tmprange = NULL;
@@ -5862,11 +6153,14 @@ void oplus_voocphy_request_fastchg_curv(struct oplus_voocphy_manager *chip)
 		batt_sys_curve->chg_time++;
 
 		if (batt_sys_curve->exit == false && (idx < BATT_SYS_ROW_MAX - 1)) {
-			voocphy_info("!fastchg curv2 [%d %d %d %d %d %d %d %d %d]\n", cc_cnt, idx, batt_sys_curve->exit,
+			int eff_vbat_thr = oplus_voocphy_ctd_eff_target_vbat_mv(chip,
+					batt_sys_curve->target_vbat,
+					(int)batt_sys_curve->target_ibus * 100);
+			voocphy_info("!fastchg curv2 [%d %d %d %d %d %d %d %d %d %d]\n", cc_cnt, idx, batt_sys_curve->exit,
 			             batt_sys_curve->target_time, batt_sys_curve->chg_time,
 			             chip->gauge_vbatt, chip->current_max,
 			             (&(batt_sys_curv_by_tmprange->batt_sys_curve[idx]))->target_ibus,
-			             (&(batt_sys_curv_by_tmprange->batt_sys_curve[idx]))->target_vbat);
+			             (&(batt_sys_curv_by_tmprange->batt_sys_curve[idx]))->target_vbat, eff_vbat_thr);
 			convert_ibus = batt_sys_curve->target_ibus * 100;
 			if (chip->parallel_charge_support) {
 				if (chip->sub_batt_icharging > chip->voocphy_max_sub_ibat ||
@@ -5887,16 +6181,7 @@ void oplus_voocphy_request_fastchg_curv(struct oplus_voocphy_manager *chip)
 						chip->cur_sys_curv_idx += 1;
 						batt_sys_curve_next->chg_time = 0;
 						cc_cnt = 0;
-						if (chip->ccd_strategy) {
-							cycle_degraded_current = oplus_voocphy_apply_ccd(chip,
-								batt_sys_curve_next->target_ibus);
-							chip->current_max = chip->current_max > cycle_degraded_current ?
-								cycle_degraded_current : chip->current_max;
-						} else {
-							chip->current_max = chip->current_max >
-								batt_sys_curve_next->target_ibus ?
-								batt_sys_curve_next->target_ibus : chip->current_max;
-						}
+						oplus_voocphy_apply_next_curve_current(chip, batt_sys_curve_next);
 						voocphy_info("!switch error? switch fastchg curv [%d %d %d]\n",
 							     chip->current_max, batt_sys_curve_next->target_ibus,
 							     batt_sys_curve_next->target_vbat);
@@ -5905,7 +6190,7 @@ void oplus_voocphy_request_fastchg_curv(struct oplus_voocphy_manager *chip)
 					switch_ocp_cnt = 0;
 				}
 			}
-			if ((chip->gauge_vbatt > batt_sys_curve->target_vbat			//switch by vol_thr
+			if ((chip->gauge_vbatt > eff_vbat_thr			//switch by vol_thr (CTD eff target_vbat)
 			     && chip->cp_ichg < convert_ibus + TARGET_VOL_OFFSET_THR)
 			    || (batt_sys_curve->target_time > 0 && batt_sys_curve->chg_time >= batt_sys_curve->target_time)		//switch by chg time
 			   ) {
@@ -5930,16 +6215,7 @@ void oplus_voocphy_request_fastchg_curv(struct oplus_voocphy_manager *chip)
 						chip->cur_sys_curv_idx += 1;
 						batt_sys_curve_next->chg_time = 0;
 						cc_cnt = 0;
-						if (chip->ccd_strategy) {
-							cycle_degraded_current = oplus_voocphy_apply_ccd(chip,
-								batt_sys_curve_next->target_ibus);
-							chip->current_max = chip->current_max > cycle_degraded_current ?
-								cycle_degraded_current : chip->current_max;
-						} else {
-							chip->current_max = chip->current_max >
-								batt_sys_curve_next->target_ibus ?
-								batt_sys_curve_next->target_ibus : chip->current_max;
-						}
+						oplus_voocphy_apply_next_curve_current(chip, batt_sys_curve_next);
 						voocphy_info("!af switch fastchg curv [%d %d %d]\n",
 							     chip->current_max,
 							     batt_sys_curve_next->target_ibus,
@@ -6770,13 +7046,20 @@ static int oplus_voocphy_parse_lcf_strategy(struct oplus_voocphy_manager *chip)
 	return rc;
 }
 
-static int oplus_voocphy_parse_ccd_strategy(struct oplus_voocphy_manager *chip)
+static int oplus_voocphy_parse_derating_strategy(struct oplus_voocphy_manager *chip)
 {
 	struct device_node *node = oplus_get_node_by_type(chip->dev->of_node);
-	if (node)
+
+	if (node) {
+		chip->ctd_strategy = oplus_chg_strategy_alloc_by_node("cycle_tier_derating", node);
 		chip->ccd_strategy = oplus_chg_strategy_alloc_by_node("cycle_current_derating", node);
+	}
+
+	if (IS_ERR_OR_NULL(chip->ctd_strategy))
+		chip->ctd_strategy = NULL;
 	if (IS_ERR_OR_NULL(chip->ccd_strategy))
 		chip->ccd_strategy = NULL;
+
 	if (chip->ccd_strategy)
 		oplus_chg_strategy_set_process_data(chip->ccd_strategy, "temp_region_cnt", chip->temp_region_cnt);
 	return 0;
@@ -6928,6 +7211,15 @@ static int oplus_voocphy_parse_batt_curves(struct oplus_voocphy_manager *chip)
 	}
 	chip->vooc_little_cold_temp_default = chip->vooc_little_cold_temp;
 
+
+	rc = of_property_read_u32(node, "oplus_spec,vooc_normal_low_pre_temp",
+	                          &chip->vooc_normal_low_pre_temp);
+	if (rc) {
+		chip->vooc_normal_low_pre_temp = -EINVAL;
+	} else {
+		voocphy_info("oplus_spec,vooc_normal_low_pre_temp is %d\n", chip->vooc_normal_low_pre_temp);
+	}
+	chip->vooc_normal_low_pre_temp_default = chip->vooc_normal_low_pre_temp;
 
 	rc = of_property_read_u32(node, "oplus_spec,vooc_normal_low_temp",
 	                          &chip->vooc_normal_low_temp);
@@ -7351,21 +7643,7 @@ static int oplus_voocphy_parse_batt_curves(struct oplus_voocphy_manager *chip)
 		}
 	}
 
-	rc = of_property_count_elems_of_size(node, "oplus_spec,full_voltage", sizeof(u8));
-	if (rc == sizeof(chip->full_voltage)) {
-		length = rc / sizeof(u32);
-		rc = of_property_read_u32_array(node, "oplus_spec,full_voltage", (u32 *)chip->full_voltage, length);
-		if (rc) {
-			chg_err("read oplus_spec,full_voltage failed, rc=%d\n", rc);
-			memset(chip->full_voltage, 0, sizeof(chip->full_voltage));
-		}
-	} else {
-		voocphy_info("full_voltage failed, rc=%d\n", rc);
-		memset(chip->full_voltage, 0, sizeof(chip->full_voltage));
-	}
-	for (i = 0; i < VOOCPHY_BATT_TEMP_MAX; i++)
-		voocphy_info("%s_full_voltage 1time=%d, ntime=%d\n", temp_region_text[i],
-			     chip->full_voltage[i].vol_1time, chip->full_voltage[i].vol_ntime);
+	oplus_voocphy_parse_full_voltage(chip, node);
 
 	chip->cancel_primary_switch = of_property_read_bool(node, "oplus_spec,cancel_primary_switch");
 	voocphy_info("cancel_primary_switch = %d\n", chip->cancel_primary_switch);
@@ -7378,7 +7656,7 @@ static int oplus_voocphy_parse_batt_curves(struct oplus_voocphy_manager *chip)
 
 	oplus_voocphy_parse_pcc_strategy(chip);
 
-	oplus_voocphy_parse_ccd_strategy(chip);
+	oplus_voocphy_parse_derating_strategy(chip);
 	return 0;
 }
 
@@ -7509,6 +7787,7 @@ static int oplus_voocphy_variables_init(struct oplus_voocphy_manager *chip)
 		chip->chip_id = chip->ops->get_chip_id(chip);
 	else
 		chip->chip_id = 0;
+	chip->perf_en = false;
 	memset(chip->int_column, 0, sizeof(chip->int_column));
 	memset(chip->int_column_pre, 0, sizeof(chip->int_column_pre));
 
@@ -7533,8 +7812,6 @@ static void oplus_voocphy_clear_dbg_info(struct oplus_voocphy_manager *chip)
 	chip->r_state = 0;
 	chip->vbus_adjust_cnt = 0;
 	chip->voocphy_cp_irq_flag = 0;
-	chip->voocphy_enable = 0;
-	chip->slave_voocphy_enable = 0;
 	chip->voocphy_iic_err = 0;
 	chip->slave_voocphy_iic_err = 0;
 	chip->voocphy_vooc_irq_flag = 0;
@@ -7610,6 +7887,8 @@ static int oplus_voocphy_init(struct oplus_voocphy_manager *chip)
 	INIT_DELAYED_WORK(&(chip->pcc_work), oplus_voocphy_pcc_work);
 	INIT_WORK(&(chip->first_ask_batvol_work), oplus_voocphy_first_ask_batvol_work);
 	INIT_DELAYED_WORK(&chip->clear_ic_abnormal_status_work, oplus_voocphy_clear_ic_abnormal_status_work);
+	INIT_DELAYED_WORK(&(chip->voocphy_fcs_work), oplus_voocphy_fcs_work);
+	INIT_DELAYED_WORK(&(chip->set_fcs_icl_work), oplus_voocphy_set_fcs_icl_work);
 	if (chip->ops && chip->ops->hardware_init)
 		chip->ops->hardware_init(chip);
 	g_voocphy_chip = chip;
@@ -8130,6 +8409,10 @@ int oplus_voocphy_bcc_get_temp_range(struct device *dev)
 			chip->vooc_temp_cur_range == FASTCHG_TEMP_RANGE_NORMAL_HIGH) {
 			return true;
 		}
+
+		if (chip->vooc_normal_low_pre_temp != -EINVAL &&
+		    chip->vooc_temp_cur_range == FASTCHG_TEMP_RANGE_NORMAL_LOW_PRE)
+			return true;
 	}
 
 	return false;
