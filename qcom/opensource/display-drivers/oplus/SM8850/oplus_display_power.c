@@ -16,7 +16,9 @@
 #include "oplus_adfr.h"
 #include "oplus_display_pwm.h"
 #include "oplus_bl_ic_ktz8868.h"
+#include "oplus_bl_ic_ktz8869.h"
 #include "oplus_display_dfte.h"
+#include "oplus_display_interface.h"
 
 #ifdef OPLUS_FEATURE_TP_BASIC
 #include "oplus_display_notify_tp.h"
@@ -27,6 +29,9 @@
 PANEL_VOLTAGE_BAK panel_vol_bak[PANEL_VOLTAGE_ID_MAX] = {{0}, {0}, {2, 0, 1, 2, ""}};
 u32 panel_pwr_vg_base = 0;
 struct notifier_block psy_nb = {0};
+extern bool is_pd_with_guesture;
+extern int panel_esd_check_failed;
+
 
 int oplus_panel_parse_power_config(struct dsi_panel *panel)
 {
@@ -1287,10 +1292,12 @@ int oplus_panel_power_on(struct dsi_panel *panel)
 			}
 			panel->power_info.refcount++;
 
-			if(panel->oplus_panel.bl_ic_ktz8868_used) {
-				rc = oplus_bl_ic_ktz8868_power_on(panel);
+			if(panel->oplus_panel.bl_ic_ktz8868_used || panel->oplus_panel.bl_ic_ktz8869_used) {
+				rc = panel->oplus_panel.bl_ic_ktz8868_used ?
+					oplus_bl_ic_ktz8868_power_on(panel) :
+					oplus_bl_ic_ktz8869_power_on(panel);
 				if (rc) {
-					OPLUS_DSI_ERR("[%s] failed to set ktz8868 on!, rc=%d\n", panel->name, rc);
+					OPLUS_DSI_ERR("[%s] failed to enable backlight IC!, rc=%d\n", panel->name, rc);
 					goto error_disable_pinctrl;
 				}
 			}
@@ -1306,10 +1313,12 @@ int oplus_panel_power_on(struct dsi_panel *panel)
 	}
 	panel->power_info.refcount++;
 
-	if(panel->oplus_panel.bl_ic_ktz8868_used) {
-		rc = oplus_bl_ic_ktz8868_power_on(panel);
+	if(panel->oplus_panel.bl_ic_ktz8868_used || panel->oplus_panel.bl_ic_ktz8869_used) {
+		rc = panel->oplus_panel.bl_ic_ktz8868_used ?
+			oplus_bl_ic_ktz8868_power_on(panel) :
+			oplus_bl_ic_ktz8869_power_on(panel);
 		if (rc) {
-			OPLUS_DSI_ERR("[%s] failed to set ktz8868 on!, rc=%d\n", panel->name, rc);
+			OPLUS_DSI_ERR("[%s] failed to enable backlight IC!, rc=%d\n", panel->name, rc);
 			goto error_disable_pinctrl;
 		}
 	}
@@ -1512,6 +1521,86 @@ void oplus_panel_register_supply_notifier(void)
 
 	return;
 }
+
+int oplus_bl_ic_ktz8869_power_on(struct dsi_panel *panel)
+{
+	int rc = 0;
+
+	if (oplus_pcb_before_evt()) {
+		/* add for ktz8866 poweron */
+		rc = bl_ic_ktz8869_hw_en(true);
+		if (rc) {
+			DSI_ERR("[%s] failed to bl_ic_ktz8866_hw_en, rc=%d\n",
+				panel->name, rc);
+			return rc;
+		}
+
+		rc = bl_ic_ktz8869_set_lcd_bias_by_gpio(true);
+		if (rc) {
+			DSI_ERR("[%s] failed to lcd_set_bias, rc=%d\n",
+				panel->name, rc);
+			return rc;
+		}
+	} else {
+		//Boards at and after evt use registers to control bias
+		rc = bl_ic_ktz8869_set_lcd_bias_by_reg(true);
+	}
+	usleep_range(10*1000, (10*1000)+100);
+	return rc;
+}
+
+void oplus_bl_ic_ktz8869_power_off(struct dsi_panel *panel)
+{
+	int rc = 0;
+
+	if (oplus_pcb_before_evt()) {
+		rc = bl_ic_ktz8869_set_lcd_bias_by_gpio(false);
+		if (rc) {
+			DSI_ERR("[%s] failed to lcd_set_bias, rc=%d\n",
+				panel->name, rc);
+		}
+
+		/* add for ktz8866 poweroff */
+		rc = bl_ic_ktz8869_hw_en(false);
+		if (rc) {
+			DSI_ERR("[%s] failed to bl_ic_ktz8866_hw_en, rc=%d\n",
+				panel->name, rc);
+		}
+	} else {
+		//Boards at and after evt use registers to control bias
+		bl_ic_ktz8869_set_lcd_bias_by_reg(false);
+	}
+}
+
+void oplus_reset_custom(struct dsi_panel *panel, struct dsi_panel_reset_config *r_config)
+{
+	int i = 0;
+
+	if (!panel || !r_config) {
+		OPLUS_DSI_ERR("panel or r_config is NULL!\n");
+		return;
+	}
+
+	if (is_pd_with_guesture && !panel_esd_check_failed) {
+		OPLUS_DSI_INFO("oplus panel need custom reset pull low twice!\n");
+	} else {
+		return;
+	}
+
+	if (panel->oplus_panel.custom_reset && r_config->count >= 3) {
+		OPLUS_DSI_INFO("oplus panel custom reset pull low twice!\n");
+		for (i = 1; i < r_config->count; i++) {
+			gpio_set_value(r_config->reset_gpio,
+				r_config->sequence[i].level);
+			if (r_config->sequence[i].sleep_ms)
+				usleep_range(r_config->sequence[i].sleep_ms * 1000,
+					(r_config->sequence[i].sleep_ms * 1000) + 100);
+		}
+	}
+
+	return;
+}
+
 
 int oplus_bl_ic_ktz8868_power_on(struct dsi_panel *panel)
 {

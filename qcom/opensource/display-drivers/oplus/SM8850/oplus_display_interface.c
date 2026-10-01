@@ -58,11 +58,21 @@ extern bool g_gamma_regs_read_done;
 extern bool g_gamma_inverse;
 
 static DEFINE_SPINLOCK(g_bk_lock);
+unsigned int panel_pcb = NO_OVERRIDE;
 
 struct oplus_display_ops oplus_display_ops = {};
 #ifdef OPLUS_FEATURE_TP_BASIC
 struct oplus_display_notify_tp_ops oplus_display_notify_tp_ops = {};
 #endif /* OPLUS_FEATURE_TP_BASIC */
+
+bool oplus_pcb_before_evt(void)
+{
+	// OPLUS_EVT1 = 24
+	if (panel_pcb < 24) {
+		return true;
+	}
+	return false;
+}
 
 void oplus_display_set_backlight_pre(struct dsi_display *display, int *bl_lvl, int brightness)
 {
@@ -153,6 +163,8 @@ void oplus_panel_set_backlight_pre(struct dsi_display *display, int *bl_lvl)
 
 	if(panel->oplus_panel.bl_ic_ktz8868_used) {
 		oplus_printf_backlight_8868_log(display, *bl_lvl);
+	} else if(panel->oplus_panel.bl_ic_ktz8869_used) {
+		oplus_printf_backlight_8869_log(display, *bl_lvl);
 	} else {
 		oplus_printf_backlight_log(display, *bl_lvl);
 	}
@@ -235,7 +247,7 @@ int oplus_panel_enable_pre(struct dsi_panel *panel)
 
 	OPLUS_DSI_INFO("oplus_panel_enable\n");
 	if ((panel->oplus_panel.gamma_compensation_support || panel->oplus_panel.gamma_ae174_compensation_support)
-			 && g_gamma_regs_read_done && g_gamma_inverse) {
+		 && g_gamma_regs_read_done && g_gamma_inverse) {
 		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_GAMMA_COMPENSATION, false);
 		if (rc) {
 			OPLUS_DSI_ERR("send DSI_CMD_GAMMA_COMPENSATION failed\n");
@@ -449,6 +461,17 @@ int oplus_display_parse_cmdline_topology(struct dsi_display *display,
 	OPLUS_DSI_INFO("Parse cmdline display%d PanelSN-0x%016lX\n",
 			display_type,
 			panel_sn);
+
+	str = strnstr(boot_str, ":PcbVersion-0x", strlen(boot_str));
+
+	if (str) {
+		if (sscanf(str, ":PcbVersion-0x%X", &panel_pcb) != 1) {
+			OPLUS_DSI_ERR("invalid PanelPcb override: %s\n",
+					boot_str);
+			return -1;
+		}
+	}
+	OPLUS_DSI_INFO("Parse cmdline Panel_pcb = 0x%X\n", panel_pcb);
 
 	return 0;
 }

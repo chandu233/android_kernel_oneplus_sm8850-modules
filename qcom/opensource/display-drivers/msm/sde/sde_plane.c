@@ -764,6 +764,9 @@ int sde_plane_wait_input_fence(struct drm_plane *plane, uint32_t wait_ms, int *e
 				EXCEPTION_TRACKPOINT_REPORT("DisplayDriverID@@%d$$fence timeout, wait_ms=%d\n",
 								OPLUS_DISP_Q_ERROR_FENCE_TIMEOUT, wait_ms);
 #endif
+// #ifdef OPLUS_ARCH_EXTENDS
+				sde_trace_kgsl_fence_timeout(input_fence);
+// #endif /*OPLUS_ARCH_EXTENDS*/
 				break;
 			case -ERESTARTSYS:
 				SDE_ERROR_PLANE(psde,
@@ -6207,4 +6210,3 @@ bool sde_plane_property_is_dirty(struct drm_plane_state *plane_state,
 	return msm_property_is_dirty(&psde->property_info,
 			&pstate->property_state, property_idx);
 }
-

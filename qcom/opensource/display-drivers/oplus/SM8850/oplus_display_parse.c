@@ -25,10 +25,8 @@
 extern int dynamic_osc_clock;
 bool oplus_enhance_mipi_strength = false;
 bool apollo_backlight_enable = false;
-#ifdef OPLUS_FEATURE_AP_UIR_DIMMING
-extern bool apuir_sdc_band;
-#endif
-
+bool ktz8868_use = false;
+bool ktz8869_use = false;
 
 static int oplus_panel_parse_common_config(struct dsi_panel *panel)
 {
@@ -343,15 +341,30 @@ int oplus_panel_parse_features_config(struct dsi_panel *panel)
 		"oplus,bl-use-ktz8868-ic-ctrl");
 	OPLUS_DSI_INFO("oplus,bl-use-ktz8868-ic-ctrl: %s\n",
 		panel->oplus_panel.bl_ic_ktz8868_used ? "true" : "false");
+	ktz8868_use = panel->oplus_panel.bl_ic_ktz8868_used;
+	panel->oplus_panel.bl_ic_ktz8869_used = utils->read_bool(utils->data,
+		"oplus,bl-use-ktz8869-ic-ctrl");
+	OPLUS_DSI_INFO("oplus,bl-use-ktz8869-ic-ctrl: %s\n",
+		panel->oplus_panel.bl_ic_ktz8869_used ? "true" : "false");
+	ktz8869_use = panel->oplus_panel.bl_ic_ktz8869_used;
 
 	panel->oplus_panel.white_point_compensation_enabled = utils->read_bool(utils->data,
 			"oplus,dsi-white-point-compensation-enabled");
 	OPLUS_DSI_INFO("oplus,dsi-white-point-compensation-enabled: %s\n", panel->oplus_panel.white_point_compensation_enabled ? "true" : "false");
 
+	panel->oplus_panel.custom_reset = utils->read_bool(utils->data,
+		"oplus,reset_custom");
+	OPLUS_DSI_INFO("oplus,reset_custom: %s\n",
+		panel->oplus_panel.custom_reset ? "true" : "false");
+
 	panel->oplus_panel.interval_time_fps_to_esd_flag = utils->read_bool(utils->data,
 			"oplus,interval-time-switch-fps-to-esd");
 	OPLUS_DSI_INFO("oplus,interval-time-switch-fps-to-esd: %s\n",
 			panel->oplus_panel.interval_time_fps_to_esd_flag ? "true" : "false");
+
+	panel->oplus_panel.timing_switch_compatible = utils->read_bool(utils->data,
+			"oplus,timing_switch_compatible");
+	OPLUS_DSI_INFO("oplus,timing_switch_compatible: %s\n", panel->oplus_panel.timing_switch_compatible ? "true" : "false");
 
 	return 0;
 }
@@ -417,90 +430,266 @@ void oplus_panel_parse_apuir_ds_list(struct dsi_panel *panel) {
 	struct dsi_parser_utils *utils = &panel->utils;
 	char payload[128] = "";
 	u32 cnt = 0;
-	int up800nit_ds_count = 0;
-	u32 *up800nit_ds_list = NULL;
-	int less800nit_ds_count = 0;
-	u32 *less800nit_ds_list = NULL;
+	int upnit_ds_count = 0;
+	u32 *upnit_ds_list = NULL;
+	int lessnit_ds_count = 0;
+	u32 *lessnit_ds_list = NULL;
+	u32 ic_type = 0;
+	int upnit_index_count = 0;
+	u32 *upnit_index_list = NULL;
+	int lessnit_index_count = 0;
+	u32 *lessnit_index_list = NULL;
+	int modeset_count = 0;
+	u32 *modeset_list = NULL;
+	int apl_lhset_count = 0;
+	u32 *apl_lhset_list = NULL;
+	int girseedtype = 0;
 
-	apuir_sdc_band = of_property_read_bool(utils->data,
-		"oplus,apuir-sdc-band");
-	OPLUS_DSI_INFO("oplus,apuir-sdc-band: %s\n",
-		apuir_sdc_band ? "true" : "false");
+	/* get ic type */
+	rc = utils->read_u32(utils->data, "oplus,apuir-ic-type", &ic_type);
+	if (rc) {
+		OPLUS_DSI_INFO("apuir oplus,apuir-ic-type not specified, defaulting to 0 (disabled)\n");
+		ic_type = 0;
+	} else {
+		OPLUS_DSI_INFO("apuir ic_type: %u (1=ILI, 2=NVT)\n", ic_type);
+	}
+	oplus_set_apuir_ictype(ic_type);
 
+	if (of_property_read_bool(utils->data, "oplus,apuir-sdc-band")){
+		oplus_set_apuir_sdc_band(true);
+		OPLUS_DSI_INFO("apuir sdc panel\n");
+	} else {
+		oplus_set_apuir_sdc_band(false);
+		OPLUS_DSI_INFO("apuir nvt panel\n");
+	}
 
-	/* get up800nit_ds_list */
-	up800nit_ds_count = utils->count_u32_elems(utils->data,
-		"oplus,apuir-up800nit-ds-list");
-	if (up800nit_ds_count < 1) {
-		OPLUS_DSI_INFO("aapuir puir-up800nit-ds-list is NULL! oplus_apuir_setenable 0\n");
-		up800nit_ds_count = 0;
+	if (of_property_read_bool(utils->data, "oplus,apuir-gamma-icds")){
+		oplus_set_apuir_gamma_icds(true);
+		OPLUS_DSI_INFO("apuir ic the relationship between ds and ratio is gamma-based, not linear.\n");
+	} else {
+		oplus_set_apuir_gamma_icds(false);
+		OPLUS_DSI_INFO("apuir ic the relationship between ds and ratio is linear, not gamma-based.\n");
+	}
+
+	if (utils->read_u32(utils->data, "oplus,apuir-gir-seedtype", &girseedtype)){
+		oplus_set_apuir_gir_seedtype(0);
+		OPLUS_DSI_INFO("apuir set default gir_seedtype %d\n", girseedtype);
+	} else {
+		oplus_set_apuir_gir_seedtype(girseedtype);
+		OPLUS_DSI_INFO("apuir set gir_seedtype %d\n", girseedtype);
+	}
+
+	/* check if use uir loading params */
+	if (of_property_read_bool(utils->data, "oplus,apuir-param-from-uirloading")) {
+		oplus_set_apuir_param_from_uirloading(true);
+		OPLUS_DSI_INFO("apuir using param from uir loading\n");
+	} else {
+		oplus_set_apuir_param_from_uirloading(false);
+		OPLUS_DSI_INFO("apuir using standard loading param\n");
+	}
+
+	/* get upnit_ds_list */
+	upnit_ds_count = utils->count_u32_elems(utils->data,
+		"oplus,apuir-upnit-ds-list");
+
+	/* Backward compatibility: try old property name if new one not found */
+	if (upnit_ds_count < 1) {
+		upnit_ds_count = utils->count_u32_elems(utils->data,
+			"oplus,apuir-up800nit-ds-list");
+		if (upnit_ds_count > 0) {
+			OPLUS_DSI_INFO("apuir using legacy property name: oplus,apuir-up800nit-ds-list\n");
+		}
+	}
+
+	if (upnit_ds_count < 1) {
+		OPLUS_DSI_INFO("apuir upnit-ds-list is NULL! oplus_apuir_setenable 0\n");
+		upnit_ds_count = 0;
 		oplus_apuir_setenable(0);
-		return;
+		goto cleanup;
 	} else {
 		oplus_apuir_setenable(1);
+		if (ic_type == 0) {
+			ic_type = 2;
+		}
+		oplus_set_apuir_ictype(ic_type);
 	}
 
-	up800nit_ds_list = kcalloc(up800nit_ds_count,
+	upnit_ds_list = kcalloc(upnit_ds_count,
 			sizeof(u32), GFP_KERNEL);
-	if (!up800nit_ds_list) {
-		kfree(up800nit_ds_list);
-		OPLUS_DSI_ERR("apuir oplus,apuir-less800nit-ds-list alloc failed!\n");
-		return;
+	if (!upnit_ds_list) {
+		OPLUS_DSI_ERR("apuir oplus,apuir-upnit-ds-list alloc failed!\n");
+		goto cleanup;
 	}
 
+	/* Try new property name first, then fall back to old one */
 	rc = utils->read_u32_array(utils->data,
-		"oplus,apuir-up800nit-ds-list",
-		up800nit_ds_list,
-		up800nit_ds_count);
+		"oplus,apuir-upnit-ds-list",
+		upnit_ds_list,
+		upnit_ds_count);
 
 	if (rc) {
-		kfree(up800nit_ds_list);
-		OPLUS_DSI_ERR("apuir up800nit_ds_list parse failed!\n");
-		return;
+		rc = utils->read_u32_array(utils->data,
+			"oplus,apuir-up800nit-ds-list",
+			upnit_ds_list,
+			upnit_ds_count);
 	}
-	oplus_apuir_set_up800nit_ds_list(up800nit_ds_count, up800nit_ds_list);
+
+	if (rc) {
+		OPLUS_DSI_ERR("apuir upnit_ds_list parse failed!\n");
+		goto cleanup;
+	}
+	oplus_apuir_set_upnit_ds_list(upnit_ds_count, upnit_ds_list);
 
 	cnt = 0;
-	for (int i = 0; i < up800nit_ds_count; i++) {
-		cnt += scnprintf(payload + cnt, sizeof(payload) - cnt, "[%u]", up800nit_ds_list[i]);
+	for (int i = 0; i < upnit_ds_count; i++) {
+		cnt += scnprintf(payload + cnt, sizeof(payload) - cnt, "[%u]", upnit_ds_list[i]);
 	}
-	OPLUS_DSI_INFO("apuir up800nit_ds_list count: %d, mode_list: %s\n", up800nit_ds_count, payload);
+	OPLUS_DSI_INFO("apuir upnit_ds_list count: %d, mode_list: %s\n", upnit_ds_count, payload);
 
-	/* get less800nit_ds_list */
-	less800nit_ds_count = utils->count_u32_elems(utils->data,
-		"oplus,apuir-less800nit-ds-list");
-	if (less800nit_ds_count < 1) {
-		OPLUS_DSI_INFO("apuir oplus,apuir-less800nit-ds-list is NULL!\n");
-		less800nit_ds_count = 0;
-		return;
+	/* get lessnit_ds_list */
+	lessnit_ds_count = utils->count_u32_elems(utils->data,
+		"oplus,apuir-lessnit-ds-list");
+
+	/* Backward compatibility: try old property name if new one not found */
+	if (lessnit_ds_count < 1) {
+		lessnit_ds_count = utils->count_u32_elems(utils->data,
+			"oplus,apuir-less800nit-ds-list");
+		if (lessnit_ds_count > 0) {
+			OPLUS_DSI_INFO("apuir using legacy property name: oplus,apuir-less800nit-ds-list\n");
+		}
 	}
 
-	less800nit_ds_list = kcalloc(less800nit_ds_count,
+	if (lessnit_ds_count < 1) {
+		OPLUS_DSI_INFO("apuir oplus,apuir-lessnit-ds-list is NULL!\n");
+		lessnit_ds_count = 0;
+		goto cleanup;
+	}
+
+	lessnit_ds_list = kcalloc(lessnit_ds_count,
 			sizeof(u32), GFP_KERNEL);
-	if (!less800nit_ds_list) {
-		kfree(less800nit_ds_list);
-		OPLUS_DSI_ERR("apuir oplus,apuir-less800nit-ds-list alloc failed!\n");
-		return;
+	if (!lessnit_ds_list) {
+		OPLUS_DSI_ERR("apuir oplus,apuir-lessnit-ds-list alloc failed!\n");
+		goto cleanup;
 	}
 
+	/* Try new property name first, then fall back to old one */
 	rc = utils->read_u32_array(utils->data,
+			"oplus,apuir-lessnit-ds-list",
+			lessnit_ds_list,
+			lessnit_ds_count);
+
+	if (rc) {
+		rc = utils->read_u32_array(utils->data,
 			"oplus,apuir-less800nit-ds-list",
-			less800nit_ds_list,
-			less800nit_ds_count);
+			lessnit_ds_list,
+			lessnit_ds_count);
+	}
 
 	if (rc) {
-		kfree(less800nit_ds_list);
-		OPLUS_DSI_ERR("apuir less800nit_ds_list parse failed!\n");
-		return;
+		OPLUS_DSI_ERR("apuir lessnit_ds_list parse failed!\n");
+		goto cleanup;
 	}
-	oplus_apuir_set_less800nit_ds_list(less800nit_ds_count, less800nit_ds_list);
+	oplus_apuir_set_lessnit_ds_list(lessnit_ds_count, lessnit_ds_list);
 
 	cnt = 0;
-	for (int i = 0; i < less800nit_ds_count; i++) {
-		cnt += scnprintf(payload + cnt, sizeof(payload) - cnt, "[%u]", less800nit_ds_list[i]);
+	for (int i = 0; i < lessnit_ds_count; i++) {
+		cnt += scnprintf(payload + cnt, sizeof(payload) - cnt, "[%u]", lessnit_ds_list[i]);
 	}
-	OPLUS_DSI_INFO("apuir less800nit_ds_list count: %d, mode_list: %s\n", less800nit_ds_count, payload);
-	return;
+	OPLUS_DSI_INFO("apuir lessnit_ds_list count: %d, mode_list: %s\n", lessnit_ds_count, payload);
+
+	/* Parse IC-specific configurations */
+	if (ic_type == 2) {
+		/* NVT specific configurations */
+		/* get upnit_index_list */
+		upnit_index_count = utils->count_u32_elems(utils->data, "oplus,apuir-upnit-index-list");
+		if (upnit_index_count > 0) {
+			upnit_index_list = kcalloc(upnit_index_count, sizeof(u32), GFP_KERNEL);
+			if (!upnit_index_list) {
+				OPLUS_DSI_ERR("apuir oplus,apuir-upnit-index-list alloc failed!\n");
+				goto cleanup;
+			}
+
+			rc = utils->read_u32_array(utils->data, "oplus,apuir-upnit-index-list", upnit_index_list, upnit_index_count);
+			if (rc) {
+				OPLUS_DSI_ERR("apuir upnit_index_count parse failed!\n");
+				goto cleanup;
+			}
+			apuir_set_nvt_upnit_index_list(upnit_index_count, upnit_index_list);
+			kfree(upnit_index_list);
+			upnit_index_list = NULL;
+		}
+
+		/* get lessnit_index_list */
+		lessnit_index_count = utils->count_u32_elems(utils->data, "oplus,apuir-lessnit-index-list");
+		if (lessnit_index_count > 0) {
+			lessnit_index_list = kcalloc(lessnit_index_count, sizeof(u32), GFP_KERNEL);
+			if (!lessnit_index_list) {
+				OPLUS_DSI_ERR("apuir oplus,apuir-lessnit-index-list alloc failed!\n");
+				goto cleanup;
+			}
+
+			rc = utils->read_u32_array(utils->data, "oplus,apuir-lessnit-index-list", lessnit_index_list, lessnit_index_count);
+			if (rc) {
+				OPLUS_DSI_ERR("apuir lessnit_index_count parse failed!\n");
+				goto cleanup;
+			}
+			apuir_set_nvt_lessnit_index_list(lessnit_index_count, lessnit_index_list);
+			kfree(lessnit_index_list);
+			lessnit_index_list = NULL;
+		}
+
+		/* get modeset_list */
+		modeset_count = utils->count_u32_elems(utils->data, "oplus,apuir-modeset-list");
+		if (modeset_count > 0) {
+			modeset_list = kcalloc(modeset_count, sizeof(u32), GFP_KERNEL);
+			if (!modeset_list) {
+				OPLUS_DSI_ERR("apuir oplus,apuir-modeset-list alloc failed!\n");
+				goto cleanup;
+			}
+
+			rc = utils->read_u32_array(utils->data, "oplus,apuir-modeset-list", modeset_list, modeset_count);
+			if (rc) {
+				OPLUS_DSI_ERR("apuir modeset_count parse failed!\n");
+				goto cleanup;
+			}
+			apuir_set_nvt_modeset_list(modeset_count, modeset_list);
+			kfree(modeset_list);
+			modeset_list = NULL;
+		}
+
+		/* get apl_lhset_list */
+		apl_lhset_count = utils->count_u32_elems(utils->data, "oplus,apuir-apl_lhset-list");
+		if (apl_lhset_count > 0) {
+			apl_lhset_list = kcalloc(apl_lhset_count, sizeof(u32), GFP_KERNEL);
+			if (!apl_lhset_list) {
+				OPLUS_DSI_ERR("apuir oplus,apuir-apl_lhset-list alloc failed!\n");
+				goto cleanup;
+			}
+
+			rc = utils->read_u32_array(utils->data, "oplus,apuir-apl_lhset-list", apl_lhset_list, apl_lhset_count);
+			if (rc) {
+				OPLUS_DSI_ERR("apuir apl_lhset_count parse failed!\n");
+				goto cleanup;
+			}
+			apuir_set_nvt_apl_lhset_list(apl_lhset_count, apl_lhset_list);
+			kfree(apl_lhset_list);
+			apl_lhset_list = NULL;
+		}
+	}
+
+cleanup:
+	if (upnit_ds_list)
+		kfree(upnit_ds_list);
+	if (lessnit_ds_list)
+		kfree(lessnit_ds_list);
+	if (upnit_index_list)
+		kfree(upnit_index_list);
+	if (lessnit_index_list)
+		kfree(lessnit_index_list);
+	if (modeset_list)
+		kfree(modeset_list);
+	if (apl_lhset_list)
+		kfree(apl_lhset_list);
 }
 #endif
 

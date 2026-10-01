@@ -44,6 +44,7 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"PPS not parsed from DTSI, generated dynamically",
 	"ROI not parsed from DTSI, generated dynamically",
 	"qcom,mdss-dsi-timing-switch-command",
+	"qcom,mdss-dsi-timing-switch-v2-command",
 	"qcom,mdss-dsi-post-mode-switch-on-command",
 	"qcom,mdss-dsi-qsync-on-commands",
 	"qcom,mdss-dsi-qsync-off-commands",
@@ -144,8 +145,10 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 #endif /* OPLUS_FEATURE_DISPLAY_TEMP_COMPENSATION */
 #ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
 	"qcom,mdss-dsi-hbm-on-command",
+#ifdef OPLUS_FEATURE_DISPLAY_PWM_MODE
 	"qcom,mdss-dsi-hbm-on-pwm-mode1-command",
 	"qcom,mdss-dsi-hbm-on-pwm-mode2-command",
+#endif /* OPLUS_FEATURE_DISPLAY_PWM_MODE */
 	"qcom,mdss-dsi-hbm-off-command",
 	"qcom,mdss-dsi-lhbm-pressed-icon-gamma-command",
 	"qcom,mdss-dsi-lhbm-pressed-icon-grayscale-command",
@@ -193,7 +196,9 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-ffc-mode2-command",
 	"qcom,mdss-dsi-ffc-mode3-command",
 #endif
+#ifdef OPLUS_FEATURE_DISPLAY_PANEL_ID
 	"qcom,mdss-dsi-panel-id1-command",
+#endif /* OPLUS_FEATURE_DISPLAY_PANEL_ID */
 	"qcom,mdss-dsi-panel-read-register-open-command",
 	"qcom,mdss-dsi-panel-read-register-close-command",
 	"qcom,mdss-dsi-loading-effect-1-command",
@@ -207,18 +212,22 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-pwm-switch-mode0-command",
 	"qcom,mdss-dsi-pwm-switch-mode1-command",
 	"qcom,mdss-dsi-pwm-switch-mode2-command",
+#ifdef OPLUS_FEATURE_DISPLAY_PWM_MODE
 	"qcom,mdss-dsi-pwm-state-l1tol2-command",
 	"qcom,mdss-dsi-pwm-state-l1tol3-command",
 	"qcom,mdss-dsi-pwm-state-l2tol1-command",
 	"qcom,mdss-dsi-pwm-state-l2tol3-command",
 	"qcom,mdss-dsi-pwm-state-l3tol1-command",
 	"qcom,mdss-dsi-pwm-state-l3tol2-command",
+#endif /* OPLUS_FEATURE_DISPLAY_PWM_MODE */
 	"qcom,mdss-dsi-pwm-switch-mode0-panel-on-command",
 	"qcom,mdss-dsi-pwm-switch-mode1-panel-on-command",
 	"qcom,mdss-dsi-pwm-switch-mode2-panel-on-command",
+#ifdef OPLUS_FEATURE_DISPLAY_PWM_MODE
 	"qcom,mdss-dsi-pwm-timing-switch-l1-command",
 	"qcom,mdss-dsi-pwm-timing-switch-l2-command",
 	"qcom,mdss-dsi-pwm-timing-switch-l3-command",
+#endif /* OPLUS_FEATURE_DISPLAY_PWM_MODE */
 	"qcom,mdss-dsi-timming-switch-pwm-mode1-command",
 	"qcom,mdss-dsi-timming-switch-pwm-mode2-command",
 	"qcom,mdss-dsi-pwm-dbv-threshold-extend-command",
@@ -241,7 +250,9 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-vid-90hz-switch-command",
 	"qcom,mdss-dsi-vid-60hz-switch-command",
 	"qcom,mdss-dsi-default-switch-page-command",
+#ifdef OPLUS_FEATURE_DISPLAY_SKIPFRAME_DBV
 	"qcom,mdss-dsi-skipframe-dbv-command",
+#endif /* OPLUS_FEATURE_DISPLAY_SKIPFRAME_DBV */
 	"qcom,mdss-dsi-demura-dbv-mode-0-command",
 	"qcom,mdss-dsi-demura-dbv-mode-1-command",
 	"qcom,mdss-dsi-demura-dbv-mode-2-command",
@@ -335,6 +346,7 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 	"PPS not parsed from DTSI, generated dynamically",
 	"ROI not parsed from DTSI, generated dynamically",
 	"qcom,mdss-dsi-timing-switch-command-state",
+	"qcom,mdss-dsi-timing-switch-v2-command-state",
 	"qcom,mdss-dsi-post-mode-switch-on-command-state",
 	"qcom,mdss-dsi-qsync-on-commands-state",
 	"qcom,mdss-dsi-qsync-off-commands-state",
@@ -435,8 +447,10 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 #endif /* OPLUS_FEATURE_DISPLAY_TEMP_COMPENSATION */
 #ifdef OPLUS_FEATURE_DISPLAY_ONSCREENFINGERPRINT
 	"qcom,mdss-dsi-hbm-on-command-state",
+#ifdef OPLUS_FEATURE_DISPLAY_PWM_MODE
 	"qcom,mdss-dsi-hbm-on-pwm-mode1-command-state",
 	"qcom,mdss-dsi-hbm-on-pwm-mode2-command-state",
+#endif /* OPLUS_FEATURE_DISPLAY_PWM_MODE */
 	"qcom,mdss-dsi-hbm-off-command-state",
 	"qcom,mdss-dsi-lhbm-pressed-icon-gamma-command-state",
 	"qcom,mdss-dsi-lhbm-pressed-icon-grayscale-command-state",
@@ -484,7 +498,9 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-ffc-mode2-command-state",
 	"qcom,mdss-dsi-ffc-mode3-command-state",
 #endif
+#ifdef OPLUS_FEATURE_DISPLAY_PANEL_ID
 	"qcom,mdss-dsi-panel-id1-command-state",
+#endif /* OPLUS_FEATURE_DISPLAY_PANEL_ID */
 	"qcom,mdss-dsi-panel-read-register-open-state",
 	"qcom,mdss-dsi-panel-read-register-close-state",
 	"qcom,mdss-dsi-loading-effect-1-command-state",
@@ -498,18 +514,22 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-pwm-switch-mode0-command-state",
 	"qcom,mdss-dsi-pwm-switch-mode1-command-state",
 	"qcom,mdss-dsi-pwm-switch-mode2-command-state",
+#ifdef OPLUS_FEATURE_DISPLAY_PWM_MODE
 	"qcom,mdss-dsi-pwm-state-l1tol2-command-state",
 	"qcom,mdss-dsi-pwm-state-l1tol3-command-state",
 	"qcom,mdss-dsi-pwm-state-l2tol1-command-state",
 	"qcom,mdss-dsi-pwm-state-l2tol3-command-state",
 	"qcom,mdss-dsi-pwm-state-l3tol1-command-state",
 	"qcom,mdss-dsi-pwm-state-l3tol2-command-state",
+#endif /* OPLUS_FEATURE_DISPLAY_PWM_MODE */
 	"qcom,mdss-dsi-pwm-switch-mode0-panel-on-command-state",
 	"qcom,mdss-dsi-pwm-switch-mode1-panel-on-command-state",
 	"qcom,mdss-dsi-pwm-switch-mode2-panel-on-command-state",
+#ifdef OPLUS_FEATURE_DISPLAY_PWM_MODE
 	"qcom,mdss-dsi-pwm-timing-switch-l1-command-state",
 	"qcom,mdss-dsi-pwm-timing-switch-l2-command-state",
 	"qcom,mdss-dsi-pwm-timing-switch-l3-command-state",
+#endif /* OPLUS_FEATURE_DISPLAY_PWM_MODE */
 	"qcom,mdss-dsi-timming-switch-pwm-mode1-command-state",
 	"qcom,mdss-dsi-timming-switch-pwm-mode2-command-state",
 	"qcom,mdss-dsi-pwm-dbv-threshold-extend-command-state",
@@ -532,7 +552,9 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-vid-90hz-switch-command-state",
 	"qcom,mdss-dsi-vid-60hz-switch-command-state",
 	"qcom,mdss-dsi-default-switch-page-command-state",
+#ifdef OPLUS_FEATURE_DISPLAY_SKIPFRAME_DBV
 	"qcom,mdss-dsi-skipframe-dbv-command-state",
+#endif /* OPLUS_FEATURE_DISPLAY_SKIPFRAME_DBV */
 	"qcom,mdss-dsi-demura-dbv-mode-0-command-state",
 	"qcom,mdss-dsi-demura-dbv-mode-1-command-state",
 	"qcom,mdss-dsi-demura-dbv-mode-2-command-state",
@@ -648,7 +670,9 @@ int oplus_panel_cmd_print(struct dsi_panel *panel, enum dsi_cmd_set_type type)
 	switch (type) {
 	case DSI_CMD_SET_ROI:
 	case DSI_CMD_ESD_SWITCH_PAGE:
+#ifdef OPLUS_FEATURE_DISPLAY_SKIPFRAME_DBV
 	case DSI_CMD_SKIPFRAME_DBV:
+#endif
 	case DSI_CMD_DEFAULT_SWITCH_PAGE:
 		/* Do nothing */
 		break;
@@ -761,6 +785,21 @@ void oplus_panel_timing_switch_cmd_replace_handle(struct dsi_panel *panel, enum 
 	return;
 }
 
+void oplus_panel_timing_switch_compatible_replace_handle(struct dsi_panel *panel, enum dsi_cmd_set_type *type)
+{
+	struct dsi_display *display = to_dsi_display(panel->host);
+
+	if (!display) {
+		OPLUS_DSI_ERR("display is null\n");
+		return;
+	}
+	if (panel->oplus_panel.timing_switch_compatible && display->oplus_display.panel_id2 >= 0x03 && *type == DSI_CMD_SET_TIMING_SWITCH){
+		*type = DSI_CMD_SET_TIMING_V2_SWITCH;
+	}
+
+	return;
+}
+
 int oplus_panel_cmd_switch(struct dsi_panel *panel, enum dsi_cmd_set_type *type)
 {
 	enum dsi_cmd_set_type type_store = *type;
@@ -769,6 +808,7 @@ int oplus_panel_cmd_switch(struct dsi_panel *panel, enum dsi_cmd_set_type *type)
 	oplus_panel_pwm_cmd_replace_handle(panel, type);
 	oplus_panel_set_on_cmd_replace_handle(panel, type);
 	oplus_panel_timing_switch_cmd_replace_handle(panel, type);
+	oplus_panel_timing_switch_compatible_replace_handle(panel, type);
 
 	if (*type == type_store) {
 		OPLUS_DSI_DEBUG("[%s] %s doesn't need switch\n",
@@ -924,6 +964,13 @@ int oplus_panel_cmd_reg_read_specific_row(struct dsi_panel *panel, struct dsi_di
 
 	if ((tx_len - 1) != read_reg_len) {
 		OPLUS_DSI_ERR("the number of rows of the command is wrong tx_len = %zu read_reg_len = %zu\n", tx_len, read_reg_len);
+		if ((type >= DSI_CMD_UIR_LOADING_EFFECT_MODE1 && type < DSI_CMD_UIR_LOADING_EFFECT_MODE2)
+				|| (type >= DSI_CMD_LOADING_EFFECT_MODE1 && type < DSI_CMD_LOADING_EFFECT_OFF)) {
+			tx_buf++;
+			memcpy(read_reg, tx_buf, tx_len - 1);
+			OPLUS_DSI_ERR("reset type %d the number of rows of the command to %zu\n", type, tx_len - 1);
+			return tx_len - 1;
+		}
 		return -EFAULT;
 	}
 	tx_buf++;

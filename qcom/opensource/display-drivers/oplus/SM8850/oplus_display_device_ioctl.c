@@ -40,6 +40,7 @@ extern int dynamic_osc_clock;
 extern int oplus_hw_partial_round;
 int mca_mode = 1;
 int dcc_flags = 0;
+int shutdown_flag = 0;
 
 extern int dither_enable;
 extern int seed_mode;
@@ -1691,4 +1692,11 @@ int oplus_display_ioctl_get_panel_btbsn(void *buf)
 	}
 
 	return rc;
+}
+
+int oplus_display_set_shutdown_flag(void *buf)
+{
+	shutdown_flag = 1;
+	OPLUS_DSI_INFO("display set shutdown_flag = %d\n", shutdown_flag);
+	return 0;
 }

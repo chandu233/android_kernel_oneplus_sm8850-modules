@@ -146,6 +146,7 @@ int oplus_display_panel_get_panel_bpp(void *buf);
 int oplus_display_panel_get_panel_name(void *buf);
 int oplus_display_panel_set_hbm_max(void *data);
 int oplus_display_panel_get_hbm_max(void *data);
+int oplus_display_set_shutdown_flag(void *buf);
 int oplus_display_panel_set_dc_compensate(void *data);
 int oplus_display_panel_set_mipi_err_check(void *data);
 int oplus_display_panel_get_mipi_err_check(void *data);

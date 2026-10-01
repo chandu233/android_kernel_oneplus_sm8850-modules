@@ -124,6 +124,7 @@ struct oplus_display_ops {
 };
 
 extern struct oplus_display_ops oplus_display_ops;
+bool oplus_pcb_before_evt(void);
 #ifdef OPLUS_FEATURE_TP_BASIC
 extern struct oplus_display_notify_tp_ops oplus_display_notify_tp_ops;
 #endif /* OPLUS_FEATURE_TP_BASIC */

@@ -4853,6 +4853,8 @@ static bool dsi_display_is_seamless_dfps_possible(
 		DSI_DEBUG("timing.h_back_porch differs %d %d\n",
 				cur->timing.h_back_porch,
 				tgt->timing.h_back_porch);
+		if (dfps_type != DSI_DFPS_IMMEDIATE_HV_P)
+			return false;
 		return false;
 	}
 
@@ -4867,7 +4869,7 @@ static bool dsi_display_is_seamless_dfps_possible(
 		DSI_DEBUG("timing.h_front_porch differs %d %d\n",
 				cur->timing.h_front_porch,
 				tgt->timing.h_front_porch);
-		if (dfps_type != DSI_DFPS_IMMEDIATE_HFP)
+		if ((dfps_type != DSI_DFPS_IMMEDIATE_HFP) && (dfps_type != DSI_DFPS_IMMEDIATE_HV_P))
 			return false;
 	}
 
@@ -4905,7 +4907,7 @@ static bool dsi_display_is_seamless_dfps_possible(
 		DSI_DEBUG("timing.v_front_porch differs %d %d\n",
 				cur->timing.v_front_porch,
 				tgt->timing.v_front_porch);
-		if (dfps_type != DSI_DFPS_IMMEDIATE_VFP)
+		if ((dfps_type != DSI_DFPS_IMMEDIATE_VFP) && (dfps_type != DSI_DFPS_IMMEDIATE_HV_P))
 			return false;
 	}
 
@@ -5543,7 +5545,7 @@ static int dsi_display_dfps_calc_front_porch(
  */
 static int dsi_display_get_dfps_timing(struct dsi_display *display,
 			struct dsi_display_mode *adj_mode,
-				u32 curr_refresh_rate)
+				u32 curr_refresh_rate, int i)
 {
 	struct dsi_dfps_capabilities dfps_caps;
 	struct dsi_display_mode per_ctrl_mode;
@@ -5612,11 +5614,39 @@ static int dsi_display_get_dfps_timing(struct dsi_display *display,
 		if (!rc)
 			adj_mode->timing.h_front_porch *= display->ctrl_count;
 		break;
+	case DSI_DFPS_IMMEDIATE_HV_P:
+		if (i < 0)
+			break;
 
+		if (!dfps_caps.dfps_hfp_list) {
+			DSI_ERR("dfps_caps.dfps_hfp_list is null ptr!");
+			break;
+		}
+
+		adj_mode->timing.h_front_porch = dfps_caps.dfps_hfp_list[i] *= display->ctrl_count;
+		adj_mode->timing.h_back_porch = dfps_caps.dfps_hbp_list[i] *= display->ctrl_count;
+		adj_mode->timing.h_sync_width = dfps_caps.dfps_hpw_list[i] *= display->ctrl_count;
+		adj_mode->timing.v_back_porch = dfps_caps.dfps_vbp_list[i];
+		adj_mode->timing.v_front_porch = dfps_caps.dfps_vfp_list[i];
+		adj_mode->timing.v_sync_width = dfps_caps.dfps_vpw_list[i];
+
+		SDE_EVT32(SDE_EVTLOG_FUNC_CASE3, DSI_DFPS_IMMEDIATE_HV_P,
+			curr_refresh_rate, timing->refresh_rate);
+		SDE_EVT32(adj_mode->timing.h_front_porch, adj_mode->timing.h_back_porch,
+				adj_mode->timing.h_sync_width, adj_mode->timing.v_back_porch,
+				adj_mode->timing.v_front_porch, adj_mode->timing.v_sync_width);
+		break;
 	default:
 		DSI_ERR("Unsupported DFPS mode %d\n", dfps_caps.type);
 		rc = -ENOTSUPP;
 	}
+
+	DSI_INFO("dfps_type=%d, cur_fps=%d, adj_fps=%d, h_active=%d, v_active=%d, hfp:%d, hbp:%d, hpw:%d, vbp:%d, vfp:%d, vpw:%d",
+		dfps_caps.type, curr_refresh_rate, timing->refresh_rate,
+		adj_mode->timing.h_active, adj_mode->timing.v_active,
+		adj_mode->timing.h_front_porch, adj_mode->timing.h_back_porch,
+		adj_mode->timing.h_sync_width, adj_mode->timing.v_back_porch,
+		adj_mode->timing.v_front_porch, adj_mode->timing.v_sync_width);
 
 	return rc;
 }
@@ -5632,7 +5662,7 @@ static bool dsi_display_validate_mode_seamless(struct dsi_display *display,
 	}
 
 	/* Currently the only seamless transition is dynamic fps */
-	rc = dsi_display_get_dfps_timing(display, adj_mode, 0);
+	rc = dsi_display_get_dfps_timing(display, adj_mode, 0, -1);
 	if (rc) {
 		DSI_DEBUG("Dynamic FPS not supported for seamless\n");
 	} else {
@@ -8174,7 +8204,7 @@ int dsi_display_get_modes_helper(struct dsi_display *display,
 			}
 
 			dsi_display_get_dfps_timing(display, sub_mode,
-					curr_refresh_rate);
+					curr_refresh_rate, i);
 			dsi_panel_get_fps_switch_cmd(display->panel, sub_mode,
 					sub_mode->timing.refresh_rate);
 			sub_mode->panel_mode_caps = DSI_OP_VIDEO_MODE;

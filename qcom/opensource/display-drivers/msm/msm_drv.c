@@ -67,6 +67,7 @@
 #ifdef OPLUS_FEATURE_DISPLAY
 #include "oplus_display_interface.h"
 #include "oplus_bl_ic_ktz8868.h"
+#include "oplus_bl_ic_ktz8869.h"
 #endif /* OPLUS_FEATURE_DISPLAY */
 #include "hfi_msm_drv.h"
 
@@ -2665,6 +2666,7 @@ static int __init msm_drm_register(void)
 	msm_lease_drm_register();
 #ifdef OPLUS_FEATURE_DISPLAY
 	bl_ic_ktz8868_init();
+	bl_ic_ktz8869_init();
 #endif /* OPLUS_FEATURE_DISPLAY */
 #ifdef OPLUS_TRACKPOINT_REPORT
 	trackpoint_report_init();
@@ -2692,6 +2694,7 @@ static void __exit msm_drm_unregister(void)
 	sde_shd_unregister();
 #ifdef OPLUS_FEATURE_DISPLAY
 	bl_ic_ktz8868_exit();
+	bl_ic_ktz8869_exit();
 #endif /* OPLUS_FEATURE_DISPLAY */
 #ifdef OPLUS_TRACKPOINT_REPORT
 	trackpoint_report_exit();

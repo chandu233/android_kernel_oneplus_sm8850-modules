@@ -23,6 +23,9 @@ def define_canoe():
                     "OPLUS_FEATURE_APDMR",
                     "OPLUS_FEATURE_AP_UIR_DIMMING",
 #endif /* OPLUS_FEATURE_DISPLAY */
+#ifdef OPLUS_FEATURE_TP_BASIC
+                    "OPLUS_FEATURE_TP_BASIC",
+#endif /* OPLUS_FEATURE_TP_BASIC */
                     "CONFIG_DRM_MSM_SDE",
                     "CONFIG_SYNC_FILE",
                     "CONFIG_DRM_MSM_DSI",
@@ -49,6 +52,9 @@ def define_canoe():
                     "CONFIG_DSI_EXTENDED_MODES",
                     "CONFIG_MSM_SDE_ROTATOR",
                     "CONFIG_MSM_SDE_ROTATOR_EVTLOG_DEBUG",
+#ifdef CONFIG_OPLUS_TYPEC_SWITCH_I2C
+                    "CONFIG_OPLUS_TYPEC_SWITCH_I2C",
+#endif /* CONFIG_OPLUS_TYPEC_SWITCH_I2C */
 #ifdef CONFIG_PXLW_IRIS
                     "CONFIG_PXLW_IRIS",
                     "CONFIG_PXLW_IRIS7P",

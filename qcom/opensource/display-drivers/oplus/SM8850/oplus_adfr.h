@@ -271,6 +271,7 @@ ssize_t oplus_adfr_get_config_attr(struct kobject *obj,
 /* test te */
 int oplus_adfr_set_test_te(void *buf);
 int oplus_adfr_get_test_te(void *buf);
+int _oplus_adfr_set_test_te(struct dsi_panel *panel, unsigned int test_te_config);
 ssize_t oplus_adfr_set_test_te_attr(struct kobject *obj,
 	struct kobj_attribute *attr, const char *buf, size_t count);
 ssize_t oplus_adfr_get_test_te_attr(struct kobject *obj,

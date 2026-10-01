@@ -106,6 +106,7 @@ static const struct panel_ioctl_desc panel_ioctls[] = {
 	PANEL_IOCTL_DEF(PANEL_IOCTL_GET_PWM_PULSE, oplus_display_panel_get_pwm_pulse),
 	PANEL_IOCTL_DEF(PANEL_IOCTL_SET_HBM_MAX, oplus_display_panel_set_hbm_max),
 	PANEL_IOCTL_DEF(PANEL_IOCTL_GET_HBM_MAX, oplus_display_panel_get_hbm_max),
+	PANEL_IOCTL_DEF(PANEL_IOCTL_SET_SHUTDOWN_FLAG, oplus_display_set_shutdown_flag),
 	PANEL_IOCTL_DEF(PANEL_IOCTL_SET_LONGRUI_AOD, oplus_ofp_set_longrui_aod_mode),
 	PANEL_IOCTL_DEF(PANEL_IOCTL_GET_LONGRUI_AOD, oplus_ofp_get_longrui_aod_config),
 	PANEL_IOCTL_DEF(PANEL_IOCTL_SET_DC_COMPENSATE, oplus_display_panel_set_dc_compensate),

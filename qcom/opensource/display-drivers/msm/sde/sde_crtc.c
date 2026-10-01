@@ -96,6 +96,10 @@ extern void oplus_sde_cp_crtc_pcc_change(struct drm_crtc *crtc_drm);
 #include "dsi_iris_api.h"
 #endif
 
+#if defined(CONFIG_PXLW_IRIS)
+#include "dsi_iris_api.h"
+#endif
+
 struct sde_crtc_custom_events {
 	u32 event;
 	int (*func)(struct drm_crtc *crtc, bool en,

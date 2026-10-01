@@ -276,6 +276,7 @@ struct oplus_panel {
 	u32 last_refresh_rate;
 	u32 work_frame;
 	bool bl_ic_ktz8868_used;
+	bool bl_ic_ktz8869_used;
 	bool need_trigger_event;
 	bool pl_check_enable;
 	bool pl_check_flag;
@@ -303,5 +304,9 @@ struct oplus_panel {
 	bool all_timing_switch_frame_delay;
 
 	struct oplus_dynamic_float_te_params dfte_params;
+	/* add for LCD reset pull low Twice */
+	bool custom_reset;
+	/*add for timing switch compatible*/
+	bool timing_switch_compatible;
 };
 #endif /* _OPLUS_PANEL_H_ */

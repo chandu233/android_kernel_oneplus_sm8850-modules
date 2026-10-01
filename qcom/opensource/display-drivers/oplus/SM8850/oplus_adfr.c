@@ -1095,23 +1095,19 @@ int oplus_adfr_property_update(void *sde_connector, void *sde_connector_state, i
 
 			if (prop_val & OPLUS_ADFR_SA_MIN_FPS_MAGIC) {
 				cur_refresh_rate = display->panel->cur_mode->timing.refresh_rate;
-				if (cur_refresh_rate == 144 || cur_refresh_rate == 165) {
-					/*
-					 in 144hz timing, sf is still use 120hz computational formula to calculate minfps value,
-					 and minfps only takes 7 bits so that the max value is 127,
-					 so it should be converted back to 144hz minfps value in kernel
-					*/
-					if ((cur_refresh_rate / (120 / OPLUS_ADFR_SA_MIN_FPS_VALUE(prop_val))) != p_oplus_adfr_params->sa_min_fps) {
+				if (OPLUS_ADFR_SA_MIN_FPS_VALUE(prop_val) != p_oplus_adfr_params->sa_min_fps) {
+					if (cur_refresh_rate > 120 && OPLUS_ADFR_SA_MIN_FPS_VALUE(prop_val) == 120) {
+						/*
+						in 144hz timing, sf is still use 120hz computational formula to calculate minfps value,
+						and minfps only takes 7 bits so that the max value is 127,
+						so it should be converted back to 144hz minfps value in kernel
+						*/
 						p_oplus_adfr_params->sa_min_fps = cur_refresh_rate / (120 / OPLUS_ADFR_SA_MIN_FPS_VALUE(prop_val));
-						p_oplus_adfr_params->sa_min_fps_updated = true;
-						handled |= BIT(5);
-					}
-				} else {
-					if (OPLUS_ADFR_SA_MIN_FPS_VALUE(prop_val) != p_oplus_adfr_params->sa_min_fps) {
+					} else {
 						p_oplus_adfr_params->sa_min_fps = OPLUS_ADFR_SA_MIN_FPS_VALUE(prop_val);
-						p_oplus_adfr_params->sa_min_fps_updated = true;
-						handled |= BIT(5);
 					}
+					p_oplus_adfr_params->sa_min_fps_updated = true;
+					handled |= BIT(5);
 				}
 			}
 
@@ -1859,7 +1855,7 @@ int oplus_adfr_status_reset(void *dsi_panel)
 	}
 
 	if (global_test_te_config != p_oplus_adfr_params->test_te.config) {
-		if (oplus_adfr_set_test_te(&global_test_te_config)) {
+		if (_oplus_adfr_set_test_te(panel, global_test_te_config)) {
 			ADFR_INFO("sync test te config failed when display switch");
 		} else {
 			ADFR_INFO("sync test te config successfully when display switch");
@@ -4424,10 +4420,8 @@ ssize_t oplus_adfr_get_config_attr(struct kobject *obj,
 int oplus_adfr_set_test_te(void *buf)
 {
 	unsigned int *test_te_config = buf;
-	unsigned int test_te_irq = 0;
 	struct dsi_display *display = oplus_display_get_current_display();
-	struct oplus_adfr_params *p_oplus_adfr_params = NULL;
-
+	int ret = 0;
 	ADFR_DEBUG("start\n");
 
 	if (!buf || !display || !display->panel) {
@@ -4435,14 +4429,34 @@ int oplus_adfr_set_test_te(void *buf)
 		return -EINVAL;
 	}
 
+	ret = _oplus_adfr_set_test_te(display->panel, *test_te_config);
+
+	ADFR_DEBUG("end\n");
+
+	return ret;
+}
+
+/* test te */
+int _oplus_adfr_set_test_te(struct dsi_panel *panel, unsigned int test_te_config)
+{
+	unsigned int test_te_irq = 0;
+	struct oplus_adfr_params *p_oplus_adfr_params = NULL;
+
+	ADFR_DEBUG("start\n");
+
+	if (!panel) {
+		ADFR_ERR("invalid display panel params\n");
+		return -EINVAL;
+	}
+
 #if defined(CONFIG_PXLW_IRIS)
-	if (iris_is_chip_supported() && (!strcmp(display->display_type, "secondary"))) {
+	if (iris_is_chip_supported() && (!strcmp(panel->type, "secondary"))) {
 		ADFR_ERR("can not set test te for iris chip\n");
 		return -EFAULT;
 	}
 #endif /* CONFIG_PXLW_IRIS */
 
-	p_oplus_adfr_params = oplus_adfr_get_params(display->panel);
+	p_oplus_adfr_params = oplus_adfr_get_params(panel);
 	if (!p_oplus_adfr_params) {
 		ADFR_ERR("invalid p_oplus_adfr_params param\n");
 		return -EINVAL;
@@ -4460,7 +4474,7 @@ int oplus_adfr_set_test_te(void *buf)
 
 	OPLUS_ADFR_TRACE_BEGIN("oplus_adfr_set_test_te");
 
-	p_oplus_adfr_params->test_te.config = *test_te_config;
+	p_oplus_adfr_params->test_te.config = test_te_config;
 	global_test_te_config = p_oplus_adfr_params->test_te.config;
 	ADFR_INFO("oplus_adfr_test_te_config:%u\n", p_oplus_adfr_params->test_te.config);
 	OPLUS_ADFR_TRACE_INT("oplus_adfr_test_te_config", p_oplus_adfr_params->test_te.config);
