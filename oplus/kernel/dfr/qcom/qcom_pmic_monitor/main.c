@@ -379,8 +379,16 @@ enum pmic_pon_event {
 	PMIC_PON_EVENT_PMIC_SID3_FAULT		= 0x12,
 	PMIC_PON_EVENT_PMIC_SID4_FAULT		= 0x13,
 	PMIC_PON_EVENT_PMIC_SID5_FAULT		= 0x14,
-	PMIC_PON_EVENT_PMIC_VREG_READY_CHECK	= 0x15,
-	PMIC_PON_EVENT_PMIC_MAX				= 0x16,
+	PMIC_PON_EVENT_PMIC_SID6_FAULT		= 0x15,
+	PMIC_PON_EVENT_PMIC_SID7_FAULT		= 0x16,
+	PMIC_PON_EVENT_PMIC_SID8_FAULT		= 0x17,
+	PMIC_PON_EVENT_PMIC_SID9_FAULT		= 0x18,
+	PMIC_PON_EVENT_PMIC_SID10_FAULT		= 0x19,
+	PMIC_PON_EVENT_PMIC_SID11_FAULT		= 0x1A,
+	PMIC_PON_EVENT_PMIC_SID12_FAULT		= 0x1B,
+	PMIC_PON_EVENT_PMIC_SID13_FAULT		= 0x1C,
+	PMIC_PON_EVENT_PMIC_VREG_READY_CHECK	= 0x20,
+	PMIC_PON_EVENT_PMIC_MAX			= 0x21,
 };
 
 enum pmic_pon_reset_type {
@@ -495,6 +503,40 @@ static const struct pmic_pon_trigger_mapping pmic_pon_reset_trigger_map[] = {
 	{0x51D0, "PMIC_SID5_OCP"},
 };
 
+static const enum pmic_pon_event pmic_pon_important_events[] = {
+	PMIC_PON_EVENT_PON_TRIGGER_RECEIVED,
+	PMIC_PON_EVENT_RESET_TRIGGER_RECEIVED,
+	PMIC_PON_EVENT_RESET_TYPE,
+	PMIC_PON_EVENT_FAULT_REASON_1_2,
+	PMIC_PON_EVENT_FAULT_REASON_3,
+	PMIC_PON_EVENT_FUNDAMENTAL_RESET,
+	PMIC_PON_EVENT_PMIC_SID1_FAULT,
+	PMIC_PON_EVENT_PMIC_SID2_FAULT,
+	PMIC_PON_EVENT_PMIC_SID3_FAULT,
+	PMIC_PON_EVENT_PMIC_SID4_FAULT,
+	PMIC_PON_EVENT_PMIC_SID5_FAULT,
+	PMIC_PON_EVENT_PMIC_SID6_FAULT,
+	PMIC_PON_EVENT_PMIC_SID7_FAULT,
+	PMIC_PON_EVENT_PMIC_SID8_FAULT,
+	PMIC_PON_EVENT_PMIC_SID9_FAULT,
+	PMIC_PON_EVENT_PMIC_SID10_FAULT,
+	PMIC_PON_EVENT_PMIC_SID11_FAULT,
+	PMIC_PON_EVENT_PMIC_SID12_FAULT,
+	PMIC_PON_EVENT_PMIC_SID13_FAULT,
+	PMIC_PON_EVENT_PMIC_VREG_READY_CHECK,
+};
+
+static bool pmic_pon_entry_is_important(const struct PmicGen3PonStateStruct *pon_state_machine)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(pmic_pon_important_events); i++)
+		if (pon_state_machine->event == pmic_pon_important_events[i])
+			return true;
+
+	return false;
+}
+
 static int pmic_pon_log_print_reason(char *buf, int buf_size, u8 data,
 					const char * const *reason)
 {
@@ -565,6 +607,7 @@ int skip , struct PMICGen3RecordKernelStruct *pmic_record_ptr , struct PmicGen3P
 static int pmic_pon_log_parse (struct PmicGen3PonStateStruct *pon_state_machine, char *parse_log) {
 	char buf[BUF_SIZE];
 	const char *label = NULL;
+	bool is_important;
 	int pos = 0;
 	int i = 0;
 	u16 data;
@@ -574,6 +617,7 @@ static int pmic_pon_log_parse (struct PmicGen3PonStateStruct *pon_state_machine,
 	}
 	data = (pon_state_machine->data1 << 8) | pon_state_machine->data0;
 	buf[0] = '\0';
+	is_important = pmic_pon_entry_is_important(pon_state_machine);
 
 	switch (pon_state_machine->event) {
 	case PMIC_PON_EVENT_PON_TRIGGER_RECEIVED:
@@ -651,17 +695,19 @@ static int pmic_pon_log_parse (struct PmicGen3PonStateStruct *pon_state_machine,
 			break;
 
 	case PMIC_PON_EVENT_FAULT_REASON_1_2:
-			if (pon_state_machine->data0) {
+			if (!pon_state_machine->data0 && !pon_state_machine->data1)
+				is_important = false;
+			if (pon_state_machine->data0 || !is_important) {
 				pos += scnprintf(buf + pos, BUF_SIZE - pos,
 						"FAULT_REASON1=");
 				pos += pmic_pon_log_print_reason(buf + pos,
 						BUF_SIZE - pos, pon_state_machine->data0,
 						pmic_pon_fault_reason1);
 			}
-			if (pon_state_machine->data1) {
+			if (pon_state_machine->data1 || !is_important) {
 				pos += scnprintf(buf + pos, BUF_SIZE - pos,
 						"%sFAULT_REASON2=",
-						(pon_state_machine->data0)
+						(pon_state_machine->data0 || !is_important)
 							? "; " : "");
 				pos += pmic_pon_log_print_reason(buf + pos,
 						BUF_SIZE - pos, pon_state_machine->data1,
@@ -671,6 +717,7 @@ static int pmic_pon_log_parse (struct PmicGen3PonStateStruct *pon_state_machine,
 
 	case PMIC_PON_EVENT_FAULT_REASON_3:
 			if (!pon_state_machine->data0)
+				is_important = false;
 			pos += scnprintf(buf + pos, BUF_SIZE - pos, "FAULT_REASON3=");
 			pos += pmic_pon_log_print_reason(buf + pos, BUF_SIZE - pos,
 						pon_state_machine->data0, pmic_pon_fault_reason3);
@@ -681,19 +728,21 @@ static int pmic_pon_log_parse (struct PmicGen3PonStateStruct *pon_state_machine,
 			break;
 
 	case PMIC_PON_EVENT_FUNDAMENTAL_RESET:
+			if (!pon_state_machine->data0 && !pon_state_machine->data1)
+				is_important = false;
 			pos += scnprintf(buf + pos, BUF_SIZE - pos,
 						"Fundamental Reset: ");
-			if (pon_state_machine->data1) {
+			if (pon_state_machine->data1 || !is_important) {
 				pos += scnprintf(buf + pos, BUF_SIZE - pos,
 						"PON_PBL_STATUS=");
 				pos += pmic_pon_log_print_reason(buf + pos,
 						BUF_SIZE - pos, pon_state_machine->data1,
 						pmic_pon_pon_pbl_status);
 			}
-			if (pon_state_machine->data0) {
+			if (pon_state_machine->data0 || !is_important) {
 				pos += scnprintf(buf + pos, BUF_SIZE - pos,
 						"%sS3_RESET_REASON=",
-						(pon_state_machine->data1)
+						(pon_state_machine->data1 || !is_important)
 							? "; " : "");
 				pos += pmic_pon_log_print_reason(buf + pos,
 						BUF_SIZE - pos, pon_state_machine->data0,
@@ -714,24 +763,22 @@ static int pmic_pon_log_parse (struct PmicGen3PonStateStruct *pon_state_machine,
 			scnprintf(buf, BUF_SIZE, "Waiting on PS_HOLD");
 			break;
 
-	case PMIC_PON_EVENT_PMIC_SID1_FAULT:
-	case PMIC_PON_EVENT_PMIC_SID2_FAULT:
-	case PMIC_PON_EVENT_PMIC_SID3_FAULT:
-	case PMIC_PON_EVENT_PMIC_SID4_FAULT:
-	case PMIC_PON_EVENT_PMIC_SID5_FAULT:
+	case PMIC_PON_EVENT_PMIC_SID1_FAULT ... PMIC_PON_EVENT_PMIC_SID13_FAULT:
+			if (!pon_state_machine->data0 && !pon_state_machine->data1)
+				is_important = false;
 			pos += scnprintf(buf + pos, BUF_SIZE - pos, "PMIC SID%u ",
 				pon_state_machine->event - PMIC_PON_EVENT_PMIC_SID1_FAULT + 1);
-			if (pon_state_machine->data0) {
+			if (pon_state_machine->data0 || !is_important) {
 				pos += scnprintf(buf + pos, BUF_SIZE - pos,
 						"FAULT_REASON1=");
 				pos += pmic_pon_log_print_reason(buf + pos,
 						BUF_SIZE - pos, pon_state_machine->data0,
 						pmic_pon_fault_reason1);
 			}
-			if (pon_state_machine->data1) {
+			if (pon_state_machine->data1 || !is_important) {
 				pos += scnprintf(buf + pos, BUF_SIZE - pos,
 						"%sFAULT_REASON2=",
-						(pon_state_machine->data0)
+						(pon_state_machine->data0 || !is_important)
 							? "; " : "");
 				pos += pmic_pon_log_print_reason(buf + pos,
 						BUF_SIZE - pos, pon_state_machine->data1,
@@ -740,6 +787,8 @@ static int pmic_pon_log_parse (struct PmicGen3PonStateStruct *pon_state_machine,
 			break;
 
 	case PMIC_PON_EVENT_PMIC_VREG_READY_CHECK:
+			if (!data)
+				is_important = false;
 			scnprintf(buf, BUF_SIZE, "VREG Check: %sVREG_FAULT detected",
 				data ? "" : "No ");
 			break;
@@ -795,11 +844,12 @@ static ssize_t pmic_history_count_gen3_show(struct kobject *kobj,
 }
 pmic_gen3_info_attr_ro(pmic_history_count);
 
+#define POFF_STR_SIZE 1024
 /**********************************************/
 static ssize_t poff_reason_gen3_show(struct kobject *kobj,
 			struct kobj_attribute *attr, char *buf) {
-	char page[512] = {0};
-	int len = 0, skip = 0, show_count = 0;
+	char *page = NULL;
+	int len = 0, skip = 0, show_count = 0, i = 0;
 	u8 L1_poff_code = 0;
 	u16 L2_poff_code = 0;
 	struct PMICGen3HistoryKernelStruct *pmic_history_ptr = NULL;
@@ -809,20 +859,26 @@ static ssize_t poff_reason_gen3_show(struct kobject *kobj,
 	char parse_log_str1[128] = {0};
 	char parse_log_str2[128] = {0};
 	char parse_log_str3[128] = {0};
+	char parse_log_str4[256] = {0}; /*for sdi fault info may more long */
+	char temp_log_str[128] = {0};
+
+	page = (char *)kmalloc(POFF_STR_SIZE, GFP_KERNEL);
+	if (!page) {
+		len += snprintf(buf , 32 , "PMIC|0|0x00|0x0000|NULL\n");
+		return len;
+	}
 
 	pmic_history_ptr = (struct PMICGen3HistoryKernelStruct *)get_pmic_history();
 
 	if (NULL == pmic_history_ptr) {
-		len += snprintf(&page[len], 512-len, "PMIC|0|0x00|0x0000|NULL\n");
-		memcpy(buf, page, len);
-		return len;
+		len += snprintf(&page[len], 1024-len, "PMIC|0|0x00|0x0000|NULL\n");
+		goto show_info_done;
 	}
 
 	pmic_history_count = pmic_history_ptr->log_count;
 	if (pmic_history_count > 4) {
-		len += snprintf(&page[len], 512-len, "PMIC|0|0x00|0x0000|NULL\n");
-		memcpy(buf, page, len);
-		return len;
+		len += snprintf(&page[len], 1024-len, "PMIC|0|0x00|0x0000|NULL\n");
+		goto show_info_done;
 	}
 
 	for (show_count = 0 ;show_count < pmic_history_count; show_count++) {
@@ -837,7 +893,7 @@ static ssize_t poff_reason_gen3_show(struct kobject *kobj,
 		L1_poff_code = 0x08;
 		L2_poff_code = tmp_pon_log.data1 << 8 | tmp_pon_log.data0;
 		pmic_pon_log_parse(&tmp_pon_log, parse_log_str1);
-		len += snprintf(&page[len], 512-len, "PMIC|%d|0x%02X|0x%04X|%s (%llu)\n",
+		len += snprintf(&page[len], 1024-len, "PMIC|%d|0x%02X|0x%04X|%s (%llu)\n",
 				show_count,
 				L1_poff_code,
 				L2_poff_code,
@@ -864,12 +920,37 @@ static ssize_t poff_reason_gen3_show(struct kobject *kobj,
 		} else {
 			snprintf(parse_log_str2, 32, "Can't find Fault_REASON3");
 		}
-		len += snprintf(&page[len], 512-len, "PMIC|%d|0x%02X|0x%04X|%s,%s (%llu)\n",
+		/* SDI FAULT LOG APPEND - collect additional fault logs */
+		int tmp_len = 0;
+		int ret_len = 0;
+		memset(parse_log_str4, 0, sizeof(parse_log_str4)); /*clear str4 */
+		for (i = PMIC_PON_EVENT_PMIC_SID1_FAULT; i < PMIC_PON_EVENT_PMIC_VREG_READY_CHECK; i++) {
+			if (-1 != get_pon_log_by_state_event(PMIC_PON_STATE_FAULT6,
+										i,
+										0,
+										&pmic_first_record,
+										&tmp_pon_log)) {
+				/* Ensure we have enough buffer space */
+				if (tmp_len >= sizeof(parse_log_str4) - 1) {
+					break;
+				}
+				memset(temp_log_str, 0, sizeof(temp_log_str)); /*set zero */
+				pmic_pon_log_parse(&tmp_pon_log, temp_log_str); /*set temp str*/
+				ret_len = snprintf(&parse_log_str4[tmp_len], sizeof(parse_log_str4) - tmp_len, "%s:", temp_log_str);
+				if (ret_len > 0 && ret_len < (sizeof(parse_log_str4) - tmp_len)) {
+					tmp_len += ret_len;
+				} else {
+					break; /* Buffer full or error occurred */
+				}
+			}
+		}
+		len += snprintf(&page[len], 1024-len, "PMIC|%d|0x%02X|0x%04X|%s,%s,%s (%llu)\n",
 				show_count,
 				L1_poff_code,
 				L2_poff_code,
 				parse_log_str1,
 				parse_log_str2,
+				parse_log_str4,
 				pmic_history_count);
 	}
 	/* on(state:3)->reset(state:4) */
@@ -906,7 +987,7 @@ static ssize_t poff_reason_gen3_show(struct kobject *kobj,
 				L2_poff_code = 0;
 				snprintf(parse_log_str2 , 32 , "can't find RESET_TRIGGER");
 			}
-			len += snprintf(&page[len], 512-len, "PMIC|%d|0x%02X|0x%04X|%s,%s,%s (%llu)\n",
+			len += snprintf(&page[len], 1024-len, "PMIC|%d|0x%02X|0x%04X|%s,%s,%s (%llu)\n",
 							show_count,
 							L1_poff_code,
 							L2_poff_code,
@@ -915,11 +996,16 @@ static ssize_t poff_reason_gen3_show(struct kobject *kobj,
 							parse_log_str3,
 							pmic_history_count);
 	} else {
-		len += snprintf(&page[len], 512-len, "PMIC|%d|0x00|0x0000|Can't parse poff reason (%lld)\n", show_count, pmic_history_count);
+		len += snprintf(&page[len], 1024-len, "PMIC|%d|0x00|0x0000|Can't parse poff reason (%lld)\n", show_count, pmic_history_count);
 	}
 	}
 
+show_info_done:
 	memcpy(buf, page, len);
+	if (page) {
+		kfree(page);
+		page = NULL;
+	}
 	return len;
 }
 pmic_gen3_info_attr_ro(poff_reason);
@@ -1079,6 +1165,47 @@ static ssize_t batt_remove_gen3_show(struct kobject *kobj,
 }
 
 pmic_gen3_info_attr_ro(batt_remove);
+
+/**********************************************/
+static ssize_t uvlo_state_gen3_show(struct kobject *kobj,
+                        struct kobj_attribute *attr, char *buf)
+{
+	int len = 0, i = 0;
+	struct PMICGen3HistoryKernelStruct *pmic_history_ptr = NULL;
+	struct PMICGen3RecordKernelStruct pmic_first_record;
+	u64 pmic_history_count;
+	struct PmicGen3PonStateStruct tmp_pon_log;
+
+	pmic_history_ptr = (struct PMICGen3HistoryKernelStruct *)get_pmic_history();
+	if (NULL == pmic_history_ptr) {
+		len += snprintf(buf, 8-len, "0\n");
+		return len;
+	}
+
+	pmic_history_count = pmic_history_ptr->log_count;
+	if (pmic_history_count > 4) {
+		len += snprintf(buf, 8-len, "0\n");
+		return len;
+	}
+
+	/* only check first record*/
+	pmic_first_record = pmic_history_ptr->pmic_record[0];
+	for (i = 0; i < MAX_STATE_RECORDS; i++) {
+		tmp_pon_log = pmic_first_record.pmic_state_machine_log[i];
+		/*state 6 should care */
+		if (tmp_pon_log.state == PMIC_PON_STATE_FAULT6 &&
+			(tmp_pon_log.data0 & BIT(6))) {
+				len += snprintf(buf, 8-len, "1\n");
+				return len;
+		}
+	}
+
+	len += snprintf(buf, 8-len, "0\n");
+	return len;
+}
+pmic_gen3_info_attr_ro(uvlo_state);
+/**********************************************/
+
 /**********************************************/
 
 static struct attribute * gen3[] = {
@@ -1088,6 +1215,7 @@ static struct attribute * gen3[] = {
 	&pon_reason_gen3_attr.attr,
 	&ocp_status_gen3_attr.attr,
 	&batt_remove_gen3_attr.attr,
+	&uvlo_state_gen3_attr.attr,
 	NULL,
 };
 
