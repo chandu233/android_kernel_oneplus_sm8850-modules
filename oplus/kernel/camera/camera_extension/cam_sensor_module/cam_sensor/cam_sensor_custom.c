@@ -1896,7 +1896,8 @@ int cam_get_sensor_temperature(struct cam_sensor_ctrl_t *s_ctrl, int *temperatur
 	}
 
 	compatible_size = of_property_count_u32_elems(s_ctrl->of_node, "temperature_reg_config");
-	if (compatible_size <= 0 || compatible_size % unit_size != 0) {
+	if (compatible_size <= 0 || compatible_size > ARRAY_SIZE(dt_data) ||
+	    compatible_size % unit_size != 0) {
 		CAM_EXT_WARN(CAM_EXT_SENSOR, "Check temperature_reg_config size %d", compatible_size);
 		return -EINVAL;
 	}
