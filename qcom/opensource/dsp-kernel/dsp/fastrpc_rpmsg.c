@@ -18,6 +18,7 @@
 #include <linux/delay.h>
 #include <linux/remoteproc.h>
 #include <linux/rpmsg/qcom_glink.h>
+#include <linux/vmalloc.h>
 
 void fastrpc_channel_ctx_put(struct fastrpc_channel_ctx *cctx);
 void fastrpc_channel_ctx_get(struct fastrpc_channel_ctx *cctx);
@@ -539,8 +540,8 @@ static void fastrpc_rpmsg_remove(struct rpmsg_device *rpdev)
 	 * channel to avoid any UAF later.
 	 */
 	list_for_each_entry(user, &cctx->users, user) {
- 		fastrpc_free_user(user);
- 	}
+		fastrpc_free_user(user);
+	}
 
 	mutex_lock(&cctx->wake_mutex);
 	if (cctx->wake_source) {
