@@ -104,7 +104,7 @@ struct kernel_loglevel {
 
 /* oplus ioctl case start */
 #define PANEL_COMMOND_BASE 0x00
-#define PANEL_COMMOND_MAX  0xD8
+#define PANEL_COMMOND_MAX  0xDA
 
 #define PANEL_IOCTL_SET_POWER                    PANEL_IOW(0x01, struct panel_vol_set)
 #define PANEL_IOCTL_GET_POWER                    PANEL_IOWR(0x02, struct panel_vol_get)
@@ -191,6 +191,7 @@ struct kernel_loglevel {
 #define PANEL_IOCTL_GET_PWM_PULSE                PANEL_IOWR(0x73, unsigned int)
 #define PANEL_IOCTL_SET_HBM_MAX                  PANEL_IOWR(0x70, unsigned int)
 #define PANEL_IOCTL_GET_HBM_MAX                  PANEL_IOWR(0x71, unsigned int)
+#define PANEL_IOCTL_SET_SHUTDOWN_FLAG            PANEL_IOWR(0xBC, unsigned int)
 #define PANEL_IOCTL_SET_LONGRUI_AOD              PANEL_IOW(0xBD, unsigned int)
 #define PANEL_IOCTL_GET_LONGRUI_AOD              PANEL_IOWR(0xBE, unsigned int)
 #define PANEL_IOCTL_SET_DC_COMPENSATE            PANEL_IOWR(0x74, unsigned int)
@@ -203,6 +204,8 @@ struct kernel_loglevel {
 #define PANEL_IOCTL_GET_DYNAMIC_FLOAT_TE         PANEL_IOWR(0xD4, unsigned int)
 #define PANEL_IOCTL_PRINT_XLOG                   PANEL_IOWR(0xD5, unsigned int)
 #define PANEL_IOCTL_SET_LOW_PWM_AOD              PANEL_IOWR(0xD6, unsigned int)
+#define PANEL_IOCTL_SET_LGD_VALUE                PANEL_IOWR(0xD8, unsigned int)
+#define PANEL_IOCTL_GET_LGD_VALUE                PANEL_IOWR(0xD9, unsigned int)
 /*oplus ioctl case end*/
 
 int oplus_display_panel_init(void);

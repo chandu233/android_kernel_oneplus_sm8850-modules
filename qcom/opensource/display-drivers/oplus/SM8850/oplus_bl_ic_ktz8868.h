@@ -1,4 +1,5 @@
 #ifndef _OPLUS_BL_IC_KTZ8868_H_
+#define _OPLUS_BL_IC_KTZ8868_H_
 
 enum POWER_GPIOS{
 	KTZ8868_HW_EN,    //GPIO62

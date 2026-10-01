@@ -171,6 +171,14 @@ void *sde_sync_get(uint64_t fd);
  */
 void sde_sync_put(void *fence);
 
+// #ifdef OPLUS_ARCH_EXTENDS
+/**
+ * sde_trace_kgsl_fence_timeout - trace kgsl fence timeout
+ * @fence: Pointer to fence to trace
+ */
+void sde_trace_kgsl_fence_timeout(void *fence);
+// #endif /*OPLUS_ARCH_EXTENDS*/
+
 /**
  * sde_sync_wait - Query sync fence object from a file handle
  *
@@ -289,6 +297,13 @@ static inline void *sde_sync_get(uint64_t fd)
 static inline void sde_sync_put(void *fence)
 {
 }
+
+// #ifdef OPLUS_ARCH_EXTENDS
+static inline void sde_trace_kgsl_fence_timeout(void *fence)
+{
+	/* do nothing */
+}
+// #endif /*OPLUS_ARCH_EXTENDS*/
 
 static inline signed long sde_sync_wait(void *fence, long timeout_ms, int *error_status)
 {
@@ -410,6 +425,18 @@ void sde_fence_output_hw_fence_dir_write_init(struct sde_hw_ctl *hw_ctl);
 int sde_fence_update_hw_fences_txq(struct sde_fence_context *ctx, bool vid_mode, u32 line_count,
 	u32 debugfs_hw_fence);
 
+
+ /**
+ * sde_fence_update_input_fence_id - updates input-fence id used for comparison with ipcc
+ *                                         signal in dpu
+ *
+ * @ctl: hw ctl to update the input-fence id
+ *
+ * Returns: Zero on success, otherwise returns an error code.
+ */
+int sde_fence_update_input_fence_id(struct sde_hw_ctl *ctl);
+
+
 /**
  * sde_fence_update_input_fence_id - updates input-fence id used for comparison with ipcc
  *                                         signal in dpu
@@ -474,6 +501,7 @@ static inline int sde_fence_update_input_hw_fence_signal(struct sde_hw_ctl *ctl,
 {
 	return -EINVAL;
 }
+
 #endif /* CONFIG_SYNC_FILE && CONFIG_QTI_HW_FENCE */
 
 #endif /* _SDE_FENCE_H_ */

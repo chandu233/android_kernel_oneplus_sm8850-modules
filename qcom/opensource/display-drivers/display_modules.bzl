@@ -293,6 +293,7 @@ module_entry(
              "oplus/SM8850/oplus_display_ext.c",
              "oplus/SM8850/oplus_display_esd.c",
              "oplus/SM8850/oplus_bl_ic_ktz8868.c",
+             "oplus/SM8850/oplus_bl_ic_ktz8869.c",
              "oplus/SM8850/oplus_display_dfte.c",
          ],
          "OPLUS_FEATURE_DISPLAY_ADFR" : [

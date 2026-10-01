@@ -913,10 +913,18 @@ static int dp_aux_configure_typec_switch(struct dp_aux *dp_aux,
 	if (enable) {
 		switch (orientation) {
 		case ORIENTATION_CC1:
-			event = TYPEC_SWITCH_USBC_ORIENTATION_CC1;
+			if (is_project(25928) || is_project(25929) || is_project(25980)) {
+				event = TYPEC_SWITCH_USBC_ORIENTATION_CC2;
+			} else {
+				event = TYPEC_SWITCH_USBC_ORIENTATION_CC1;
+			}
 			break;
 		case ORIENTATION_CC2:
-			event = TYPEC_SWITCH_USBC_ORIENTATION_CC2;
+			if (is_project(25928) || is_project(25929) || is_project(25980)) {
+				event = TYPEC_SWITCH_USBC_ORIENTATION_CC1;
+			} else {
+				event = TYPEC_SWITCH_USBC_ORIENTATION_CC2;
+			}
 			break;
 		default:
 			DP_AUX_ERR(dp_aux, "invalid orientation\n");

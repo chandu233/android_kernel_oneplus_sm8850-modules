@@ -59,6 +59,8 @@
 
 #define to_dsi_display(x) container_of(x, struct dsi_display, host)
 
+bool low_pwm_aod_flag = false;
+
 /* -------------------- parameters -------------------- */
 /* log level config */
 unsigned int oplus_ofp_log_now_level = OPLUS_OFP_LOG_LEVEL_DEBUG;
@@ -521,6 +523,22 @@ bool oplus_ofp_full_screen_aod_mode_is_enabled(void)
 
 	return (bool)((p_oplus_ofp_params->longrui_aod_config & OPLUS_OFP_FULL_SCREEN_AOD_CONFIG)
 					&& (p_oplus_ofp_params->longrui_aod_mode & OPLUS_OFP_FULL_SCREEN_AOD_MODE));
+}
+
+bool oplus_ofp_low_pwm_aod_mode_is_enabled(void)
+{
+	struct oplus_ofp_params *p_oplus_ofp_params = oplus_ofp_get_params(oplus_ofp_display_id);
+
+	if (!p_oplus_ofp_params) {
+		OFP_ERR("Invalid params\n");
+		return false;
+	}
+
+	if (!oplus_ofp_full_screen_aod_mode_is_enabled()) {
+		OFP_DEBUG("full screen aod is not support, low pwm aod is also not supported\n");
+		return false;
+	}
+	return (bool)(p_oplus_ofp_params->low_pwm_aod_mode);
 }
 
 bool oplus_ofp_get_hbm_state(void)
@@ -3020,7 +3038,7 @@ bool oplus_ofp_backlight_filter(void *dsi_panel, unsigned int bl_level)
 			} else if (p_oplus_ofp_params->need_to_update_lhbm_pressed_icon_gamma && (bl_level > OPLUS_OFP_900NIT_DBV_LEVEL)) {
 				OFP_INFO("hbm state is true and backlight lvl is greater than OPLUS_OFP_900NIT_DBV_LEVEL, filter backlight %u setting\n", bl_level);
 				need_filter_backlight = true;
-			} else if (panel->oplus_panel.gamma_ae174_compensation_support && oplus_ofp_get_hbm_state()) {
+			} else if (panel->oplus_panel.gamma_ae174_compensation_support && oplus_ofp_get_hbm_state()){
 				OFP_INFO("hbm state is true, filter backlight %u setting\n\n", bl_level);
 				need_filter_backlight = true;
 			}
@@ -3582,7 +3600,7 @@ int oplus_ofp_power_mode_handle(void *dsi_display, int power_mode)
 					&& (p_oplus_ofp_params->longrui_aod_mode & OPLUS_OFP_A_MIRROR_TO_THE_END_AOD_MODE)
 						&& (p_oplus_ofp_params->longrui_aod_mode & OPLUS_OFP_AOD_ON)
 							&& !((oplus_ofp_optical_new_solution_is_enabled() || oplus_ofp_video_mode_aod_fod_is_enabled())
-								&& p_oplus_ofp_params->dimlayer_hbm) && !oplus_ofp_oled_capacitive_is_enabled())) {
+								&& p_oplus_ofp_params->dimlayer_hbm) && !oplus_ofp_oled_capacitive_is_enabled() && !oplus_ofp_ultrasonic_is_enabled())) {
 			rc = oplus_ofp_aod_off_handle(display);
 			if (rc) {
 				OFP_ERR("[%s] failed to handle aod off, rc=%d\n", display->name, rc);
@@ -5134,17 +5152,30 @@ int oplus_ofp_set_low_pwm_aod_mode(void *buf)
 
 	OFP_DEBUG("start\n");
 
-	if (!buf || !display || !p_oplus_ofp_params) {
+	if (!buf || !display || !display->panel || !display->panel->cur_mode ||
+	    !p_oplus_ofp_params) {
 		OFP_ERR("Invalid params\n");
 		return -EINVAL;
 	}
 
 	refresh_rate = display->panel->cur_mode->timing.refresh_rate;
-	if (*low_pwm_aod_mode && (refresh_rate == 60)) {
-		/* set low pwm aod mode */
-		p_oplus_ofp_params->low_pwm_aod_mode = true;
+	if (display->panel->oplus_panel.ltpo_low_pwm_full_screen_aod_enable) {
+		/* low pwn aod for LTPO  */
+		if (*low_pwm_aod_mode) {
+			p_oplus_ofp_params->low_pwm_aod_mode = true;
+			low_pwm_aod_flag = true;
+		} else {
+			p_oplus_ofp_params->low_pwm_aod_mode = false;
+			low_pwm_aod_flag = false;
+		}
 	} else {
-		p_oplus_ofp_params->low_pwm_aod_mode = false;
+		/* low pwn aod for LTPS  */
+		if (*low_pwm_aod_mode && (refresh_rate == 60)) {
+			/* set low pwm aod mode */
+			p_oplus_ofp_params->low_pwm_aod_mode = true;
+		} else {
+			p_oplus_ofp_params->low_pwm_aod_mode = false;
+		}
 	}
 
 	//p_oplus_ofp_params->low_pwm_aod_mode = (*low_pwm_aod_mode);
