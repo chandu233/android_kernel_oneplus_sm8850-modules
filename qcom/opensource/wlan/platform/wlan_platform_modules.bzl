@@ -227,6 +227,7 @@ def _define_modules_for_target_variant(target, variant):
         defconfig = ":{}/{}_defconfig_generate_{}".format(module, tv, variant)
         deps = [
                 soc_label("all_headers"),
+                modules_label("oplus/kernel/boot:oplus_bsp_boot_projectinfo"),
                 soc_label("{}/drivers/iommu/qcom_iommu_util".format(tv)),
                 soc_label("{}/kernel/trace/qcom_ipc_logging".format(tv)),
                 soc_label("{}/drivers/soc/qcom/qcom_ramdump".format(tv)),
@@ -252,6 +253,7 @@ def _define_modules_for_target_variant(target, variant):
             kconfig = "icnss2/Kconfig",
             copts = [],
             defconfig = defconfig,
+            local_defines = ["OPLUS_FEATURE_WIFI_BDF"],
             conditional_srcs = {
                 "CONFIG_ICNSS2_QMI": {
                     True: [
