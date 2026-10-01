@@ -1001,7 +1001,7 @@ static ssize_t oplus_cnss_switch_debug_write(struct file *fp,
 
 	//for cmd debug_cnss
 	if (strcmp(cmd, "debug_cnss") == 0) {
-		cnss_pr_err(value);
+		cnss_pr_err("%s", value);
 	}
 
 	//for other cmd
@@ -1371,6 +1371,11 @@ void oplus_cnss_error_log_add(char *fmt, ...)
 
 	time_str = oplus_conn_get_local_seconds();
 	new_cel_list = kmalloc(sizeof(struct cel_list), GFP_ATOMIC);
+	if (!new_cel_list) {
+		spin_unlock_irqrestore(&cel_lock, flags);
+		va_end(args);
+		return;
+	}
 	strncpy(new_cel_list->message, buffer, CNSS_ERROR_SIZE);
 	new_cel_list->time_s = time_str;
 	//printf("oplus_cnss_error_log_add dt=%s,%s\n",time_str,new_cel_list->dt);

@@ -1024,6 +1024,11 @@ void oplus_cnss_error_log_add(char *fmt, ...)
 
 	time_str = oplus_conn_get_local_seconds();
 	new_cel_list = kmalloc(sizeof(struct cel_list), GFP_ATOMIC);
+	if (!new_cel_list) {
+		spin_unlock_irqrestore(&cel_lock, flags);
+		va_end(args);
+		return;
+	}
 	strncpy(new_cel_list->message, buffer, CNSS_ERROR_SIZE);
 	new_cel_list->time_s = time_str;
 	//printf("oplus_cnss_error_log_add dt=%s,%s\n",time_str,new_cel_list->dt);
