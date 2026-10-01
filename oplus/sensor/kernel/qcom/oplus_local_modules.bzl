@@ -28,6 +28,9 @@ def define_oplus_local_modules():
         oplus_trace_sensor_err_header_deps = [
             modules_label("oplus/sensor/kernel:oplus_trace_sensor_err_headers"),
         ]
+        oplus_trace_sensor_err_ko_deps = [
+            modules_label("oplus/sensor/kernel:oplus_trace_sensor_err"),
+        ]
     else :
         oplus_bsp_boot_projectinfo_ko_deps = []
         oplus_bsp_kfb_ko_deps = []
@@ -35,6 +38,7 @@ def define_oplus_local_modules():
         panel_event_notifier_ko_deps = []
         qmi_ko_deps = []
         oplus_trace_sensor_err_header_deps = []
+        oplus_trace_sensor_err_ko_deps = []
 
     define_oplus_ddk_module(
         name = "oplus_sensor_ir_core",
@@ -100,7 +104,7 @@ def define_oplus_local_modules():
         local_defines = ["CFG_OPLUS_ARCH_IS_QCOM",
                          "CONFIG_OPLUS_SENSOR_DRM_PANEL_NOTIFY"],
         header_deps = oplus_trace_sensor_err_header_deps,
-        ko_deps = smem_ko_deps + oplus_bsp_kfb_ko_deps,
+        ko_deps = smem_ko_deps + oplus_bsp_kfb_ko_deps + oplus_trace_sensor_err_ko_deps,
     )
 
     define_oplus_ddk_module(

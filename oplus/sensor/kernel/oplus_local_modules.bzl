@@ -13,7 +13,7 @@ def define_oplus_local_modules():
         hdrs = native.glob([
             "oplus_sensor_err/*.h",
         ]),
-        includes = ["oplus_sensor_err"],
+        includes = ["."],
     )
 
     # Define oplus_trace_sensor_err module (common for both QCOM and MTK)

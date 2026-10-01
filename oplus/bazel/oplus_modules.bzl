@@ -74,6 +74,7 @@ def define_oplus_ddk_modules(target, msm_target, variant):
         modules_label("oplus/kernel/vibrator/bazel:oplus_bsp_haptic_feedback"),
         modules_label("oplus/secure/biometrics/fingerprints/bsp/uff/driver:oplus_bsp_uff_fp_driver"),
         modules_label("oplus/secure/common/bsp/drivers/oplus_secure_common:oplus_secure_common"),
+        modules_label("oplus/sensor/kernel:oplus_trace_sensor_err"),
         modules_label("oplus/sensor/kernel/qcom:oplus_sensor_deviceinfo"),
         modules_label("oplus/sensor/kernel/qcom:oplus_sensor_feedback"),
         modules_label("oplus/sensor/kernel/qcom:oplus_sensor_interact"),
