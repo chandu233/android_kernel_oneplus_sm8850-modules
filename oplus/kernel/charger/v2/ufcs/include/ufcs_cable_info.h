@@ -27,14 +27,14 @@ static inline void ufcs_cable_info_legacy_to_ext(u64 legacy, u8 *info)
 
 static inline int ufcs_cable_info_ext_to_legacy(const u8 *info, u64 *legacy)
 {
-	u32 current = (info[0] | (info[1] << 8)) / 100;
+	u32 cable_current = (info[0] | (info[1] << 8)) / 100;
 	u32 voltage = (info[2] | (info[3] << 8)) / 100;
 	u32 impedance = (info[4] | (info[5] << 8)) * 10;
 
 	/* Round power limits down to the legacy whole-amp/volt units. */
-	if (current > 0xff || voltage > 0xff || impedance > 0xffff)
+	if (cable_current > 0xff || voltage > 0xff || impedance > 0xffff)
 		return -ERANGE;
-	*legacy = ((u64)impedance << 16) | (voltage << 8) | current;
+	*legacy = ((u64)impedance << 16) | (voltage << 8) | cable_current;
 	return 0;
 }
 #endif
