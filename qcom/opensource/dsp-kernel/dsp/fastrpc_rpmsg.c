@@ -18,6 +18,7 @@
 #include <linux/delay.h>
 #include <linux/remoteproc.h>
 #include <linux/rpmsg/qcom_glink.h>
+#include <linux/vmalloc.h>
 
 void fastrpc_channel_ctx_put(struct fastrpc_channel_ctx *cctx);
 void fastrpc_channel_ctx_get(struct fastrpc_channel_ctx *cctx);

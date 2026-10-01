@@ -426,6 +426,12 @@ static void mbox_irq_deinit(struct hfi_core_drv_data *drv_data,
 
 	mbox_ipc = (struct hfi_mbox_info *)
 		drv_data->client_data[client_id].ipc_info.data;
+
+	if (!mbox_ipc) {
+		HFI_CORE_ERR("failed to get mbox_ipc\n");
+		return;
+	}
+
 	if (mbox_ipc->irq_power.irq) {
 		disable_irq_wake(mbox_ipc->irq_power.irq);
 		devm_free_irq(dev, mbox_ipc->irq_power.irq, drv_data);

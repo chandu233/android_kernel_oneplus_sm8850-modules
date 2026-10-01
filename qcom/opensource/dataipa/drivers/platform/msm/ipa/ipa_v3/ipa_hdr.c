@@ -1102,10 +1102,10 @@ bail:
  */
 int ipa3_del_hdr_hpc_usr(struct ipa_ioc_del_hdr *hdls, bool by_user)
 {
-	int i;
+	int i = 0;
 	int result = 0;
-	struct ipa3_hdr_entry *entry;
-	struct ipa3_hdr_proc_ctx_entry *proc_ctx_entry;
+	struct ipa3_hdr_entry *entry = NULL;
+	struct ipa3_hdr_proc_ctx_entry *proc_ctx_entry = NULL;
 
 	if (hdls == NULL || hdls->num_hdls == 0) {
 		IPAERR_RL("bad parm\n");
@@ -1123,10 +1123,20 @@ int ipa3_del_hdr_hpc_usr(struct ipa_ioc_del_hdr *hdls, bool by_user)
 			entry->proc_ctx = NULL;
 			entry->ref_cnt--;
 			result = __ipa3_del_hdr(hdls->hdl[i].hdl, by_user) != 0;
-			if (proc_ctx_entry) {
+			if ((0 == result) && (NULL != proc_ctx_entry)) {
 				proc_ctx_entry->hdr = NULL;
 				proc_ctx_entry->ref_cnt--;
 				result = __ipa3_del_hdr_proc_ctx(proc_ctx_entry->id, false, false) != 0;
+				if (0 != result) {
+					IPAERR("Failed to delete hdr proc ctx\n");
+					/*can't restore hdr as it's already been deleted*/
+					proc_ctx_entry->ref_cnt++;
+				}
+			}
+			else if (result) {
+				IPAERR("Failed to delete hdr\n");
+				entry->proc_ctx = proc_ctx_entry;
+				entry->ref_cnt++;
 			}
 		}
 		hdls->hdl[i].status = result;

@@ -860,7 +860,7 @@ static int bt_resetb_operation(int resetb)
 	rc = bt_pull_resetb(resetb, RESETB_GPIO_LOW);
 	if (rc)
 		return rc;
-	msleep(20);
+	usleep_range(20000, 22000);
 	/* making resetb to high after delay */
 	pr_info("BTON: Turn bt_resetb_gpio to High\n");
 	rc = bt_pull_resetb(resetb, RESETB_GPIO_HIGH);
@@ -905,7 +905,7 @@ static int bt_configure_gpios(int on)
 		}
 		power_src.platform_state[BT_RESET_GPIO] =
 			gpio_get_value(bt_reset_gpio);
-		msleep(50);
+		usleep_range(50000, 55000);
 		pr_info("BTON:Turn Bt OFF post asserting BT_EN to low\n");
 		pr_info("bt-reset-gpio(%d) value(%d)\n", bt_reset_gpio,
 			gpio_get_value(bt_reset_gpio));
@@ -963,7 +963,7 @@ static int bt_configure_gpios(int on)
 			}
 			pr_info("BTON: WLAN OFF waiting for 100ms delay\n");
 			pr_info("for AON output to fully discharge\n");
-			msleep(100);
+			usleep_range(100000, 110000);
 			pr_info("BTON: WLAN OFF Asserting BT_EN to high\n");
 			btpower_set_xo_clk_gpio_state(true);
 			if (bt_resetb_gpio  >=  0)
@@ -994,7 +994,7 @@ static int bt_configure_gpios(int on)
 				gpio_get_value(bt_reset_gpio);
 			btpower_set_xo_clk_gpio_state(false);
 		}
-		msleep(50);
+		usleep_range(50000, 55000);
 #ifdef CONFIG_MSM_BT_OOBS
 		bt_configure_wakeup_gpios(on);
 #endif
@@ -1036,7 +1036,7 @@ static int bt_configure_gpios(int on)
 		bt_configure_wakeup_gpios(on);
 #endif
 		gpio_set_value(bt_reset_gpio, 0);
-		msleep(100);
+		usleep_range(100000, 110000);
 		pr_info("BT-OFF:bt-reset-gpio(%d) value(%d)\n",
 			bt_reset_gpio, gpio_get_value(bt_reset_gpio));
 		if (bt_sw_ctrl_gpio >= 0) {
@@ -2492,7 +2492,7 @@ int btpower_retenion(enum plt_pwr_state client)
 		pr_err("%s: invalid retention_mode request", __func__);
 		return -1;
 	}
-	
+
 	ret = power_regulators((client == POWER_ON_BT_RETENION ? BT_CORE : UWB_CORE),
 				POWER_RETENTION);
 	if (ret < 0)
@@ -2540,7 +2540,7 @@ int btpower_on(enum plt_pwr_state client)
 		ret = platform_regulators_pwr(POWER_DISABLE_RETENTION);
 		if (ret < 0)
 			return ret;
-		if (retention_mode_state == BT_IN_RETENTION) 
+		if (retention_mode_state == BT_IN_RETENTION)
 			btpower_set_retenion_mode_state(BT_OUT_OF_RETENTION);
 		else
 			btpower_set_retenion_mode_state(UWB_OUT_OF_RETENTION);
@@ -2610,11 +2610,11 @@ int btpower_access_ctrl(enum plt_pwr_state request)
 			}
 			btpower_set_grant_pending_state(NO_OTHER_CLIENT_WAITING_FOR_GRANT);
 			return ACCESS_RELEASED;
-			
+
 		} else {
 			btpower_set_grant_state(NO_GRANT_FOR_ANY_SS);
 			btpower_set_grant_pending_state(NO_OTHER_CLIENT_WAITING_FOR_GRANT);
-			return ACCESS_RELEASED; 
+			return ACCESS_RELEASED;
 		}
 	} else if (request == UWB_RELEASE_ACCESS && grant_state == UWB_HAS_GRANT) {
 		if (grant_pending == BT_WAITING_FOR_GRANT) {

@@ -37,6 +37,7 @@
 #include <linux/version.h>
 #define CREATE_TRACE_POINTS
 #include "fastrpc_trace.h"
+#include <linux/vmalloc.h>
 
 /*
  * The size of the hash table used to store fastrpc domains.
@@ -3995,7 +3996,7 @@ static int fastrpc_init_create_process(struct fastrpc_user *fl,
 	int err = 0;
 	int user_fd = fl->config.user_fd, user_size = fl->config.user_size;
 	void *file = NULL;
-	
+
       struct {
 		int pgid;
 		u32 namelen;
@@ -6298,7 +6299,7 @@ static int fastrpc_multimode_invoke(struct fastrpc_user *fl, char __user *argp)
 		size = sizeof(struct fastrpc_internal_config);
 		/* Copy with which ever is miminum size, ensures backward compatibility */
 		if (invoke.size < size )
-			size = invoke.size; 
+			size = invoke.size;
 		if (copy_from_user(&config, (void __user *)(uintptr_t)invoke.invparam,
 			size))
 			return -EFAULT;

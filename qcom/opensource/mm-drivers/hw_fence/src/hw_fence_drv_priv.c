@@ -2691,6 +2691,11 @@ int hw_fence_signal_fence(struct hw_fence_driver_data *drv_data, struct dma_fenc
 		return -EINVAL;
 	}
 
+	if (IS_ERR_OR_NULL(drv_data->hw_fences_tbl)) {
+		HWFNC_ERR("bad hw_fences_tbl\n");
+		return -EINVAL;
+	}
+
 	hw_fence = _get_hw_fence(drv_data->hw_fence_table_entries, drv_data->hw_fences_tbl, hash);
 	if (!hw_fence) {
 		HWFNC_ERR("bad hw fence hash:%llu\n", hash);
