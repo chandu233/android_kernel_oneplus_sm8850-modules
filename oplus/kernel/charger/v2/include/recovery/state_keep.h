@@ -38,6 +38,7 @@ enum state_keep_status_type {
 enum state_keep_client_priority {
 	STATE_KEEP_CLIENT_VOOC_DISCONNECT_DETECTION = 0,
 	STATE_KEEP_CLIENT_WIRED_DISCONNECT_DETECTION,
+	STATE_KEEP_CLIENT_DCP_DISCONNECT_DETECTION,
 };
 
 enum state_keep_switch_info {

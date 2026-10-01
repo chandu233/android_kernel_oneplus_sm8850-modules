@@ -8,6 +8,7 @@
 
 #include <linux/kernel.h>
 #include <linux/device.h>
+#include "ufcs_cable_info.h"
 #include <linux/kfifo.h>
 
 struct ufcs_class;
@@ -16,6 +17,7 @@ struct ufcs_class;
 #include "internal/ufcs_msg.h"
 
 #define UFCS_OPLUS_DEV_ID	0x22d9
+#define UFCS_VIVO_DEV_ID	0x2
 
 #define UFCS_SW_VERSION		0x1
 #define UFCS_HW_VERSION		0x1
@@ -54,6 +56,7 @@ enum ufcs_err_type {
 	UFCS_RECV_ERR,
 	UFCS_RECV_ERR_SENT_CMP = UFCS_RECV_ERR,
 	UFCS_RECV_ERR_TRANS_FAIL,
+	UFCS_RECV_ERR_BUFF_BUSY,
 	UFCS_RECV_ERR_ACK_TIMEOUT,
 	UFCS_RECV_ERR_DATA_READY,
 
@@ -108,6 +111,8 @@ struct ufcs_dev_ops {
 	int (*irq_event_handler)(struct ufcs_dev *ufcs);
 	int (*retrieve_flags)(struct ufcs_dev *ufcs);
 	int (*reset_dpdm)(struct ufcs_dev *ufcs);
+	int (*hiz_enable)(struct ufcs_dev *ufcs, bool en);
+	int (*clr_rx_buf)(struct ufcs_dev *ufcs);
 };
 
 #if IS_ENABLED(CONFIG_OPLUS_UFCS_CLASS)
@@ -132,8 +137,10 @@ int ufcs_intf_get_device_info(struct ufcs_dev *ufcs, u64 *dev_info);
 int ufcs_intf_get_error_info(struct ufcs_dev *ufcs, u64 *err_info);
 int ufcs_intf_get_source_info(struct ufcs_dev *ufcs, u64 *src_info);
 int ufcs_intf_get_cable_info(struct ufcs_dev *ufcs, u64 *cable_info);
+int ufcs_intf_get_cable_info_ext(struct ufcs_dev *ufcs, u8 *cable_info, int size);
 int ufcs_intf_get_pdo_info(struct ufcs_dev *ufcs, u64 *pdo, int num);
 int ufcs_intf_verify_adapter(struct ufcs_dev *ufcs, u8 key_index, u8 *auth_data, u8 data_len);
+int ufcs_intf_set_user_encrypt_data(struct ufcs_dev *ufcs, u8 *auth_data, u8 data_len);
 int ufcs_intf_get_power_change_info(struct ufcs_dev *ufcs, u32 *pwr_change_info, int num);
 int ufcs_intf_get_emark_info(struct ufcs_dev *ufcs, u64 *info);
 int ufcs_intf_get_power_info_ext(struct ufcs_dev *ufcs, u64 *pie, int num);
@@ -251,6 +258,11 @@ static inline int ufcs_intf_get_source_info(struct ufcs_dev *ufcs, u64 *src_info
 __maybe_unused
 static inline int ufcs_intf_get_cable_info(struct ufcs_dev *ufcs, u64 *cable_info)
 {
+	return -ENOTSUPP;
+}
+
+static inline int ufcs_intf_get_cable_info_ext(struct ufcs_dev *ufcs, u8 *cable_info, int size)
+{
 	return -EINVAL;
 }
 
@@ -262,6 +274,12 @@ static inline int ufcs_intf_get_pdo_info(struct ufcs_dev *ufcs, u64 *pdo, int nu
 
 __maybe_unused
 static inline int ufcs_intf_verify_adapter(struct ufcs_dev *ufcs, u8 key_index, u8 *auth_data, u8 data_len)
+{
+	return -EINVAL;
+}
+
+__maybe_unused
+static inline int ufcs_intf_set_user_encrypt_data(struct ufcs_dev *ufcs, u8 *auth_data, u8 data_len)
 {
 	return -EINVAL;
 }

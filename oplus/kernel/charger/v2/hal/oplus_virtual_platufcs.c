@@ -721,6 +721,38 @@ static int oplus_chg_vpu_get_cable_info(struct oplus_chg_ic_dev *ic_dev, u64 *ca
 	return rc;
 }
 
+static int oplus_chg_vpu_get_cable_info_ext(struct oplus_chg_ic_dev *ic_dev, u8 *info, int size)
+{
+	struct oplus_virtual_ufcs_ic *vpu;
+	u8 extended[UFCS_CABLE_INFO_SIZE];
+	u64 legacy;
+	int i, rc = -ENOTSUPP;
+
+	if (!ic_dev || !info || size <= 0)
+		return -EINVAL;
+	vpu = oplus_chg_ic_get_drvdata(ic_dev);
+	if (!vpu)
+		return -ENODEV;
+	for (i = 0; i < vpu->child_num; i++) {
+		if (!func_is_support(&vpu->child_list[i], OPLUS_IC_FUNC_UFCS_GET_CABLE_INFO_EXT) &&
+		    !func_is_support(&vpu->child_list[i], OPLUS_IC_FUNC_UFCS_GET_CABLE_INFO))
+			continue;
+		rc = oplus_chg_ic_func(vpu->child_list[i].ic_dev,
+			OPLUS_IC_FUNC_UFCS_GET_CABLE_INFO_EXT, info, size);
+		if (rc == -ENOTSUPP || rc == -EOPNOTSUPP) {
+			rc = oplus_chg_ic_func(vpu->child_list[i].ic_dev,
+				OPLUS_IC_FUNC_UFCS_GET_CABLE_INFO, &legacy);
+			if (!rc) {
+				ufcs_cable_info_legacy_to_ext(legacy, extended);
+				memcpy(info, extended, min(size, UFCS_CABLE_INFO_SIZE));
+			}
+		}
+		if (!rc)
+			return 0;
+	}
+	return rc;
+}
+
 static int oplus_chg_vpu_get_pdo_info(struct oplus_chg_ic_dev *ic_dev, u64 *pdo, int num)
 {
 	struct oplus_virtual_ufcs_ic *vpu;
@@ -1020,6 +1052,10 @@ static void *oplus_chg_vpu_get_func(struct oplus_chg_ic_dev *ic_dev, enum oplus_
 	case OPLUS_IC_FUNC_UFCS_GET_CABLE_INFO:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_UFCS_GET_CABLE_INFO,
 			oplus_chg_vpu_get_cable_info);
+		break;
+	case OPLUS_IC_FUNC_UFCS_GET_CABLE_INFO_EXT:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_UFCS_GET_CABLE_INFO_EXT,
+			oplus_chg_vpu_get_cable_info_ext);
 		break;
 	case OPLUS_IC_FUNC_UFCS_GET_PDO_INFO:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_UFCS_GET_PDO_INFO,

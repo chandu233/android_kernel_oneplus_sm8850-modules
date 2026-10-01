@@ -683,6 +683,8 @@ static void oplus_smart_chg_common_topic_ready(struct oplus_mms *topic,
 
 #define SOH_SUPPORT_BIT    0  /* Bit 0: Smart charging SOH support flag */
 #define SN_SUPPORT_BIT     1  /* Bit 1: Battery SN support flag */
+#define EXTERN_GAUGE_SN_SUPPORT_BIT  2  /* Bit 2: External gauge SN support flag */
+#define BATT_SOH_WEIGHTED_ALGORITHM_SUPPORT_BIT  3  /* Bit 3: Battery SOH weighted algorithm support flag */
 static int oplus_smart_charge_parse_dt(struct oplus_smart_charge *smart_chg)
 {
 	bool bcc_support = 0;
@@ -690,6 +692,13 @@ static int oplus_smart_charge_parse_dt(struct oplus_smart_charge *smart_chg)
 	struct device_node *node = oplus_get_node_by_type(smart_chg->dev->of_node);
 	int smart_chg_soh_support;
 	int batt_sn_support;
+	int batt_extern_gauge_sn_support;
+	int batt_soh_weighted_algorithm_support;
+
+	if (node == NULL) {
+		chg_err("device tree node is NULL, cannot parse dt properties\n");
+		return -ENODEV;
+	}
 
 	if (!node) {
 		chg_err("device tree node is NULL, cannot parse dt properties\n");
@@ -704,10 +713,14 @@ static int oplus_smart_charge_parse_dt(struct oplus_smart_charge *smart_chg)
 
 	smart_chg_soh_support = of_property_read_bool(node, "oplus,smart_chg_soh_support");
 	batt_sn_support = of_property_read_bool(node, "oplus,batt_sn_support");
+	batt_extern_gauge_sn_support = of_property_read_bool(node, "oplus,batt_extern_gauge_sn_support");
+	batt_soh_weighted_algorithm_support = of_property_read_bool(node, "oplus,batt_soh_weighted_algorithm_support");
 
 	smart_chg->smart_chg_soh_flag = 0;
 	smart_chg->smart_chg_soh_flag |= (!!smart_chg_soh_support) << SOH_SUPPORT_BIT;
 	smart_chg->smart_chg_soh_flag |= (!!batt_sn_support) << SN_SUPPORT_BIT;
+	smart_chg->smart_chg_soh_flag |= (!!batt_extern_gauge_sn_support) << EXTERN_GAUGE_SN_SUPPORT_BIT;
+	smart_chg->smart_chg_soh_flag |= (!!batt_soh_weighted_algorithm_support) << BATT_SOH_WEIGHTED_ALGORITHM_SUPPORT_BIT;
 
 	smart_chg->quick_mode_gain_support =
                 of_property_read_bool(node, "oplus,quick_mode_gain_support");

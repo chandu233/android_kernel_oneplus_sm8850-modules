@@ -1800,9 +1800,6 @@ static int oplus_set_ui_soh(struct oplus_chg_ic_dev *ic_dev, u8 ui_soh)
 	if (!chip)
 		return -EINVAL;
 
-	if (!chip->support_eco_design)
-		return -ENOTSUPP;
-
 	check_sum = 0xFF - (ui_soh & 0xFF);
 	data = ui_soh << 8 | check_sum;
 	ret = bq27z561_set_batt_ui_soh(chip, data);
@@ -1828,9 +1825,6 @@ static int oplus_get_ui_soh(struct oplus_chg_ic_dev *ic_dev, u8 *ui_soh)
 
 	if (!chip || !ui_soh)
 		return -EINVAL;
-
-	if (!chip->support_eco_design)
-		return -ENOTSUPP;
 
 	chg_info("BattUISoh:%d", chip->battinfo.ui_soh);
 	*ui_soh = chip->battinfo.ui_soh;

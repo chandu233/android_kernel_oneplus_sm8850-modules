@@ -285,12 +285,16 @@ void sia91xx_interrupt(struct work_struct *work)
 int sia91xx_ext_reset(sipa_dev_t *si_pa)
 {
 	if (si_pa && gpio_is_valid(si_pa->rst_pin)) {
-		gpio_set_value_cansleep(si_pa->rst_pin, 1);
-		usleep_range(5000, 6000);
-		gpio_set_value_cansleep(si_pa->rst_pin, 0);
-		usleep_range(5000, 6000);
+		if (IS_DIGITAL_PA_PULL_RST_TYPE(si_pa->chip_type)) {
+			gpio_set_value_cansleep(si_pa->rst_pin, SIA91XX_HIGH_LEVEL);
+			usleep_range(10000, 12000);
+		} else {
+			gpio_set_value_cansleep(si_pa->rst_pin, SIA91XX_HIGH_LEVEL);
+			usleep_range(5000, 6000);
+			gpio_set_value_cansleep(si_pa->rst_pin, SIA91XX_LOW_LEVEL);
+			usleep_range(5000, 6000);
+		}
 	}
-
 	return 0;
 }
 
@@ -351,6 +355,16 @@ int sia91xx_append_i2c_address(
 	return 0;
 }
 
+static void sia91xx_get_rst_value(sipa_dev_t *si_pa)
+{
+	unsigned int gpio_value = 0xff;
+	if (0 == si_pa->disable_pin) {
+		gpio_value = gpio_get_value(si_pa->rst_pin);
+		pr_debug("[debug][%s] %s: reset pin num:%u, value:%u \r\n",
+			LOG_FLAG, __func__, si_pa->rst_pin, gpio_value);
+	}
+}
+
 int sia91xx_detect_chip(
 	sipa_dev_t *si_pa)
 {
@@ -359,12 +373,18 @@ int sia91xx_detect_chip(
 	/* Power up! */
 	sia91xx_ext_reset(si_pa);
 
+	sia91xx_get_rst_value(si_pa);
+
 	ret = sipa_regmap_check_chip_id(si_pa->regmap,
 		si_pa->channel_num, si_pa->chip_type);
 	if (ret < 0) {
 		pr_err("[  err][%s] %s: Failed to read Revision register: %d \r\n",
 			LOG_FLAG, __func__, ret);
 		return -EIO;
+	}
+
+	if (IS_DIGITAL_PA_PULL_RST_TYPE(si_pa->chip_type)) {
+		gpio_set_value(si_pa->rst_pin, SIA91XX_LOW_LEVEL);
 	}
 
 	return 0;
@@ -428,9 +448,14 @@ int sia91xx_startup(
 	pr_debug("[debug][%s] %s: dai:%s, substream:%s, startup, stream = %d \r\n",
 			LOG_FLAG, __func__, dai->name, substream->name, substream->stream);
 
-	if (SIA91XX_DISABLE_LEVEL == gpio_get_value(si_pa->rst_pin)) {
-		gpio_set_value(si_pa->rst_pin, 0);
+	if (IS_DIGITAL_PA_PULL_RST_TYPE(si_pa->chip_type)) {
+		gpio_set_value(si_pa->rst_pin, SIA91XX_HIGH_LEVEL);
 		usleep_range(5000, 6000);
+	} else {
+		if (SIA91XX_HIGH_LEVEL == gpio_get_value(si_pa->rst_pin)) {
+			gpio_set_value(si_pa->rst_pin, SIA91XX_LOW_LEVEL);
+			usleep_range(5000, 6000);
+		}
 	}
 
 	return 0;
@@ -535,16 +560,25 @@ int sia91xx_mute(
 
 		//at the stop, I2c ends earlier than i2s.
 		//if (si_pa->pstream != 0 || si_pa->cstream != 0)
-		if (si_pa->power_mode == false)
+		if (si_pa->power_mode == false) {
+			pr_info("[debug][%s] %s: power_mode is false, direct return!\n",
+						LOG_FLAG, __func__);
 			return 0;
+		}
 
 		si_pa->power_mode = false;
 		//cancel_delayed_work_sync(&si_pa->monitor_work);
 		if (sia91xx_smartpa_soft_mute(si_pa)) {
-			gpio_set_value(si_pa->rst_pin, 1);
+			if (IS_DIGITAL_PA_PULL_RST_TYPE(si_pa->chip_type)) {
+					gpio_set_value(si_pa->rst_pin, SIA91XX_LOW_LEVEL);
+				} else {
+					gpio_set_value(si_pa->rst_pin, SIA91XX_HIGH_LEVEL);
+				}
 			usleep_range(5000, 6000);
+			pr_err("[  err][%s] %s: Failed mute smartpa \n", LOG_FLAG, __func__);
 			return -SIPA_ERROR_SOFT_MUTE;
 		}
+		sipa_digital_rst_suspend(si_pa);
 	} else {
 		if (stream == SNDRV_PCM_STREAM_PLAYBACK) {
 			si_pa->pstream = 1;
@@ -560,11 +594,12 @@ int sia91xx_mute(
 #endif /* OPLUS_FEATURE_SPEAKER_MUTE */
 		//at the start, I2s starts earlier than i2c.
 		sipa_reg_init(si_pa);
-		sipa_regmap_write_sram(si_pa);
+
 		if (sia91xx_smartpa_start(si_pa, stream))
 			return -SIPA_ERROR_SOFT_MUTE;
 
 		sipa_regmap_check_trimming(si_pa);
+		sipa_regmap_write_sram(si_pa);
 	}
 
 	return 0;

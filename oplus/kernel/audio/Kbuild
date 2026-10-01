@@ -24,6 +24,7 @@ else
 $(warning "Build audio driver for mtk plaform")
 
 obj-$(CONFIG_OPLUS_MTK_AUDIO_EXT) += mtk/
+obj-$(CONFIG_SND_SOC_TFA9865) += codecs/tfa98xx_v6.14.2/
 obj-$(CONFIG_SND_SOC_TFA9873) += codecs/tfa98xx/
 obj-$(CONFIG_SND_SOC_TFA9874) += codecs/tfa98xx/
 obj-$(CONFIG_SND_SOC_FSA) += codecs/fsa44xx/
@@ -35,6 +36,7 @@ obj-$(CONFIG_SND_SOC_SIA91XX_V3_1_0) += codecs/sia91xx_v3.1.0/
 obj-$(CONFIG_SND_SOC_AW87XXX_2_X_0) += codecs/aw87xxx_2.x.0/
 obj-$(CONFIG_SND_SOC_AW882XX) += codecs/aw882xx/
 obj-$(CONFIG_SND_SOC_CODEC_AW882XX_V1_13_0) += codecs/aw882xx_v1.13.0/
+obj-$(CONFIG_SND_SOC_FS181X) += codecs/frsm_i2ca_v5.2.4/
 obj-$(CONFIG_SND_SOC_OPLUS_DISCRETE_TYPEC_SWITCH) += codecs/oplus_discrete_typec_switch/
 # add for audio daemon kernel with hifi adsp
 obj-$(CONFIG_AUDIO_DAEMON_KERNEL_MTK_HIFI) += oplus_audio_daemon/

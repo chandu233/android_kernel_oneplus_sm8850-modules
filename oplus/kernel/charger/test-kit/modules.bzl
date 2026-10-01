@@ -46,7 +46,8 @@ def define_test_kit_module():
             out = "test-kit.ko",
             srcs = native.glob([
                 "test-kit/**/*.h",
-                "test-kit/test-kit.c"
+                "test-kit/test-kit-core.c",
+                "test-kit/test-kit-unisoc.c",
             ]),
             includes = [
                 "test-kit"
@@ -72,7 +73,8 @@ def define_test_kit_module():
             out = "test-kit.ko",
             srcs = native.glob([
                 "test-kit/**/*.h",
-                "test-kit/test-kit.c"
+                "test-kit/test-kit-core.c",
+                "test-kit/test-kit-unisoc.c",
             ]),
             includes = [
                 "test-kit"

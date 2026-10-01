@@ -1131,8 +1131,8 @@ static int oplus_gauge_get_deep_dischg_temperature(struct oplus_mms_gauge *chip,
 		gauge_temp = data.intval;
 		break;
 	default:
-		break;
 		chg_err("not support temp type, type=%d\n", type);
+		break;
 	}
 	return gauge_temp;
 }
@@ -1261,7 +1261,6 @@ void oplus_gauge_get_ratio_value(struct oplus_mms *mms)
 	int *cc = 0, *ratio = 0, counts = 0;
 	int rc = 0;
 	int gauge_type;
-	int soh_cc;
 	struct oplus_mms_gauge *chip;
 
 	if (mms == NULL) {
@@ -1296,7 +1295,7 @@ void oplus_gauge_get_ratio_value(struct oplus_mms *mms)
 	gauge_type = oplus_get_gauge_type();
 	chg_info("gauge_type=%d\n", gauge_type);
 	if (gauge_type == GAUGE_TYPE_PLATFORM) {
-		soh_cc = oplus_gauge_get_dec_cv_soh(mms);
+		int soh_cc = oplus_gauge_get_dec_cv_soh(mms);
 		chg_info("soh_cc=%d\n", soh_cc);
 		if (soh_cc >= 0) {
 			*cc = soh_cc;
@@ -1976,7 +1975,7 @@ static void oplus_gauge_init_sili_status(struct oplus_mms_gauge *chip)
 static char __oplus_chg_cmdline[BAT_TYPE_MESSAGE_LEN];
 static char *oplus_chg_cmdline = __oplus_chg_cmdline;
 
-static const char *oplus_battype_get_cmdline(void)
+__maybe_unused static const char *oplus_battype_get_cmdline(void)
 {
 	struct device_node * of_chosen = NULL;
 	char *bat_type = NULL;
@@ -2035,6 +2034,8 @@ int oplus_gauge_get_battery_type_str(char *type)
 	chg_debug("current battery type %s\n", str);
 
 	snprintf(type, OPLUS_BATTERY_TYPE_LEN, "%s", str);
+	return 0;
+#elif IS_ENABLED(CONFIG_OPLUS_CHARGER_UNISOC)
 	return 0;
 #else
 	size_t smem_size;
@@ -3623,7 +3624,6 @@ void oplus_mms_gauge_set_deep_term_volt_work(struct work_struct *work)
 }
 
 #define DEEP_DISCHG_UPDATE_VOLT_DELTA 100
-
 int oplus_gauge_term_voltage_vote_callback(struct votable *votable, void *data, int volt, const char *client,
 						  bool step)
 {

@@ -337,17 +337,29 @@ bool test_kit_typec_port_check(void *info, char *buf, size_t len, size_t *use_si
 struct test_kit_soc_gpio_info g_uart_gpio_info[] = {
 	{
 		.name = "uart_tx",
+		.pin_comm_name = NULL,
+		.pin_misc_name = NULL,
 		.is_out = false,
 		.is_high = false,
+#if IS_ENABLED(CONFIG_OPLUS_CHARGER_UNISOC)
+		.func = 3,
+#else
 		.func = 0,
+#endif
 		.pull = 0,
 		.drive = 2,
 	},
 	{
 		.name = "uart_rx",
+		.pin_comm_name = NULL,
+		.pin_misc_name = NULL,
 		.is_out = false,
 		.is_high = false,
+#if IS_ENABLED(CONFIG_OPLUS_CHARGER_UNISOC)
+		.func = 3,
+#else
 		.func = 0,
+#endif
 		.pull = 0,
 		.drive = 2,
 	},
@@ -359,6 +371,8 @@ const struct test_feature_cfg g_uart_gpio_test_cfg = {
 	.test_info = (void *)g_uart_gpio_info,
 #if IS_ENABLED(CONFIG_OPLUS_CHARGER_MTK)
 	.test_func = test_kit_mtk_soc_gpio_test,
+#elif IS_ENABLED(CONFIG_OPLUS_CHARGER_UNISOC)
+	.test_func = test_kit_unisoc_soc_gpio_test,
 #else
 	.test_func = test_kit_qcom_soc_gpio_test,
 #endif
@@ -564,7 +578,7 @@ irqreturn_t oplus_vc_ccdetect_change_handler(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-#ifndef CONFIG_OPLUS_CHARGER_MTK
+#if !IS_ENABLED(CONFIG_OPLUS_CHARGER_MTK) && !IS_ENABLED(CONFIG_OPLUS_CHARGER_UNISOC)
 static int oplus_vc_usbtemp_l_gpio_init(struct oplus_virtual_buck_ic *chip)
 {
 	struct pinctrl_state *usbtemp_l_gpio_default = NULL;
@@ -692,7 +706,7 @@ static int oplus_vc_usbtemp_adc_init(struct oplus_virtual_buck_ic *chip)
 		}
 	}
 
-#ifndef CONFIG_OPLUS_CHARGER_MTK
+#if !IS_ENABLED(CONFIG_OPLUS_CHARGER_MTK) && !IS_ENABLED(CONFIG_OPLUS_CHARGER_UNISOC)
 	rc = oplus_vc_usbtemp_l_gpio_init(chip);
 	if (rc < 0) {
 		chg_err("usbtemp_l_gpio init error, rc=%d\n", rc);
@@ -986,6 +1000,12 @@ static int oplus_vc_chg_2uart_pinctrl_init(struct oplus_virtual_buck_ic *chip)
 		g_uart_gpio_info[UART_TX_INFO_INDEX].chip = gpio_chip;
 		if (gpio_chip != NULL)
 			g_uart_gpio_info[UART_TX_INFO_INDEX].num = uart_tx - gpio_chip->base;
+#if IS_ENABLED(CONFIG_OPLUS_CHARGER_UNISOC)
+		of_property_read_string(node, "oplus,uart-tx-comm-name",
+					&g_uart_gpio_info[UART_TX_INFO_INDEX].pin_comm_name);
+		of_property_read_string(node, "oplus,uart-tx-misc-name",
+					&g_uart_gpio_info[UART_TX_INFO_INDEX].pin_misc_name);
+#endif
 	}
 	uart_rx = of_get_named_gpio(node, "oplus,uart_rx-gpio", 0);
 	if (gpio_is_valid(uart_rx)) {
@@ -997,6 +1017,12 @@ static int oplus_vc_chg_2uart_pinctrl_init(struct oplus_virtual_buck_ic *chip)
 		g_uart_gpio_info[UART_RX_INFO_INDEX].chip = gpio_chip;
 		if (gpio_chip != NULL)
 			g_uart_gpio_info[UART_RX_INFO_INDEX].num = uart_rx - gpio_chip->base;
+#if IS_ENABLED(CONFIG_OPLUS_CHARGER_UNISOC)
+		of_property_read_string(node, "oplus,uart-rx-comm-name",
+					&g_uart_gpio_info[UART_RX_INFO_INDEX].pin_comm_name);
+		of_property_read_string(node, "oplus,uart-rx-misc-name",
+					&g_uart_gpio_info[UART_RX_INFO_INDEX].pin_misc_name);
+#endif
 	}
 #endif /* CONFIG_OPLUS_CHG_TEST_KIT */
 
@@ -2603,6 +2629,66 @@ static int oplus_chg_vb_set_pd_config(struct oplus_chg_ic_dev *ic_dev, u32 pdo)
 		return 0;
 }
 
+static int oplus_chg_vb_set_burst_mode(struct oplus_chg_ic_dev *ic_dev, bool enable)
+{
+	struct oplus_virtual_buck_ic *vb;
+	int i;
+	int rc = 0;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+
+	vb = oplus_chg_ic_get_drvdata(ic_dev);
+	for (i = 0; i < vb->child_num; i++) {
+		if (!func_is_support(&vb->child_list[i], OPLUS_IC_FUNC_BUCK_SET_BURST_MODE)) {
+			rc = -ENOTSUPP;
+			continue;
+		}
+		rc = oplus_chg_ic_func(
+			vb->child_list[i].ic_dev,
+			OPLUS_IC_FUNC_BUCK_SET_BURST_MODE,
+			enable);
+		if (rc < 0)
+			chg_err("child ic[%d] set burst mode error, rc=%d\n", i, rc);
+		else
+			return 0;
+	}
+
+	return rc;
+}
+
+static int oplus_chg_vb_set_low_vsys_thr(struct oplus_chg_ic_dev *ic_dev, bool enable)
+{
+	struct oplus_virtual_buck_ic *vb;
+	int i;
+	int rc = 0;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+
+	vb = oplus_chg_ic_get_drvdata(ic_dev);
+	for (i = 0; i < vb->child_num; i++) {
+		if (!func_is_support(&vb->child_list[i], OPLUS_IC_FUNC_BUCK_SET_LOW_VSYS_THR)) {
+			rc = -ENOTSUPP;
+			continue;
+		}
+		rc = oplus_chg_ic_func(
+			vb->child_list[i].ic_dev,
+			OPLUS_IC_FUNC_BUCK_SET_LOW_VSYS_THR,
+			enable);
+		if (rc < 0)
+			chg_err("child ic[%d] set vsys thr error, rc=%d\n", i, rc);
+		else
+			return 0;
+	}
+
+	return rc;
+}
+
 static int oplus_chg_vb_wls_boost_enable(struct oplus_chg_ic_dev *ic_dev, bool en)
 {
 	struct oplus_virtual_buck_ic *vb;
@@ -3131,7 +3217,7 @@ static int oplus_chg_vb_get_usb_temp_volt(struct oplus_chg_ic_dev *ic_dev, int *
 		goto usbtemp_next;
 	}
 
-#ifndef CONFIG_OPLUS_CHARGER_MTK
+#if !IS_ENABLED(CONFIG_OPLUS_CHARGER_MTK) && !IS_ENABLED(CONFIG_OPLUS_CHARGER_UNISOC)
 	usbtemp_volt = vb->usbtemp_conversion_ratio * usbtemp_volt / 10000;
 #endif
 	if (usbtemp_volt > USBTEMP_DEFAULT_VOLT_VALUE_MV) {
@@ -3166,7 +3252,7 @@ usbtemp_next:
 		return 0;
 	}
 
-#ifndef CONFIG_OPLUS_CHARGER_MTK
+#if !IS_ENABLED(CONFIG_OPLUS_CHARGER_MTK) && !IS_ENABLED(CONFIG_OPLUS_CHARGER_UNISOC)
 	usbtemp_volt = vb->usbtemp_conversion_ratio * usbtemp_volt / 10000;
 #endif
 	if (usbtemp_volt > USBTEMP_DEFAULT_VOLT_VALUE_MV) {
@@ -5090,6 +5176,40 @@ int oplus_chg_vb_set_adsp_ovp(struct oplus_chg_ic_dev *ic_dev, bool enable)
 	return rc;
 }
 
+static int oplus_chg_vb_get_cc_state(struct oplus_chg_ic_dev *ic_dev, u8 *cc1, u8 *cc2)
+{
+	struct oplus_virtual_buck_ic *vb;
+	int i;
+	int rc = 0;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+
+	vb = oplus_chg_ic_get_drvdata(ic_dev);
+	if (vb == NULL) {
+		chg_err("oplus_chg_ic_get_drvdata is NULL");
+		return -ENODEV;
+	}
+
+	for (i = 0; i < vb->child_num; i++) {
+		if (!func_is_support(&vb->child_list[i], OPLUS_IC_FUNC_BUCK_GET_CC_STATE)) {
+			rc = -ENOTSUPP;
+			continue;
+		}
+		rc = oplus_chg_ic_func(
+			vb->child_list[i].ic_dev,
+			OPLUS_IC_FUNC_BUCK_GET_CC_STATE, cc1, cc2);
+		if (rc < 0)
+			chg_err("child ic[%d] get cc state error, rc=%d\n", i, rc);
+		else
+			return 0;
+	}
+
+	return rc;
+}
+
 static int oplus_set_usb_dpdm_ovp_disable(struct oplus_chg_ic_dev *ic_dev, bool disable)
 {
 	struct oplus_virtual_buck_ic *vb;
@@ -5434,8 +5554,17 @@ static void *oplus_chg_vb_get_func(struct oplus_chg_ic_dev *ic_dev, enum oplus_c
 	case OPLUS_IC_FUNC_BUCK_GET_POWER_MOS_ENABLE:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BUCK_GET_POWER_MOS_ENABLE, oplus_chg_vb_get_power_mos_status);
 		break;
+	case OPLUS_IC_FUNC_BUCK_SET_BURST_MODE:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BUCK_SET_BURST_MODE, oplus_chg_vb_set_burst_mode);
+		break;
+	case OPLUS_IC_FUNC_BUCK_SET_LOW_VSYS_THR:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BUCK_SET_LOW_VSYS_THR, oplus_chg_vb_set_low_vsys_thr);
+		break;
 	case OPLUS_IC_FUNC_BUCK_SET_OVP_FORCED:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BUCK_SET_OVP_FORCED, oplus_chg_vb_set_adsp_ovp);
+		break;
+	case OPLUS_IC_FUNC_BUCK_GET_CC_STATE:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BUCK_GET_CC_STATE, oplus_chg_vb_get_cc_state);
 		break;
 	case OPLUS_IC_FUNC_BUCK_SET_DPDM_OVP_DISABLE:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BUCK_SET_DPDM_OVP_DISABLE, oplus_set_usb_dpdm_ovp_disable);
@@ -5911,7 +6040,6 @@ static int oplus_virtual_buck_remove(struct platform_device *pdev)
 #if IS_ENABLED(CONFIG_HORAE_FLASH_LED_THERMAL)
 	struct thermal_zone_device *tzd;
 #endif
-
 	if (chip == NULL) {
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0))
 		return -ENODEV;

@@ -70,6 +70,9 @@
 #define TFA98XX_GET_RE_RANGE            _IOWR(TFA98XX_MAGIC_NUMBER, 52, void *)
 #define TFA98XX_GET_F0_RANGE            _IOWR(TFA98XX_MAGIC_NUMBER, 53, void *)
 #define TFA98XX_INIT_CALIB_RE           _IOWR(TFA98XX_MAGIC_NUMBER, 54, void *)
+#define TFA98XX_GET_RE_DEFAULT          _IOWR(TFA98XX_MAGIC_NUMBER, 55, void *)
+#define TFA98XX_GET_SLAVE_ADDRESS       _IOWR(TFA98XX_MAGIC_NUMBER, 56, void *)
+#define TFA98XX_GET_DEV_IDX             _IOWR(TFA98XX_MAGIC_NUMBER, 57, void *)
 //#endif
 
 #ifdef CONFIG_COMPAT
@@ -107,6 +110,9 @@
 #define TFA98XX_GET_RE_RANGE_COMPAT             _IOWR(TFA98XX_MAGIC_NUMBER, 52, compat_uptr_t)
 #define TFA98XX_GET_F0_RANGE_COMPAT             _IOWR(TFA98XX_MAGIC_NUMBER, 53, compat_uptr_t)
 #define TFA98XX_INIT_CALIB_RE_COMPAT            _IOWR(TFA98XX_MAGIC_NUMBER, 54, compat_uptr_t)
+#define TFA98XX_GET_RE_DEFAULT_COMPAT           _IOWR(TFA98XX_MAGIC_NUMBER, 55, compat_uptr_t)
+#define TFA98XX_GET_SLAVE_ADDRESS_COMPAT        _IOWR(TFA98XX_MAGIC_NUMBER, 56, compat_uptr_t)
+#define TFA98XX_GET_DEV_IDX_COMPAT              _IOWR(TFA98XX_MAGIC_NUMBER, 57, compat_uptr_t)
 //#endif
 
 #endif
@@ -193,6 +199,12 @@ struct tfa98xx {
 	struct delayed_work unmute_work;
 #endif
 
+#ifdef OPLUS_ARCH_EXTENDS
+	/* delayed work for firmware container loading retry */
+	struct delayed_work firmware_retry_work;
+	unsigned int firmware_retry_count;
+#endif /* OPLUS_ARCH_EXTENDS */
+
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_FEEDBACK)
 	struct delayed_work check_work;
 	uint32_t f0_min;
@@ -255,6 +267,7 @@ struct tfa98xx {
 
 #ifdef OPLUS_ARCH_EXTENDS
 	struct regulator *tfa98xx_vdd;
+	bool enable_dummy_codec;
 #endif /* OPLUS_ARCH_EXTENDS */
 };
 

@@ -32,7 +32,10 @@ struct sensor_fb_conf {
 	char *fb_event_id;
 };
 
-#if !IS_ENABLED(CONFIG_OPLUS_FEATURE_TRACE_SENSOR)
+/* Only define enum if CONFIG_OPLUS_FEATURE_TRACE_SENSOR is not enabled
+ * and CONFIG_OPLUS_FEATURE_TRACE_SENSOR_ERR is not enabled,
+ * to avoid redefinition conflict with oplus_trace_sensor_err.h */
+#if !IS_ENABLED(CONFIG_OPLUS_FEATURE_TRACE_SENSOR) && !IS_ENABLED(CONFIG_OPLUS_FEATURE_TRACE_SENSOR_ERR)
 enum sensor_fb_event_id {
 	FD_HEAD_EVENT_ID = 0,
 	/*1~100*/
@@ -252,7 +255,5 @@ typedef struct {
 typedef struct {
 	sensor_log_module_t sensors[SENSOR_TYPE_SENSOR_MAX];
 } log_center_t;
-
-log_center_t *oplus_get_log_center(void);
 
 #endif /*__SENSOR_FEEDBACK_H__*/

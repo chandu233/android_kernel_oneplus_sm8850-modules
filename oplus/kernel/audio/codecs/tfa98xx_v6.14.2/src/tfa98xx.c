@@ -102,6 +102,10 @@ static int tfa98xx_kmsg_regs = 0;
 static int tfa98xx_ftrace_regs = 0;
 
 static char *fw_name = "tfa98xx.cnt";
+#ifdef OPLUS_ARCH_EXTENDS
+static char *fw_name_sec = NULL;
+static u32 secondary_reg_value = 0;
+#endif /* OPLUS_ARCH_EXTENDS */
 module_param(fw_name, charp, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(fw_name, "TFA98xx DSP firmware (container file) name.");
 
@@ -1549,14 +1553,24 @@ static int tfa98xx_set_stop_ctl(struct snd_kcontrol *kcontrol,
 
 	mutex_lock(&tfa98xx_mutex);
 	list_for_each_entry_reverse(tfa98xx, &tfa98xx_device_list, list) {
+#ifndef OPLUS_ARCH_EXTENDS
+// Fix IIC and IIS power-on/off sequence issues
 		int ready = 0;
+#endif
 		int i = tfa98xx->tfa->dev_idx;
 
 		pr_debug("%d: %ld\n", i, ucontrol->value.integer.value[i]);
-
+#ifndef OPLUS_ARCH_EXTENDS
+// Fix IIC and IIS power-on/off sequence issues
 		tfa98xx_dsp_system_stable(tfa98xx->tfa, &ready);
+#endif
 
 		if ((ucontrol->value.integer.value[i] != 0)) {
+#ifdef OPLUS_ARCH_EXTENDS
+// Fix IIC and IIS power-on/off sequence issues
+			int ready = 0;
+			tfa98xx_dsp_system_stable(tfa98xx->tfa, &ready);
+#endif
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_FEEDBACK)
 			/* Add for smartpa err feedback.*/
 			oplus_tfa98xx_exit_check_work(tfa98xx);
@@ -2042,6 +2056,13 @@ enum Tfa98xx_Error tfa98xx_write_register16(struct tfa_device *tfa,
 		return Tfa98xx_Error_Fail;
 	}
 
+#ifdef OPLUS_ARCH_EXTENDS
+// change for support dummy codec probe
+	if (tfa->is_dummy_codec) {
+		return Tfa98xx_Error_Ok;
+	}
+#endif /* OPLUS_ARCH_EXTENDS */
+
 	tfa98xx = (struct tfa98xx *)tfa->data;
 	if (!tfa98xx || !tfa98xx->regmap) {
 		pr_err("No tfa98xx regmap available\n");
@@ -2084,6 +2105,13 @@ enum Tfa98xx_Error tfa98xx_read_register16(struct tfa_device *tfa,
 		pr_err("No device available\n");
 		return Tfa98xx_Error_Fail;
 	}
+
+#ifdef OPLUS_ARCH_EXTENDS
+// change for support dummy codec probe
+	if (tfa->is_dummy_codec) {
+		return Tfa98xx_Error_Ok;
+	}
+#endif /* OPLUS_ARCH_EXTENDS */
 
 	tfa98xx = (struct tfa98xx *)tfa->data;
 	if (!tfa98xx || !tfa98xx->regmap) {
@@ -2276,6 +2304,12 @@ enum Tfa98xx_Error tfa98xx_write_raw(struct tfa_device *tfa,
 		return Tfa98xx_Error_Fail;
 	}
 
+#ifdef OPLUS_ARCH_EXTENDS
+// change for support dummy codec probe
+	if (tfa->is_dummy_codec) {
+		return Tfa98xx_Error_Ok;
+	}
+#endif /* OPLUS_ARCH_EXTENDS */
 	tfa98xx = (struct tfa98xx *)tfa->data;
 
 retry:
@@ -2469,6 +2503,46 @@ static void tfa98xx_container_loaded(const struct firmware *cont, void *context)
 	}
 }
 
+#ifdef OPLUS_ARCH_EXTENDS
+/* Delayed firmware retry work callback */
+static void tfa98xx_firmware_retry_work(struct work_struct *work)
+{
+	struct tfa98xx *tfa98xx = container_of(work, struct tfa98xx, firmware_retry_work.work);
+	const struct firmware *cont = NULL;
+	int err = 0;
+
+	tfa98xx->firmware_retry_count++;
+	dev_info(tfa98xx->dev, "Retrying firmware load (attempt %d)\n",
+		tfa98xx->firmware_retry_count);
+
+	if (tfa98xx_container == NULL) {
+		err = request_firmware(&cont, fw_name, tfa98xx->dev);
+	}
+
+	if (err == 0 && (tfa98xx_container || cont)) {
+		dev_info(tfa98xx->dev, "Firmware loaded successfully on retry\n");
+		tfa98xx_container_loaded(cont, tfa98xx);
+		tfa98xx->firmware_retry_count = 0;
+	} else {
+		/* Retry failed, try again after delay if retry count not exceeded */
+		if (cont)
+			release_firmware(cont);
+		if (tfa98xx->firmware_retry_count < 20) {
+			dev_warn(tfa98xx->dev,
+				"Firmware load retry failed (attempt %d), will retry again\n",
+				tfa98xx->firmware_retry_count);
+			queue_delayed_work(tfa98xx->tfa98xx_wq,
+				&tfa98xx->firmware_retry_work, msecs_to_jiffies(1000));
+		} else {
+			dev_err(tfa98xx->dev,
+				"Firmware load failed after %d retries, giving up\n",
+				tfa98xx->firmware_retry_count);
+			tfa98xx->dsp_fw_state = TFA98XX_DSP_FW_FAIL;
+		}
+	}
+}
+#endif /* OPLUS_ARCH_EXTENDS */
+
 static int tfa98xx_load_container(struct tfa98xx *tfa98xx)
 {
 
@@ -2489,6 +2563,20 @@ static int tfa98xx_load_container(struct tfa98xx *tfa98xx)
 	if (tfa98xx_container || err == 0) {
 		tfa98xx_container_loaded(cont, tfa98xx);
 	}
+#ifdef OPLUS_ARCH_EXTENDS
+/*add for load container retry*/
+	else {
+		dev_warn(tfa98xx->dev,
+			"Direct firmware load failed with error %d, scheduling retry\n", err);
+		if (tfa98xx->tfa98xx_wq && tfa98xx->firmware_retry_count == 0) {
+			/* Retry after 1 seconds to allow /odm partition to mount */
+			queue_delayed_work(tfa98xx->tfa98xx_wq,
+				&tfa98xx->firmware_retry_work, msecs_to_jiffies(1000));
+			/* Return 0 to allow probe to continue, firmware will load later */
+			return 0;
+		}
+	}
+#endif /* OPLUS_ARCH_EXTENDS */
 
 	return err;
  #endif
@@ -2617,6 +2705,15 @@ static void tfa98xx_dsp_init(struct tfa98xx *tfa98xx)
 
 		goto do_sync;
 	}
+
+#ifdef OPLUS_ARCH_EXTENDS
+// change for support dummy codec probe
+	if (tfa98xx->tfa->is_dummy_codec) {
+		sync = true;
+		dev_info(&tfa98xx->i2c->dev, "dummy device, skip DSP power-on\n");
+		goto do_sync;
+	}
+#endif /* OPLUS_ARCH_EXTENDS */
 
 	/*send MTP values to adsp*/
 	if (tfa98xx == get_tfa_handle(CHAN_PRI_L) && tfa98xx->tfa->is_probus_device) {
@@ -3005,7 +3102,7 @@ static int tfa98xx_mute(struct snd_soc_dai *dai, int mute, int stream)
 	struct snd_soc_codec *codec = dai->codec;
 	struct tfa98xx *tfa98xx = snd_soc_codec_get_drvdata(codec);
 #endif
-	dev_dbg(&tfa98xx->i2c->dev, "%s: state: %d\n", __func__, mute);
+	dev_info(&tfa98xx->i2c->dev, "%s: state: %d\n", __func__, mute);
 
 	if (no_start) {
 		pr_debug("no_start parameter set no tfa_dev_start or tfa_dev_stop, returning\n");
@@ -3103,7 +3200,12 @@ static const struct snd_soc_dai_ops tfa98xx_dai_ops = {
 
 static struct snd_soc_dai_driver tfa98xx_dai[] = {
 	{
+#ifdef OPLUS_TFA98XX_DRV_NEED_COMPAT
+/* Modify for compatibility, which baseline use both old and new V6 driver */
+		.name = "tfa98xx-v6-aif",
+#else /* OPLUS_TFA98XX_DRV_NEED_COMPAT */
 		.name = "tfa98xx-aif",
+#endif /* OPLUS_TFA98XX_DRV_NEED_COMPAT */
 		.id = 1,
 		.playback = {
 			.stream_name = "AIF Playback",
@@ -3159,6 +3261,10 @@ static int tfa98xx_probe(struct snd_soc_codec *codec)
 #ifdef DISABLE_TFA98XX_ALSA_SUPPORT
 	INIT_DELAYED_WORK(&tfa98xx->unmute_work, tfa98xx_unmue_target_device);
 #endif
+#ifdef OPLUS_ARCH_EXTENDS
+	INIT_DELAYED_WORK(&tfa98xx->firmware_retry_work, tfa98xx_firmware_retry_work);
+	tfa98xx->firmware_retry_count = 0;
+#endif /* OPLUS_ARCH_EXTENDS */
 	tfa98xx->codec = codec;
 
 	ret = tfa98xx_load_container(tfa98xx);
@@ -3212,6 +3318,9 @@ static int tfa98xx_remove(struct snd_soc_codec *codec)
 #ifdef DISABLE_TFA98XX_ALSA_SUPPORT
 	cancel_delayed_work_sync(&tfa98xx->unmute_work);
 #endif
+#ifdef OPLUS_ARCH_EXTENDS
+	cancel_delayed_work_sync(&tfa98xx->firmware_retry_work);
+#endif /* OPLUS_ARCH_EXTENDS */
 	if (tfa98xx->tfa98xx_wq)
 		destroy_workqueue(tfa98xx->tfa98xx_wq);
 
@@ -3379,6 +3488,9 @@ static int tfa98xx_parse_dt(struct device *dev, struct tfa98xx *tfa98xx,
 	struct device_node *np) {
 	u32 value;
 	int ret;
+#ifdef OPLUS_ARCH_EXTENDS
+	const char *fw_name_dt = NULL;
+#endif /* OPLUS_ARCH_EXTENDS */
 	tfa98xx->reset_gpio = of_get_named_gpio(np, "reset-gpio", 0);
 	if (tfa98xx->reset_gpio < 0)
 		dev_dbg(dev, "No reset GPIO provided, will not HW reset device\n");
@@ -3403,6 +3515,19 @@ static int tfa98xx_parse_dt(struct device *dev, struct tfa98xx *tfa98xx,
 	dev_dbg(dev, "tfa98xx->channel_config=%d  ret=%d\n", tfa98xx->channel_config, ret);
 
 	tfa98xx->is_aux_i2c = of_property_read_bool(np, "is-aux-i2c");
+
+#ifdef OPLUS_ARCH_EXTENDS
+	ret = of_property_read_string(np, "secondary-firmware-name", &fw_name_dt);
+	if (ret == 0 && fw_name_dt) {
+		fw_name_sec = (char *)fw_name_dt;
+	}
+	dev_info(dev, "Secondary firmware name: %s\n", fw_name_sec ? fw_name_sec : "NULL");
+	ret = of_property_read_u32(np, "secondary-firmware-reg-value", &secondary_reg_value);
+	dev_info(dev, "Secondary firmware register value: 0x%x\n", secondary_reg_value);
+
+	tfa98xx->enable_dummy_codec = of_property_read_bool(np, "enable-dummy-codec");
+	dev_dbg(dev, "enable_dummy_codec : %d\n", tfa98xx->enable_dummy_codec);
+#endif /* OPLUS_ARCH_EXTENDS */
 
 #ifdef CONFIG_ARCH_MEDIATEK
 	tfa98xx_vsvoter_of_property_parse(tfa98xx, np);
@@ -3565,6 +3690,10 @@ static int tfa98xx_ioctrl_probe(struct tfa98xx *tfa98xx)
 #ifdef DISABLE_TFA98XX_ALSA_SUPPORT
 	INIT_DELAYED_WORK(&tfa98xx->unmute_work, tfa98xx_unmue_target_device);
 #endif
+#ifdef OPLUS_ARCH_EXTENDS
+	INIT_DELAYED_WORK(&tfa98xx->firmware_retry_work, tfa98xx_firmware_retry_work);
+	tfa98xx->firmware_retry_count = 0;
+#endif /* OPLUS_ARCH_EXTENDS */
 	ret = tfa98xx_load_container(tfa98xx);
 	pr_debug("Container loading requested: %d\n", ret);
 
@@ -3990,8 +4119,11 @@ static long tfa98xx_ioctl(struct file *f,
 	int ready = 0;
 #endif
 //#ifdef OPLUS_ARCH_EXTENDS
-	int rang_array[TFACONT_MAXDEVS][2] = {0};
+	uint32_t rang_array[TFACONT_MAXDEVS][2] = {{0, 0}};
 	TFA_PARAM_CAL_SPK tfa_calib_data[TFACONT_MAXDEVS] = {{0, 0, 0, 0}};
+	uint32_t default_mohms[TFACONT_MAXDEVS] = {0};
+	int dev_idx[TFACONT_MAXDEVS] = {0};
+	unsigned char slave_address[TFACONT_MAXDEVS] = {0};
 //#endif
 
 	tfa98xx_pri = get_tfa_handle(CHAN_PRI_L);
@@ -4391,11 +4523,11 @@ static long tfa98xx_ioctl(struct file *f,
 		case TFA98XX_GET_RE_RANGE:
 			for (i = 0; i < TFACONT_MAXDEVS; i++) {
 				tfa98xx = get_tfa_handle(1<<i);
-				if (tfa98xx) {
-					rang_array[i][0] = tfa98xx->tfa->min_mohms;
-					rang_array[i][1] = tfa98xx->tfa->max_mohms;
-				}
-				dev_info(tfa98xx_pri->dev, "TFA98XX_GET_RE_RANGE spk%d min_mohms = %d, max_mohms = %d\n", i, rang_array[i][0], rang_array[i][1]);
+				if (!tfa98xx || !tfa98xx->tfa)
+					continue;
+				rang_array[i][0] = tfa98xx->tfa->min_mohms;
+				rang_array[i][1] = tfa98xx->tfa->max_mohms;
+				dev_info(tfa98xx->dev, "TFA98XX_GET_RE_RANGE spk%d min_mohms = %d, max_mohms = %d\n", i, rang_array[i][0], rang_array[i][1]);
 			}
 
 			ret = copy_to_user(arg, rang_array, sizeof(rang_array));
@@ -4403,11 +4535,11 @@ static long tfa98xx_ioctl(struct file *f,
 		case TFA98XX_GET_F0_RANGE:
 			for (i = 0; i < TFACONT_MAXDEVS; i++) {
 				tfa98xx = get_tfa_handle(1<<i);
-				if (tfa98xx) {
-					rang_array[i][0] = tfa98xx->tfa->f0_range_min;
-					rang_array[i][1] = tfa98xx->tfa->f0_range_max;
-				}
-				dev_info(tfa98xx_pri->dev, "TFA98XX_GET_RE_RANGE spk%d f0_range_min = %d, f0_range_max = %d\n", i, rang_array[i][0], rang_array[i][1]);
+				if (!tfa98xx || !tfa98xx->tfa)
+					continue;
+				rang_array[i][0] = tfa98xx->tfa->f0_range_min;
+				rang_array[i][1] = tfa98xx->tfa->f0_range_max;
+				dev_info(tfa98xx->dev, "TFA98XX_GET_F0_RANGE spk%d f0_range_min = %d, f0_range_max = %d\n", i, rang_array[i][0], rang_array[i][1]);
 			}
 
 			ret = copy_to_user(arg, rang_array, sizeof(rang_array));
@@ -4420,11 +4552,46 @@ static long tfa98xx_ioctl(struct file *f,
 			}
 			for (i = 0; i < tfa98xx_device_count; i++) {
 				tfa98xx = get_tfa_handle(1<<i);
+				if (!tfa98xx || !tfa98xx->tfa)
+					continue;
 				tfa98xx->tfa->mohm[0] = tfa_calib_data[i].wire_r0;
 				tfa98xx->tfa->freqs = tfa_calib_data[i].f0;
 
-				dev_info(tfa98xx_pri->dev, "TFA98XX_INIT_CALIB_RE spk%d r0 = %d, f0 = %d\n", i, tfa98xx->tfa->mohm[0], tfa98xx->tfa->freqs);
+				dev_info(tfa98xx->dev, "TFA98XX_INIT_CALIB_RE spk%d r0 = %d, f0 = %d\n", i, tfa98xx->tfa->mohm[0], tfa98xx->tfa->freqs);
 			}
+			break;
+		case TFA98XX_GET_RE_DEFAULT:
+			for (i = 0; i < TFACONT_MAXDEVS; i++) {
+				tfa98xx = get_tfa_handle(1<<i);
+				if (!tfa98xx || !tfa98xx->tfa)
+					continue;
+				default_mohms[i] = tfa98xx->tfa->default_mohms;
+				dev_info(tfa98xx->dev, "TFA98XX_GET_RE_DEFAULT default_mohms = %d\n", default_mohms[i]);
+			}
+
+			ret = copy_to_user(arg, default_mohms, sizeof(default_mohms));
+			break;
+		case TFA98XX_GET_SLAVE_ADDRESS:
+			for (i = 0; i < TFACONT_MAXDEVS; i++) {
+				tfa98xx = get_tfa_handle(1<<i);
+				if (!tfa98xx || !tfa98xx->tfa)
+					continue;
+				slave_address[i] = tfa98xx->tfa->slave_address;
+				dev_info(tfa98xx->dev, "TFA98XX_GET_SLAVE_ADDRESS slave_address = 0x%x\n", slave_address[i]);
+			}
+
+			ret = copy_to_user(arg, slave_address, sizeof(slave_address));
+			break;
+		case TFA98XX_GET_DEV_IDX:
+			for (i = 0; i < TFACONT_MAXDEVS; i++) {
+				tfa98xx = get_tfa_handle(1<<i);
+				if (!tfa98xx || !tfa98xx->tfa)
+					continue;
+				dev_idx[i] = tfa98xx->tfa->dev_idx;
+				dev_info(tfa98xx->dev, "TFA98XX_GET_DEV_IDX dev_idx = %d\n", dev_idx[i]);
+			}
+
+			ret = copy_to_user(arg, dev_idx, sizeof(dev_idx));
 			break;
 //#endif /* OPLUS_ARCH_EXTENDS */
 		default:
@@ -4523,6 +4690,15 @@ static long tfa98xx_compat_ioctl(struct file *f,
 		break;
 	case TFA98XX_INIT_CALIB_RE_COMPAT:
 		cmd64 = TFA98XX_INIT_CALIB_RE;
+		break;
+	case TFA98XX_GET_RE_DEFAULT_COMPAT:
+		cmd64 = TFA98XX_GET_RE_DEFAULT;
+		break;
+	case TFA98XX_GET_SLAVE_ADDRESS_COMPAT:
+		cmd64 = TFA98XX_GET_SLAVE_ADDRESS;
+		break;
+	case TFA98XX_GET_DEV_IDX_COMPAT:
+		cmd64 = TFA98XX_GET_DEV_IDX;
 		break;
 //#endif
 	default:
@@ -4732,6 +4908,11 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c)
 	int irq_flags;
 	unsigned int reg;
 	int ret;
+#ifdef OPLUS_ARCH_EXTENDS
+// change for support dummy codec probe
+	bool is_dummy_codec = false;
+	int i = 0;
+#endif /* OPLUS_ARCH_EXTENDS */
 
 #ifndef OPLUS_ARCH_EXTENDS
 	char buf[20] = {0};
@@ -4864,12 +5045,42 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c)
 	tfa98xx_ext_reset(tfa98xx);
 
 	if ((no_start == 0) && (no_reset == 0)) {
+#ifdef OPLUS_ARCH_EXTENDS
+// change for support dummy codec probe
+		for (i = 0; i < I2C_RETRIES; i++) {
+			ret = regmap_read(tfa98xx->regmap, 0x03, &reg);
+			if (ret < 0) {
+				msleep(I2C_RETRY_DELAY);
+			} else {
+				break;
+			}
+		}
+
+		if (ret < 0) {
+			dev_err(&i2c->dev, "Failed to read Revision register: %d\n", ret);
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_FEEDBACK)
+			mm_fb_audio_fatal_delay(OPLUS_AUDIO_EVENTID_SMARTPA_ERR, \
+				MM_FB_KEY_RATELIMIT_5MIN, \
+				FEEDBACK_DELAY_60S, \
+				"payload@@Failed to read Revision register %d-0x%x", \
+				i2c->adapter->nr, i2c->addr);
+#endif /*CONFIG_OPLUS_FEATURE_MM_FEEDBACK*/
+			if (tfa98xx->enable_dummy_codec) {
+				is_dummy_codec = true;
+				dev_err(&i2c->dev, "is_dummy_codec: %d\n", is_dummy_codec);
+				goto tfa_device_probe;
+			} else {
+				return -EIO;
+			}
+		}
+#else /* OPLUS_ARCH_EXTENDS */
 		ret = regmap_read(tfa98xx->regmap, 0x03, &reg);
 		if (ret < 0) {
 			dev_err(&i2c->dev, "Failed to read Revision register: %d\n",
 				ret);
 			return -EIO;
 		}
+#endif /* OPLUS_ARCH_EXTENDS */
 
 		tfa98xx->rev = reg & 0xffff;
 
@@ -4911,6 +5122,16 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c)
 			pr_info("TFA986x detected\n");
 			tfa98xx->flags |= TFA98XX_FLAG_TDM_DEVICE;
 			tfa98xx->flags |= TFA98XX_FLAG_OTP_TYPE_DEVICE;
+#ifdef OPLUS_ARCH_EXTENDS
+			regmap_read(tfa98xx->regmap, 0x06, &reg);
+			dev_info(tfa98xx->dev, "Register 0x06 = 0x%x\n", reg);
+			if (secondary_reg_value != 0 && reg == secondary_reg_value && fw_name_sec) {
+				fw_name = fw_name_sec;
+				dev_info(tfa98xx->dev, "Register value 0x%x matches secondary, using firmware: %s\n", reg, fw_name);
+			} else {
+				dev_info(tfa98xx->dev, "Using default firmware: %s\n", fw_name);
+			}
+#endif /* OPLUS_ARCH_EXTENDS */
 			break;
 		case 0x88: /* tfa9888 */
 			pr_info("TFA9888 detected\n");
@@ -4963,42 +5184,56 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c)
 		}
 	}
 
+#ifdef OPLUS_ARCH_EXTENDS
+// change for support dummy codec probe
+tfa_device_probe:
+#endif /* OPLUS_ARCH_EXTENDS */
 	tfa98xx->tfa = devm_kzalloc(&i2c->dev, sizeof(struct tfa_device), GFP_KERNEL);
 	if (tfa98xx->tfa == NULL)
 		return -ENOMEM;
 
 	tfa98xx->tfa->data = (void *)tfa98xx;
 	tfa98xx->tfa->cachep = tfa98xx_cache;
+#ifdef OPLUS_ARCH_EXTENDS
+// change for support dummy codec probe
+	tfa98xx->tfa->is_dummy_codec = is_dummy_codec;
+#endif /* OPLUS_ARCH_EXTENDS */
 
 //#ifdef OPLUS_ARCH_EXTENDS
 	ret = of_property_read_u32(i2c->dev.of_node, "tfa_min_range", &tfa98xx->tfa->min_mohms);
 	if (ret) {
-		dev_err(&i2c->dev, "Failed to parse spk_min_range node\n");
+		dev_info(&i2c->dev, "Failed to parse spk_min_range node\n");
 		tfa98xx->tfa->min_mohms = SMART_PA_RANGE_DEFAULT_MIN;
 	}
 
 	ret = of_property_read_u32(i2c->dev.of_node, "tfa_max_range", &tfa98xx->tfa->max_mohms);
 	if (ret) {
-		dev_err(&i2c->dev, "Failed to parse spk_max_range node\n");
+		dev_info(&i2c->dev, "Failed to parse spk_max_range node\n");
 		tfa98xx->tfa->max_mohms = SMART_PA_RANGE_DEFAULT_MAX;
 	}
 
-	dev_err(&i2c->dev, "min_mohms=%d, max_mohms=%d\n",
-			tfa98xx->tfa->min_mohms, tfa98xx->tfa->max_mohms);
+	ret = of_property_read_u32(i2c->dev.of_node, "tfa_default_mohm", &tfa98xx->tfa->default_mohms);
+	if (ret) {
+		dev_info(&i2c->dev, "Failed to parse  default impedance node\n");
+		tfa98xx->tfa->default_mohms = 0;
+	}
+
+	dev_info(&i2c->dev, "min_mohms=%u, max_mohms=%u, default_mohms=%u\n",
+			tfa98xx->tfa->min_mohms, tfa98xx->tfa->max_mohms, tfa98xx->tfa->default_mohms);
 
 	ret = of_property_read_u32(i2c->dev.of_node, "f0_range_min", &tfa98xx->tfa->f0_range_min);
 	if (ret) {
-		dev_err(&i2c->dev, "Failed to parse f0_range_min node\n");
+		dev_info(&i2c->dev, "Failed to parse f0_range_min node\n");
 		tfa98xx->tfa->f0_range_min = DEFAULT_F0_RANGE_MIN;
 	}
 
 	ret = of_property_read_u32(i2c->dev.of_node, "f0_range_max", &tfa98xx->tfa->f0_range_max);
 	if (ret) {
-		dev_err(&i2c->dev, "Failed to parse f0_range_max node\n");
+		dev_info(&i2c->dev, "Failed to parse f0_range_max node\n");
 		tfa98xx->tfa->f0_range_max = DEFAULT_F0_RANGE_MAX;
 	}
 
-	dev_err(&i2c->dev, "f0_range_min = %d, f0_range_max = %d\n",
+	dev_info(&i2c->dev, "f0_range_min = %u, f0_range_max = %u\n",
 			tfa98xx->tfa->f0_range_min, tfa98xx->tfa->f0_range_max);
 //#endif /* OPLUS_ARCH_EXTENDS */
 
@@ -5145,6 +5380,9 @@ static int tfa98xx_i2c_remove(struct i2c_client *i2c)
 #ifdef DISABLE_TFA98XX_ALSA_SUPPORT
 	cancel_delayed_work_sync(&tfa98xx->unmute_work);
 #endif
+#ifdef OPLUS_ARCH_EXTENDS
+	cancel_delayed_work_sync(&tfa98xx->firmware_retry_work);
+#endif /* OPLUS_ARCH_EXTENDS */
 	device_remove_bin_file(&i2c->dev, &dev_attr_rpc);
 	device_remove_bin_file(&i2c->dev, &dev_attr_reg);
 	device_remove_bin_file(&i2c->dev, &dev_attr_rw);
@@ -5178,14 +5416,24 @@ static int tfa98xx_i2c_remove(struct i2c_client *i2c)
 }
 
 static const struct i2c_device_id tfa98xx_i2c_id[] = {
+#ifdef OPLUS_TFA98XX_DRV_NEED_COMPAT
+/* Modify for compatibility, which baseline use both old and new V6 driver */
+	{ "tfa98xx-v6", 0 },
+#else /* OPLUS_TFA98XX_DRV_NEED_COMPAT */
 	{ "tfa98xx", 0 },
+#endif /* OPLUS_TFA98XX_DRV_NEED_COMPAT */
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, tfa98xx_i2c_id);
 
 #ifdef CONFIG_OF
 static struct of_device_id tfa98xx_dt_match[] = {
+#ifdef OPLUS_TFA98XX_DRV_NEED_COMPAT
+/* Modify for compatibility, which baseline use both old and new V6 driver */
+	{.compatible = "tfa,tfa98xx-v6" },
+#else /* OPLUS_TFA98XX_DRV_NEED_COMPAT */
 	{.compatible = "tfa,tfa98xx" },
+#endif /* OPLUS_TFA98XX_DRV_NEED_COMPAT */
 	{.compatible = "tfa,tfa9872" },
 	{.compatible = "tfa,tfa9873" },
 	{.compatible = "tfa,tfa9875" },
@@ -5208,7 +5456,12 @@ static struct of_device_id tfa98xx_dt_match[] = {
 
 static struct i2c_driver tfa98xx_i2c_driver = {
 	.driver = {
+#ifdef OPLUS_TFA98XX_DRV_NEED_COMPAT
+/* Modify for compatibility, which baseline use both old and new V6 driver */
+		.name = "tfa98xx-v6",
+#else /* OPLUS_TFA98XX_DRV_NEED_COMPAT */
 		.name = "tfa98xx",
+#endif /* OPLUS_TFA98XX_DRV_NEED_COMPAT */
 		.owner = THIS_MODULE,
 		.of_match_table = of_match_ptr(tfa98xx_dt_match),
 	},
@@ -5228,11 +5481,20 @@ static int __init tfa98xx_i2c_init(void)
 	tfa98xx_ftrace_regs = trace_level & 4;
 
 	/* Initialize kmem_cache */
+#ifdef OPLUS_TFA98XX_DRV_NEED_COMPAT
+/* Modify for compatibility, which baseline use both old and new V6 driver */
+	tfa98xx_cache = kmem_cache_create("tfa98xx_cache_v6", /* Cache name /proc/slabinfo */
+		PAGE_SIZE, /* Structure size, we should fit in single page */
+		0, /* Structure alignment */
+		(SLAB_HWCACHE_ALIGN | SLAB_RECLAIM_ACCOUNT), /* Cache property */
+		NULL); /* Object constructor */
+#else /* OPLUS_TFA98XX_DRV_NEED_COMPAT */
 	tfa98xx_cache = kmem_cache_create("tfa98xx_cache", /* Cache name /proc/slabinfo */
 		PAGE_SIZE, /* Structure size, we should fit in single page */
 		0, /* Structure alignment */
 		(SLAB_HWCACHE_ALIGN | SLAB_RECLAIM_ACCOUNT), /* Cache property */
 		NULL); /* Object constructor */
+#endif /* OPLUS_TFA98XX_DRV_NEED_COMPAT */
 	if (!tfa98xx_cache) {
 		pr_err("tfa98xx can't create memory pool\n");
 		ret = -ENOMEM;

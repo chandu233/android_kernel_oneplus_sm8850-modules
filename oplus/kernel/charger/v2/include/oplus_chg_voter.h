@@ -8,6 +8,7 @@
 #define __PMIC_VOTER_H
 
 #include <linux/mutex.h>
+#include <oplus_mms.h>
 
 struct votable;
 
@@ -16,6 +17,22 @@ enum votable_type {
 	VOTE_MAX,
 	VOTE_SET_ANY,
 	NUM_VOTABLE_TYPES,
+};
+
+enum votable_check_type {
+	VOTE_CHECK_CLIENTS = BIT(0),
+	VOTE_CHECK_GLOBAL = BIT(1),
+	VOTE_CHECK_RESULT = BIT(2),
+};
+
+struct event_check_point_desc {
+	const char *name;
+	struct oplus_mms *topic;
+	u32 item_id;
+	enum votable_check_type check_type;
+	bool (*check_enabled)(union mms_msg_data *data);
+	bool step;
+	unsigned long delayed_ms;
 };
 
 #define PLC_VOTER		"PLC_VOTER"
@@ -72,8 +89,12 @@ enum votable_type {
 #define RXAC_VOTER		"RXAC_VOTER"
 #define WLS_ONLINE_VOTER	"WLS_ONLINE_VOTER"
 #define EPP_CURVE_VOTER		"EPP_CURVE_VOTER"
+#define PRODUCT_ID_VOTER	"PRODUCT_ID_VOTER"
+#define TA_CAPCHANGE_VOTER	"TA_CAPCHANGE_VOTER"
+#define WLS_UFCSTA_MAX_POWER_VOTER	"WLS_UFCSTA_MAX_POWER_VOTER"
 #define SPEC_VOTER		"SPEC_VOTER"
 #define BOOST_CV_VOTER		"BOOST_CV_VOTER"
+#define BOOST_I2C_ERROR_VOTER	"BOOST_I2C_ERROR_VOTER"
 #define FV_MAX_VOTER		"FV_MAX_VOTER"
 #define OVER_FV_VOTER		"OVER_FV_VOTER"
 #define CHG_FULL_VOTER		"CHG_FULL_VOTER"
@@ -163,16 +184,19 @@ enum votable_type {
 #define OCP_VOTER		"OCP_VOTER"
 #define IIC_VOTER		"IIC_VOTER"
 #define WLS_TIMEOUT_VOTER	"WLS_TIMEOUT_VOTER"
+#define WLSPEN_COVER_VOTER	"WLSPEN_COVER_VOTER"
 #define COMMON_POWER_CHECK	"COMMON_POWER_CHECK"
 #define FLASH_MODE_VOTER	"FLASH_MODE_VOTER"
 #define LIMIT_FCL_VOTER		"LIMIT_FCL_VOTER"
 #define STATE_KEEP_VOTER	"STATE_KEEP_VOTER"
 #define REC_VDD_VOTER		"REC_VDD_VOTER"
-#define DUAL_CELLS_PROTECTION_VOTER	  "DUAL_CELLS_PROTECTION_VOTER"
+#define DCB_PROTECT_VOTER	"DCB_PROTECT_VOTER"
 #define VBUS_MV_VOTER		"VBUS_MV_VOTER"
+#define STATE_KEEP_DDD_VOTER	"STATE_KEEP_DDD_VOTER"
 #define VFA_VOTER		"VFA_VOTER"
 #define FCS_ICL_VOTER		"FCS_ICL_VOTER"
 #define SVOOC_SUSPEND_ICL_VOTER	"SVOOC_SUSPEND_ICL_VOTER"
+
 
 /* TOPIC voter */
 #define COMM_TOPIC_VOTER	"COMM_TOPIC_VOTER"
@@ -217,6 +241,27 @@ int votable_add_check_func(struct votable *votable,
 	int (*func)(struct votable *votable,
 		void *data, const char *client_str,
 		bool enabled, int val, bool step));
+int votable_check_result(struct votable *votable, bool step);
+int votable_check_result_locked(struct votable *votable, bool step);
+int votable_remove_check_func(struct votable *votable,
+	int (*func)(struct votable *votable,
+		void *data, const char *client_str,
+		bool enabled, int val, bool step));
+int votable_add_client_check_func(struct votable *votable, const char *client_str,
+	void *data,
+	int (*func)(struct votable *votable, void *data,
+		    const char *client_str, bool enabled, int val, bool step));
+int votable_remove_client_check_func(struct votable *votable, const char *client_str);
+int votable_add_callback_result(struct votable *votable,
+	int (*func)(struct votable *votable, void *data, int *result));
+int votable_check_all_clients(struct votable *votable, bool step);
+int votable_add_timer_check_point(struct votable *votable,
+	int interval_ms, enum votable_check_type check_type, bool step);
+void votable_remove_timer_check_point(struct votable *votable);
+struct event_check_point *votable_add_event_check_point(
+	struct votable *votable,
+	struct event_check_point_desc *desc);
+void votable_remove_event_check_point(struct event_check_point *point);
 void destroy_votable(struct votable *votable);
 void lock_votable(struct votable *votable);
 void unlock_votable(struct votable *votable);

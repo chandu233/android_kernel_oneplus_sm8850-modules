@@ -30,6 +30,7 @@
 		if (!(a)) \
 			return -1; \
 	} while (0)
+#define ARRAY_LEN(array) 				((int)sizeof(array) / sizeof((array)[0]))
 
 #define SIH_I2C_OPERA_BYTE_ONE                      1
 #define SIH_I2C_OPERA_BYTE_TWO                      2
@@ -48,6 +49,10 @@
 
 extern haptic_func_t sih_688x_func_list;
 extern const struct regmap_config sih688x_regmap_config;
+extern int sih688x_config_load(sih_haptic_t *);
+extern haptic_func_t sih_6889_func_list;
+extern const struct regmap_config sih6889_regmap_config;
+extern int sih6889_config_load(sih_haptic_t *);
 extern haptic_stream_func_t stream_play_func;
 
 /*********************************************************

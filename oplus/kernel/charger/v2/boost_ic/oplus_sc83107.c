@@ -14,7 +14,6 @@
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
-#include <linux/power_supply.h>
 #include <linux/slab.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -367,6 +366,12 @@ static int sc83107_i2c_read_bytes(struct sc83107_chip *chip, uint8_t reg, uint8_
 	int ret = 0;
 	int retry;
 	int reset_ret;
+
+	/* Skip I2C operations if system is suspended */
+	if (atomic_read(&chip->suspended)) {
+		chg_info("system suspended, skip I2C read, reg=0x%02x\n", reg);
+		return -EAGAIN;
+	}
 
 	/* Skip I2C operations if system is suspended */
 	if (atomic_read(&chip->suspended)) {
@@ -1228,9 +1233,10 @@ static int sc83107_wdt_set(struct sc83107_chip *chip, uint32_t ms)
 #define SC83107_LV2_COMP_VOL_2_2V	4
 #define SC83107_LV2_COMP_VOL_2_4V	5
 __maybe_unused
-static int sc83107_lv2_comp_input_vol_threshold_set(struct sc83107_chip *chip, uint32_t mv)
+int sc83107_lv2_comp_input_vol_threshold_set(struct sc83107_chip *chip, uint32_t mv)
 {
 	uint8_t reg_val;
+	int ret;
 
 	if (mv >= 2400) {
 		reg_val = SC83107_LV2_COMP_VOL_2_4V;
@@ -1244,7 +1250,14 @@ static int sc83107_lv2_comp_input_vol_threshold_set(struct sc83107_chip *chip, u
 		reg_val = SC83107_LV2_COMP_VOL_1_8V;
 	}
 
-	return sc83107_field_write(chip, F_LV2_COMP_CT, reg_val);
+	chg_info("sc83107_lv2_comp_input_vol_threshold_set: mv=%d, reg_val=%d\n", mv, reg_val);
+	ret = sc83107_field_write(chip, F_LV2_COMP_CT, reg_val);
+	if (ret < 0) {
+		chg_err("sc83107_field_write F_LV2_COMP_CT failed: ret=%d\n", ret);
+	} else {
+		chg_info("sc83107_field_write F_LV2_COMP_CT success: reg_val=%d\n", reg_val);
+	}
+	return ret;
 }
 
 #define SC83107_LV2_COMP_HYS_VOL_100MV	0
@@ -1268,9 +1281,10 @@ static int sc83107_lv2_comp_vol_hysteresis_set(struct sc83107_chip *chip, uint32
 #define SC83107_LV0_COMP_CT_2_8V	2
 #define SC83107_LV0_COMP_CT_3_0V	3
 __maybe_unused
-static int sc83107_lv0_comp_falling_threshold_set(struct sc83107_chip *chip, uint32_t mv)
+int sc83107_lv0_comp_falling_threshold_set(struct sc83107_chip *chip, uint32_t mv)
 {
 	uint8_t reg_val;
+	int ret;
 
 	if (mv >= 3000) {
 		reg_val = SC83107_LV0_COMP_CT_3_0V;
@@ -1282,7 +1296,14 @@ static int sc83107_lv0_comp_falling_threshold_set(struct sc83107_chip *chip, uin
 		reg_val = SC83107_LV0_COMP_CT_2_4V;
 	}
 
-	return sc83107_field_write(chip, F_LV0_COMP_CT, reg_val);
+	chg_info("sc83107_lv0_comp_falling_threshold_set: mv=%d, reg_val=%d\n", mv, reg_val);
+	ret = sc83107_field_write(chip, F_LV0_COMP_CT, reg_val);
+	if (ret < 0) {
+		chg_err("sc83107_field_write F_LV0_COMP_CT failed: ret=%d\n", ret);
+	} else {
+		chg_info("sc83107_field_write F_LV0_COMP_CT success: reg_val=%d\n", reg_val);
+	}
+	return ret;
 }
 
 #define SC83107_LV1_COMP_CT_2_2V	0
@@ -1290,9 +1311,10 @@ static int sc83107_lv0_comp_falling_threshold_set(struct sc83107_chip *chip, uin
 #define SC83107_LV1_COMP_CT_2_6V	2
 #define SC83107_LV1_COMP_CT_2_8V	3
 __maybe_unused
-static int sc83107_lv1_comp_falling_threshold_set(struct sc83107_chip *chip, uint32_t mv)
+int sc83107_lv1_comp_falling_threshold_set(struct sc83107_chip *chip, uint32_t mv)
 {
 	uint8_t reg_val;
+	int ret;
 
 	if (mv >= 2800) {
 		reg_val = SC83107_LV1_COMP_CT_2_8V;
@@ -1304,7 +1326,14 @@ static int sc83107_lv1_comp_falling_threshold_set(struct sc83107_chip *chip, uin
 		reg_val = SC83107_LV1_COMP_CT_2_2V;
 	}
 
-	return sc83107_field_write(chip, F_LV1_COMP_CT, reg_val);
+	chg_info("sc83107_lv1_comp_falling_threshold_set: mv=%d, reg_val=%d\n", mv, reg_val);
+	ret = sc83107_field_write(chip, F_LV1_COMP_CT, reg_val);
+	if (ret < 0) {
+		chg_err("sc83107_field_write F_LV1_COMP_CT failed: ret=%d\n", ret);
+	} else {
+		chg_info("sc83107_field_write F_LV1_COMP_CT success: reg_val=%d\n", reg_val);
+	}
+	return ret;
 }
 
 #define TONMIN1_DELAY_TIME_20NS 20
@@ -2321,9 +2350,19 @@ static int sc83107_init_device(struct sc83107_chip *chip)
 	sc83107_vbat_sns_enable(chip, 0);
 #else
 	sc83107_bcl_clamp_vol_set(chip, 400);
-	sc83107_lv0_comp_falling_threshold_set(chip, 2600);
-	sc83107_lv1_comp_falling_threshold_set(chip, 2400);
-	sc83107_lv2_comp_input_vol_threshold_set(chip, 2000);
+	/* Set initial BCL thresholds (use default config with max values) */
+	if (chip->support_dynamic_bcl && chip->dynamic_bcl_config && chip->dynamic_bcl_config_count > 0) {
+		/* Use default config (max values) - will be replaced by backup config after restore */
+		/* Use first config entry (max values) for initial setup */
+		sc83107_lv0_comp_falling_threshold_set(chip, chip->dynamic_bcl_config[0].lv0_mv);
+		sc83107_lv1_comp_falling_threshold_set(chip, chip->dynamic_bcl_config[0].lv1_mv);
+		sc83107_lv2_comp_input_vol_threshold_set(chip, chip->dynamic_bcl_config[0].lv2_mv);
+	} else {
+		/* Default fixed values if dynamic BCL not supported */
+		sc83107_lv0_comp_falling_threshold_set(chip, 2600);
+		sc83107_lv1_comp_falling_threshold_set(chip, 2400);
+		sc83107_lv2_comp_input_vol_threshold_set(chip, 2000);
+	}
 #endif
 	sc83107_ton_max_limit_time_set(chip, 750);
 	sc83107_hybrid_output_vol_set(chip, 3100);
@@ -3333,6 +3372,9 @@ static int sc83107_charger_probe(struct i2c_client *client,
 
 	sc83107_create_device_node(&(client->dev));
 
+	/* Initialize dynamic BCL configuration after DT parsing and detection. */
+	sc83107_dynamic_bcl_init(chip, &client->dev);
+
 	ret = sc83107_register_interrupt(chip);
 	if (ret < 0) {
 		chg_err("register irq fail(%d)\n", ret);
@@ -3414,6 +3456,9 @@ static void sc83107_charger_remove(struct i2c_client *client)
 		disable_irq(chip->irq);
 
 	device_remove_file(chip->dev, &dev_attr_registers);
+
+	/* Cleanup dynamic BCL resources */
+	sc83107_dynamic_bcl_cleanup(chip);
 
 	/* Unregister wakelock */
 	if (chip->i2c_wake_lock) {

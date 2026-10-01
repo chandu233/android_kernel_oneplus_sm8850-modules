@@ -1410,7 +1410,7 @@ static int oplus_sc5891_get_batt_histsoh_data(struct oplus_chg_ic_dev *ic_dev, i
 
 	for (i = 0; i < OPLUS_MAXIM_MAX_SOH_RETRY; i++) {
 		rc = sc5891_get_historic_soh_data(chip, buf, len);
-		if (rc >= 0) {
+		if (rc == 0) {
 			chg_info("get_historic_soh_data success at retry %d\n", i);
 			break;
 		}
@@ -1611,6 +1611,7 @@ static int sc5891_read_page(struct oplus_chg_ic_dev *ic_dev,
 	*len = SC5891_INFO_PAGE_SIZE;
 
 err_out:
+	__pm_relax(chip->rw_wake_lock);
 	sc5891_ic_enter_shutdown(chip);
 	sc5891_pinctrl_avoid(chip, false);
 	__pm_relax(chip->rw_wake_lock);
@@ -2713,10 +2714,20 @@ static int sc5891_ic_register(struct sc5891_device *chip)
 
 static int sc5891_pinctrl_init(struct sc5891_device *chip)
 {
-	chip->pinctrl = devm_pinctrl_get(chip->dev);
+	struct device *dev;
+
+	if (!chip || !chip->dev)
+		return -EINVAL;
+
+	dev = chip->dev;
+	chip->pinctrl = devm_pinctrl_get(dev->parent);
 	if (IS_ERR_OR_NULL(chip->pinctrl)) {
-		chg_err("get pinctrl fail\n");
-		return -ENODEV;
+		chg_err("get parent pinctrl fail, error: %ld\n", PTR_ERR(chip->pinctrl));
+		chip->pinctrl = devm_pinctrl_get(dev);
+		if (IS_ERR_OR_NULL(chip->pinctrl)) {
+			chg_err("get device pinctrl fail, error: %ld\n", PTR_ERR(chip->pinctrl));
+			return -ENODEV;
+		}
 	}
 	chip->pinctrl_default = pinctrl_lookup_state(chip->pinctrl, "default");
 	if (IS_ERR_OR_NULL(chip->pinctrl_default)) {

@@ -32,7 +32,23 @@
 #define POINT_DATA_CHECKSUM_LEN 65
 #define NVT_TOUCH_ESD_CHECK_PERIOD (2000)
 #define NVT_ID_BYTE_MAX 6
-#define POINT_DATA_LEN 120
+#define POINT_DATA_LEN 300 /* coord 120bytes + dummy 136bytes (aligned 256byes) + edge reject 40bytes + pen speed*/
+/* Pen uplink timing protocol definitions */
+#define MAX_PEN_UPLINK_DATA_LEN 76  /* Maximum expected data length: data[5] ~ data[80] */
+#define MIN_BUF_LEN 2  /* Minimum required buffer size: 2 bytes (type + length) */
+/* Protocol field indices */
+#define PEN_UPLINK_INPUT_ID_SHIFT 3  /* Bit shift for extracting input_id from data[1] */
+#define PEN_UPLINK_FUNC_TYPE_IDX 2   /* Function type field index: data[2] */
+#define PEN_UPLINK_STYLUS_TIMING_IDX 3  /* Stylus timing field index: data[3] */
+#define PEN_UPLINK_DATA_LEN_IDX 4    /* Data length field index: data[4] */
+#define PEN_UPLINK_DATA_START_IDX 5  /* Data payload start index: data[5] */
+#define PEN_UPLINK_FREQ_HOP_DATA_END_IDX 6  /* Frequency hopping data end index: data[6] */
+/* Buffer and array size constants */
+#define PEN_UPLINK_MIN_DATA_ARRAY_LEN 7  /* Minimum data array length to access data[0]~data[6] */
+#define PEN_UPLINK_HEADER_LEN 2  /* Header length: type (1 byte) + length (1 byte) */
+#define PEN_UPLINK_CHECKSUM_START_IDX 66  /* Checksum data start index in point_data array */
+#define PEN_UPLINK_FREQ_HOP_MIN_BUF_LEN 4  /* Minimum buffer length for frequency hopping: header(2) + data(2) */
+#define PEN_UPLINK_DEBUG_STR_BUF_SIZE 256  /* Debug string buffer size */
 #define SIZE_4KB 4096
 #define FLASH_SECTOR_SIZE SIZE_4KB
 /*#define FW_BIN_VER_OFFSET (fw_need_write_size - SIZE_4KB)*/
@@ -47,6 +63,9 @@
 
 #define NVT_MMAP_DEBUG_FINGER_DOWN_DIFFDATA   (0x26A78) /*debug finger diff (finger down)  */
 #define NVT_MMAP_DEBUG_STATUS_CHANGE_DIFFDATA (0x26CB8) /*debug finger diff (status change)*/
+#define ADDR_MP_DEBUG_MESSAGE                 (0x130A50)
+#define ADDR_UNLOCK_CP_COUNT                  (0x1FB316)
+#define ADDR_READ_PC_COUNT                    (0x1FB304)
 
 #define W_DETECT                        13
 #define UP_VEE_DETECT                   14
@@ -58,13 +77,28 @@
 #define DOWN_SLIDE_DETECT               22
 #define LEFT_SLIDE_DETECT               23
 #define RIGHT_SLIDE_DETECT              24
-
+/* customized gesture id */
+#define DATA_PROTOCOL                   30
+/* function page definition */
+#define FUNCPAGE_STYLUS_STATE            5
+#define FUNCPAGE_STYLUS_TIMING           6
+/* function: stylus state */
+#define STYLUS_STATE_LEAVE               0
+#define STYLUS_STATE_DETECT              1
+#define STYLUS_STATE_ENTER               2
+/* function: stylus timing */
+#define STYLUS_TIMING_SET                0
+#define STYLUS_TIMING_FREQ_HOPPING       1
 #define LEFT_VEE_DETECT                 31
 #define RIGHT_VEE_DETECT                32
 #define DOWN_VEE_DETECT                 33
 #define DOUSWIP_DETECT                  34
 #define PEN_DETECT                      25
 
+#define PEN_UPLINK_IN_RESUME             1
+#define PEN_UPLINK_IN_SUSPEND            2
+
+#define EVENTBUFFER_INJECT_WDT_RESET     0x24       /*inject watchdog reset*/
 #define EVENTBUFFER_PWR_PLUG_IN          0x53
 #define EVENTBUFFER_PWR_PLUG_OUT         0x51
 #define EVENTBUFFER_HOPPING_POLLING_ON   0x73
@@ -79,7 +113,7 @@
 #define EVENTBUFFER_EDGE_LIMIT_RIGHT_UP  0x7C
 #define EVENTBUFFER_GAME_ON            0x7D
 #define EVENTBUFFER_GAME_OFF           0x7E
-
+#define EVENTBUFFER_EXT_OPP_CMD                   0x40
 #define EVENTBUFFER_EXT_CMD                       0x7F
 #define EVENTBUFFER_EXT_DBG_MSG_DIFF_ON           0x01
 #define EVENTBUFFER_EXT_DBG_MSG_DIFF_OFF          0x02
@@ -103,9 +137,22 @@
 #define EVENTBUFFER_EXT_PEN_VIBRATOR_ON           0x16
 #define EVENTBUFFER_EXT_PEN_VIBRATOR_OFF          0x17
 #define EVENTBUFFER_EXT_PEN_MODE_5TH_ON           0x18       /*notify maxeye-3ND pencil connected*/
+#define EVENTBUFFER_EXT_PEN_MODE_6TH_ON           0x19       /*notify maxeye-4ND pencil connected*/
 #define EVENTBUFFER_EXT_PEN_JITTER_LEVEL          0x25
 #define EVENTBUFFER_EXT_NOTIFY_KEYBOARD_OPEN      0x26       /*notify keyboard open event during screenOn*/
+#define EVENTBUFFER_EXT_REALTIME_DIFF_RECORD      0x28
+#define EVENTBUFFER_EXT_SET_PACKAGE_TYPE          0x29
+#define EVENTBUFFER_EXT_DISABLE_0G_TOUCH          0x2B
 #define PEN_CTL_FEEDBACK                          0xffff
+#define PEN_CTL_VIBRATOR_ON                       3       /* Enable pen vibrator */
+#define PEN_CTL_VIBRATOR_OFF                      2       /* Disable pen vibrator */
+#define PEN_POINT_DATA_0G_OUTPUT                  16      /* 0g出水 */
+#define PEN_POINT_DATA_REAL_WRITING                32      /* 真实书写 */
+
+#define DISABLE_RELOAD_PATH  "disable_reload_fw"
+#define DISABLE_RELOAD_CHMOD 0666
+#define PEN_PRESSURE_RATIO_THRESHOLD_PATH  "pen_pressure_ratio_threshold"
+#define PEN_PRESSURE_DIFF_THRESHOLD_PATH   "pen_pressure_diff_threshold"
 
 #define NVT_TOUCH_FW_DEBUG_INFO (1)
 #define NVT_DUMP_SRAM   (0)
@@ -155,6 +202,22 @@
 
 /* define for fw event buffer protocol */
 #define NVT_EVENTBUF_PROT_HIGH_RESO 0xF1
+
+/* define for Game Hot Zone */
+#define TENCENT_TMGP           10
+#define TENCENT_TMGP_MAP       4
+#define PHYSICAL_ORIGIN_LEFT   0
+#define PHYSICAL_ORIGIN_RIGHT  1
+#define MAX_CMD_LEN            9
+#define GAME_AIUNIT_CMD        0xBD
+
+/* different pencil press config */
+#define OTHER_PENCIL_PARA      2
+
+#define BUF_SIZE               10
+/* Realtime Diff Data Record */
+#define NVT_REALTIME_DIFF_DATA_ADDR    0x134DA0
+#define NVT_REALTIME_FRAME_COUNT_SIZE  4
 
 typedef enum {
 	NVT_RAWDATA,    /*raw data       */
@@ -364,6 +427,8 @@ struct chip_data_nt36536 {
 	uint8_t                         hw_crc;
 	uint8_t                         auto_copy;
 	uint8_t                         bld_multi_header;
+	uint16_t                        last_pressure;
+	uint16_t                        pressure;
 	uint16_t                        nvt_pid;
 	uint32_t                        ENG_RST_ADDR;
 	uint32_t                        partition;
@@ -386,12 +451,16 @@ struct chip_data_nt36536 {
 #endif /* end of CONFIG_TOUCHPANEL_MTK_PLATFORM */
 	uint8_t                         touch_direction;    /*show touchpanel current direction*/
 	struct mutex                    mutex_testing;
+	struct mutex                    mutex_fw_update;  /* serialize fw update (probe vs lcd_trigger_load_tp_fw) */
 	int                             probe_done;
 	bool                            using_headfile;
 	int                             lcd_reset_gpio;
 	struct nvt_fw_debug_info        nvt_fw_debug_info;
 	int irq_num;
 	int pen_id_map_num;
+	int other_pen_para[OTHER_PENCIL_PARA];
+	int pen_press_ratio;
+	bool pen_change_press;
 	struct touchpanel_data *ts;
 	u8 *g_fw_buf;
 	size_t g_fw_len;
@@ -409,7 +478,9 @@ struct chip_data_nt36536 {
 	int gesture_state;
 	int doze_x_num;
 	int doze_y_num;
+	int pen_max_diff;
 	uint8_t current_pencil_type;
+	bool disable_reload_fw;
 #ifdef CONFIG_OPLUS_TP_APK
 
 	bool lock_point_status;
@@ -440,6 +511,24 @@ struct chip_data_nt36536 {
 	struct monitor_data *monitor_data;
 	ktime_t start;
 	ktime_t end;
+
+	/* Realtime Diff Data Record */
+	bool tp_data_record_support;
+	bool differ_print_every_frame;
+	uint32_t frame_cnt;
+	uint32_t last_frame_cnt;
+	int32_t realtime_diff_size; /* tx * rx + 4bytes frame_cnt */
+	int8_t *realtime_diff_data;
+
+	/* Pen pressure lift detection */
+	struct pen_pressure_state pressure_state; /* Pressure detection state */
+	struct mutex pressure_mutex;              /* Mutex for pressure data protection */
+	bool fw_update_completed;                 /* Flag to indicate if firmware update is completed */
+	bool black_gesture_completed;             /* Flag to indicate if black gesture setup is completed */
+	/* pen_press_write_allowed is accessed from both interrupt context (nvt_get_pen_points)
+	 * and process context (nvt_set_pen_downlink), use atomic operations for synchronization */
+	atomic_t pen_press_write_allowed;         /* Flag to indicate if pen press write is allowed (set in nvt_get_pen_points) */
+	bool pen_uplink_timing_completed;        /* Flag to indicate if nvt_get_pen_uplink_timing is completed in suspend mode (required before nvt_set_pen_downlink) */
 };
 
 #endif /*NVT_H_NT36536_NOFLASH*/

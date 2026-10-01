@@ -30,6 +30,15 @@ unsigned int get_eng_version(void);
 unsigned int is_new_cdt(void);
 #ifdef CONFIG_OPLUS_SYSTEM_KERNEL_QCOM
 unsigned int get_serialID(void);
+int get_midplat_version(void);
+int get_midplat_feature_info(OPLUS_MID_PLAT_FEATURE_T feature);
+unsigned int get_GKI_version(void);
+unsigned int get_kernel_major_version(void);
+unsigned int get_kernel_patch_version(void);
+unsigned int get_kernel_sub_version(void);
+unsigned int get_kernel_version_code(void);
+int get_vnd_platform(char *buf, int len);
+int get_vnd_chipset_brand(char *buf, int len);
 #else
 void get_serialID(char *serialno);
 #endif

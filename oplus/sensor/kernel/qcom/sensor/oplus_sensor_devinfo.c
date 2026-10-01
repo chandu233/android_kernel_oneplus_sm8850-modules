@@ -25,16 +25,21 @@ EXPORT_SYMBOL(sns_dsi_display_secondary);
 extern int oplus_press_cali_data_init(void);
 extern void oplus_press_cali_data_clean(void);
 
-extern int pad_als_data_init(void);
-extern void pad_als_data_clean(void);
-
 struct sensor_info * g_chip = NULL;
 
 struct proc_dir_entry *sensor_proc_dir = NULL;
 static struct oplus_als_cali_data *gdata = NULL;
 static uint32_t g_ldo_enable;
 static bool g_fold_dev_supt = false;
+static bool g_multi_panel_stage = false;
 
+enum PANEL_STAGE {
+	PANEL_PVT,
+	PANEL_DVT,
+	PANEL_EVT,
+	PANEL_T0,
+	PANEL_DEFAULT,
+};
 
 static char* als_rear_feature[] = {
 	"als-factor",
@@ -151,7 +156,7 @@ static void parse_magnetic_sensor_dts(struct sensor_hw* hw, struct device_node *
 	int distinguish_nfc = 0;
 	int soft_default_para[18] = {10000, 0, 0, 0, 0, 0, 0, 0, 10000, 0, 0, 0, 0, 0, 0, 0, 10000, 0};
 	/*set default defaut mag */
-	memcpy((void *)&hw->feature.parameter[0], (void *)&soft_default_para[0], sizeof(soft_default_para));
+	memmove((void *)&hw->feature.parameter[0], (void *)&soft_default_para[0], sizeof(soft_default_para));
 	rc = of_property_read_u32(ch_node, "parameter-number", &value);
 	if (!rc && value > 0 && value < PARAMETER_NUM) {
 		rc = of_property_read_u32(ch_node, "is-need-distinguish-nfc", &distinguish_nfc);
@@ -301,6 +306,58 @@ static void parse_proximity_sensor_dts(struct sensor_hw* hw, struct device_node 
 		hw->feature.feature[0], hw->feature.feature[1], hw->feature.feature[2], hw->feature.feature[4]);
 }
 
+static int sns_get_panel_stage(struct device_node *ch_node)
+{
+	unsigned int panel_id = 0;
+	unsigned int panel_id1 = 0;
+	unsigned int panel_id2 = 0;
+	char *str_id = NULL;
+	int stage_id_size = 0;
+	uint32_t *panel_stage_array = NULL;
+	int rc = 0;
+	int i = 0;
+
+	str_id = strnstr(sns_dsi_display_primary, ":PanelID-0x", strlen(sns_dsi_display_primary));
+	if (str_id) {
+		if (sscanf(str_id, ":PanelID-0x%08X", &panel_id) != 1) {
+			pr_err("invalid PanelID = %s\n", sns_dsi_display_primary);
+			return PANEL_DEFAULT;
+		}
+	}
+	panel_id2 = (panel_id >> 8) & 0xFF;
+	panel_id1 = (panel_id >> 16) & 0xFF;
+	pr_info("panel id2 =0x%x, id1 =0x%x\n", panel_id2, panel_id1);
+	if (panel_id2 <= 0 || panel_id1 <= 0) {
+		return PANEL_DEFAULT;
+	}
+	stage_id_size = of_property_count_elems_of_size(ch_node, "panel_stage", sizeof(uint32_t));
+	panel_stage_array = (uint32_t *)kzalloc(sizeof(uint32_t) * stage_id_size, GFP_KERNEL);
+	of_property_read_u32_array(ch_node, "panel_stage", panel_stage_array, stage_id_size);
+
+	for (i = 0; i < stage_id_size; i++) {
+	    pr_info("panel_stage_array: =0x%x\n", panel_stage_array[i]);
+	}
+
+	if (panel_id1 == panel_stage_array[0] || panel_id1 == panel_stage_array[1] ||
+		panel_id1 == panel_stage_array[2] || panel_id1 == panel_stage_array[3]) {
+		rc = PANEL_PVT;
+	} else if (panel_id1 == panel_stage_array[4] || panel_id1 == panel_stage_array[5] ||
+		panel_id1 == panel_stage_array[6] || panel_id1 == panel_stage_array[7]) {
+		rc = PANEL_DVT;
+	} else if (panel_id1 == panel_stage_array[8] || panel_id1 == panel_stage_array[9] ||
+		panel_id1 == panel_stage_array[10] || panel_id1 == panel_stage_array[11]) {
+		rc = PANEL_EVT;
+	} else if (panel_id1 == panel_stage_array[12] || panel_id1 == panel_stage_array[13] ||
+		panel_id1 == panel_stage_array[14] || panel_id1 == panel_stage_array[15]) {
+		rc = PANEL_T0;
+	} else {
+		rc = PANEL_DEFAULT;
+	}
+	pr_info("stage info =%d\n", rc);
+	kfree(panel_stage_array);
+	return rc;
+}
+
 static void parse_light_sensor_dts(struct sensor_hw* hw, struct device_node *ch_node)
 {
 	int rc = 0;
@@ -320,7 +377,8 @@ static void parse_light_sensor_dts(struct sensor_hw* hw, struct device_node *ch_
 		"als_ratio_type",
 		"sup_remote_proc",
 		"als_polling_timer",
-		"is_distinguish_screens"
+		"is_distinguish_screens",
+		"panel_stage"
 	};
 
 	char *light_para[] = {
@@ -373,6 +431,9 @@ static void parse_light_sensor_dts(struct sensor_hw* hw, struct device_node *ch_
 			pr_info("parse %s failed!", als_feature[di]);
 		}
 
+		if ((0 == strncmp(als_feature[di], "panel_stage", 11)) && g_multi_panel_stage) {
+			hw->feature.feature[di] = sns_get_panel_stage(ch_node);
+		}
 		SENSOR_DEVINFO_DEBUG("light feature[%s] : %d\n", als_feature[di], hw->feature.feature[di]);
 	}
 	if (of_property_read_u32(ch_node, "is_distinguish_screens", &value)) {
@@ -465,7 +526,7 @@ static void parse_sar_sensor_dts(struct sensor_hw* hw, struct device_node *ch_no
 	/*reg->dc_offset*/
 	rc = of_property_read_u32(ch_node, "is-dc-offset", &value);
 	if (!rc && value == 1) {
-		memcpy((void *)&hw->feature.reg[0], (void *)&dc_offset_default[0], SAR_MAX_CH_NUM * 2);
+		memmove((void *)&hw->feature.reg[0], (void *)&dc_offset_default[0], SAR_MAX_CH_NUM * 2);
 		for (di = 0; di < SAR_MAX_CH_NUM; di++) {
 			SENSOR_DEVINFO_DEBUG("sar dc_offset_l[%d] = %d, dc_offset_H[%d] = %d",
 				di, hw->feature.reg[di], di + SAR_MAX_CH_NUM, hw->feature.reg[di + SAR_MAX_CH_NUM]);
@@ -933,6 +994,19 @@ static void parse_expand_gpio_sensor_dts(struct sensor_algorithm *algo, struct d
 	pr_err("is_externel_power_on:%d", algo->parameter[10]);
 }
 
+static void parse_data_log_sensor_dts(struct sensor_algorithm *algo, struct device_node *ch_node)
+{
+	int rc = 0;
+	int value = 0;
+
+	rc = of_property_read_u32(ch_node, "switch", &value);
+	if (!rc) {
+		algo->parameter[0] = value;
+	}
+
+	SENSOR_DEVINFO_DEBUG("switch:%d\n", algo->feature[0]);
+}
+
 static void parse_each_virtual_sensor_dts(struct sensor_algorithm *algo, struct device_node * ch_node)
 {
 	if (0 == strncmp(ch_node->name, "pickup", 6)) {
@@ -949,6 +1023,8 @@ static void parse_each_virtual_sensor_dts(struct sensor_algorithm *algo, struct 
 		parse_camera_protect_sensor_dts(algo, ch_node);
 	} else if (0 == strncmp(ch_node->name, "expand_gpio", 11)) {
 		parse_expand_gpio_sensor_dts(algo, ch_node);
+	} else if (0 == strncmp(ch_node->name, "data_log", 8)) {
+		parse_data_log_sensor_dts(algo, ch_node);
 	} else {
 		/* do nothing */
 	}
@@ -975,6 +1051,12 @@ static void oplus_sensor_parse_dts(struct platform_device *pdev)
 		g_fold_dev_supt = true;
 	} else {
 		g_fold_dev_supt = false;
+	}
+
+	if (of_property_read_bool(node, "sup-multi-panel-stage")) {
+	    g_multi_panel_stage = true;
+	} else {
+	    g_multi_panel_stage = false;
 	}
 
 	for_each_child_of_node(node, ch_node) {
@@ -1047,7 +1129,7 @@ static ssize_t als_type_read_proc(struct file *file, char __user *buf,
 		return -ENOMEM;
 	}
 
-	len = sprintf(page, "%d", g_chip->s_vector[OPLUS_LIGHT].hw[0].feature.feature[0]);
+	len = snprintf(page, sizeof(page), "%d", g_chip->s_vector[OPLUS_LIGHT].hw[0].feature.feature[0]);
 
 	if (len > *off) {
 		len -= *off;
@@ -1073,7 +1155,7 @@ static ssize_t red_max_lux_read_proc(struct file *file, char __user *buf,
 		return -ENOMEM;
 	}
 
-	len = sprintf(page, "%d", gdata->red_max_lux);
+	len = snprintf(page, sizeof(page), "%d", gdata->red_max_lux);
 
 	if (len > *off) {
 		len -= *off;
@@ -1138,7 +1220,7 @@ static ssize_t white_max_lux_read_proc(struct file *file, char __user *buf,
 		return -ENOMEM;
 	}
 
-	len = sprintf(page, "%d", gdata->white_max_lux);
+	len = snprintf(page, sizeof(page), "%d", gdata->white_max_lux);
 
 	if (len > *off) {
 		len -= *off;
@@ -1203,7 +1285,7 @@ static ssize_t blue_max_lux_read_proc(struct file *file, char __user *buf,
 		return -ENOMEM;
 	}
 
-	len = sprintf(page, "%d", gdata->blue_max_lux);
+	len = snprintf(page, sizeof(page), "%d", gdata->blue_max_lux);
 
 	if (len > *off) {
 		len -= *off;
@@ -1268,7 +1350,7 @@ static ssize_t green_max_lux_read_proc(struct file *file, char __user *buf,
 		return -ENOMEM;
 	}
 
-	len = sprintf(page, "%d", gdata->green_max_lux);
+	len = snprintf(page, sizeof(page), "%d", gdata->green_max_lux);
 
 	if (len > *off) {
 		len -= *off;
@@ -1333,7 +1415,7 @@ static ssize_t cali_coe_read_proc(struct file *file, char __user *buf,
 		return -ENOMEM;
 	}
 
-	len = sprintf(page, "%d", gdata->cali_coe);
+	len = snprintf(page, sizeof(page), "%d", gdata->cali_coe);
 
 	if (len > *off) {
 		len -= *off;
@@ -1399,7 +1481,7 @@ static ssize_t row_coe_read_proc(struct file *file, char __user *buf,
 		return -ENOMEM;
 	}
 
-	len = sprintf(page, "%d", gdata->row_coe);
+	len = snprintf(page, sizeof(page), "%d", gdata->row_coe);
 
 	if (len > *off) {
 		len -= *off;

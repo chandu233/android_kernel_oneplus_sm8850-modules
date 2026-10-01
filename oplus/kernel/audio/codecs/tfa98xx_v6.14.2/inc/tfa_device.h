@@ -151,11 +151,13 @@ struct tfa_device {
 	struct kmem_cache *cachep;	/**< Memory allocator handle */
 	char fw_itf_ver[4];          /* Firmware ITF version */
 //#ifdef OPLUS_ARCH_EXTENDS
-	u32 min_mohms;
-	u32 max_mohms;
-	u32 f0_range_min;
-	u32 f0_range_max;
+	uint32_t min_mohms;
+	uint32_t max_mohms;
+	uint32_t default_mohms;
+	uint32_t f0_range_min;
+	uint32_t f0_range_max;
 	int freqs;
+	bool is_dummy_codec;
 //#endif /* OPLUS_ARCH_EXTENDS */
 };
 

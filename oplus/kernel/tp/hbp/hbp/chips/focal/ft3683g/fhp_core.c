@@ -43,6 +43,7 @@
 #include "../../../hbp_core.h"
 #include "../../../hbp_spi.h"
 #include "../../../utils/debug.h"
+#include "../../chips_healthinfo_report.h"
 
 #define PLATFORM_DRIVER_NAME "fts"
 
@@ -189,6 +190,7 @@ static int fhp_chip_write(struct fts_core *ts_data, u8 *writebuf, u32 writelen)
 	if (ret < 0) {
 		hbp_err("data write(addr:%x) fail,status:%x,ret:%d",
 			writebuf[0], rxbuf[3], ret);
+		hbp_dev_healthinfo_report(ts_data, CHIPS_REPORT_FOCAL_CHIP_WRITE_FAIL);
 	}
 
 	udelay(CS_HIGH_DELAY);
@@ -252,6 +254,7 @@ static int fhp_chip_read(struct fts_core *ts_data, u8 *cmd, u32 cmdlen, u8 *data
 		hbp_err("data read(addr:%x) %s,status:%x,ret:%d", cmd[0],
 			(i >= SPI_RETRY_NUMBER) ? "crc abnormal" : "fail",
 			rxbuf[3], ret);
+		hbp_dev_healthinfo_report(ts_data, CHIPS_REPORT_FOCAL_CHIP_READ_FAIL);
 	}
 
 	//udelay(CS_HIGH_DELAY);
@@ -315,6 +318,7 @@ static int fhp_read_fod_info(struct fts_core *ts_data, struct fod_info *fod)
 	ret = fhp_chip_read(ts_data, &cmd, 1, &val[0], FT3681_REG_FOD_INFO_LEN);
 	if (ret < 0) {
 		hbp_err("failed to read fod data\n");
+		hbp_dev_healthinfo_report(ts_data, CHIPS_REPORT_FOCAL_FOD_INFO_READ_FAIL);
 		return ret;
 	}
 
@@ -326,6 +330,7 @@ static int fhp_read_fod_info(struct fts_core *ts_data, struct fod_info *fod)
 		fod->fp_down = 0;
 	} else {
 		hbp_err("failed to read fp down 0x%x\n", val[8]);
+		hbp_dev_healthinfo_report(ts_data, CHIPS_REPORT_FOCAL_FOD_INFO_READ_FAIL);
 		return -1;
 	}
 
@@ -346,6 +351,7 @@ static int fhp_read_fod_error_info(struct fts_core *ts_data)
 	ret = fhp_chip_read(ts_data, &cmd, 1, &val[0], FT3681_REG_FOD_ERROR_INFO_LEN);
 	if (ret < 0) {
 		hbp_err("TP_FP_ERROR_REPORT:failed to read fod data\n");
+		hbp_dev_healthinfo_report(ts_data, CHIPS_REPORT_FOCAL_FOD_ERROR_READ_FAIL);
 		return ret;
 	}
 
@@ -393,6 +399,7 @@ static int fhp_read_aod_info(struct fts_core *ts_data, struct aod_info *aod)
 	ret = fhp_chip_read(ts_data, &cmd, 1, &val[0], FT3681_REG_AOD_INFO_LEN);
 	if (ret < 0) {
 		hbp_err("failed to read aod data\n");
+		hbp_dev_healthinfo_report(ts_data, CHIPS_REPORT_FOCAL_AOD_INFO_READ_FAIL);
 		return ret;
 	}
 
@@ -416,6 +423,7 @@ static int fhp_chip_get_irq_reason(void *priv, enum irq_reason *reason)
 	ret = fhp_chip_read_reg(fts, FTS_REG_RESET_REASON, &reset_reason);
 	if (ret < 0) {
 		hbp_err("failed to read reset reason");
+		hbp_dev_healthinfo_report(fts, CHIPS_REPORT_FOCAL_IRQ_REASON_READ_FAIL);
 		return ret;
 	}
 
@@ -427,15 +435,19 @@ static int fhp_chip_get_irq_reason(void *priv, enum irq_reason *reason)
 	switch (reset_reason) {
 	case FTS_RST_REASON_FWUPDATE:
 		*reason = IRQ_REASON_RESET_FWUPDATE;
+		hbp_info("hbp chip reset, reason 0x%x(RESET_FWUPDATE)\n", *reason);
 		break;
 	case FTS_RST_REASON_WDT:
 		*reason = IRQ_REASON_RESET_WDT;
+		hbp_info("hbp chip reset, reason 0x%x(RESET_WDT)\n", *reason);
 		break;
 	case FTS_RST_REASON_EXTERNAL:
 		*reason = IRQ_REASON_RESET_EXTERNAL;
+		hbp_info("hbp chip reset, reason 0x%x(RESET_EXTERNAL)\n", *reason);
 		break;
 	case FTS_RST_REASON_PWR:
 		*reason = IRQ_REASON_RESET_PWR;
+		hbp_info("hbp chip reset, reason 0x%x(RESET_PWR)\n", *reason);
 		break;
 	case FTS_GESTURE_DIFF:
 		*reason = IRQ_REASON_GESTURE_DIFF;
@@ -445,9 +457,6 @@ static int fhp_chip_get_irq_reason(void *priv, enum irq_reason *reason)
 		break;
 	}
 
-	if (reset_reason != FTS_GESTURE_DIFF) {
-		hbp_info("hbp chip reset, reason 0x%x\n", *reason);
-	}
 	ret = fhp_chip_write_reg(fts, FTS_REG_RESET_REASON, 0x00);
 	if (ret < 0) {
 		hbp_err("failed to clear reset reason");
@@ -510,6 +519,7 @@ static int fhp_chip_get_gesture(void *priv, struct gesture_info *gesture)
 	if (ret < 0) {
 		hbp_err("read gesture data fail");
 		hbp_exception_report(EXCEP_GESTURE, "read gesture data fail", sizeof("read gesture data fail"));
+		hbp_dev_healthinfo_report(fts, CHIPS_REPORT_FOCAL_GESTURE_READ_FAIL);
 		return ret;
 	}
 
@@ -579,6 +589,7 @@ static int fhp_chip_get_gesture(void *priv, struct gesture_info *gesture)
 		if (ret < 0) {
 			hbp_err("failed to read fod info\n");
 			hbp_exception_report(EXCEP_FINGERPRINT, "failed to read fod info", sizeof("failed to read fod info"));
+			hbp_dev_healthinfo_report(fts, CHIPS_REPORT_FOCAL_FOD_INFO_READ_FAIL);
 			return ret;
 		}
 
@@ -599,6 +610,7 @@ static int fhp_chip_get_gesture(void *priv, struct gesture_info *gesture)
 		ret = fhp_read_fod_error_info(fts);
 		if (ret < 0) {
 				hbp_err("failed to read fod error info\n");
+				hbp_dev_healthinfo_report(fts, CHIPS_REPORT_FOCAL_FOD_ERROR_READ_FAIL);
 				return ret;
 		}
 		gesture->type = UnknownGesture;
@@ -612,6 +624,7 @@ static int fhp_chip_get_gesture(void *priv, struct gesture_info *gesture)
 		if (ret < 0) {
 			hbp_err("failed to read aod info\n");
 			hbp_exception_report(EXCEP_GESTURE, "failed to read aod", sizeof("failed to read aod"));
+			hbp_dev_healthinfo_report(fts, CHIPS_REPORT_FOCAL_AOD_INFO_READ_FAIL);
 			return ret;
 		}
 		gesture->Point_start.x = aod.aod_x;
@@ -659,6 +672,7 @@ static int fhp_chip_get_touch_points(void *priv, struct point_info *points)
 	ret = fhp_chip_read(fts, &cmd, 1, touch_buf, FTS_MAX_POINTS_LENGTH);
 	if (ret < 0) {
 		hbp_err("read touch point one fail");
+		hbp_dev_healthinfo_report(fts, CHIPS_REPORT_FOCAL_TOUCH_POINTS_READ_FAIL);
 		return ret;
 	}
 
@@ -670,6 +684,7 @@ static int fhp_chip_get_touch_points(void *priv, struct point_info *points)
 
 		if (finger_num > FTS_MAX_POINTS_SUPPORT) {
 			hbp_err("invalid point_num(%d),max_num(%d)", finger_num, FTS_MAX_POINTS_SUPPORT);
+			hbp_dev_healthinfo_report(fts, CHIPS_REPORT_FOCAL_TOUCH_INVALID_POINT_NUM);
 			return -EIO;
 		}
 
@@ -682,6 +697,7 @@ static int fhp_chip_get_touch_points(void *priv, struct point_info *points)
 
 			} else if (pointid >= FTS_MAX_POINTS_SUPPORT) {
 				hbp_err("ID(%d) beyond max_num(%d)", pointid, FTS_MAX_POINTS_SUPPORT);
+				hbp_dev_healthinfo_report(fts, CHIPS_REPORT_FOCAL_TOUCH_INVALID_ID);
 				return -EINVAL;
 			}
 
@@ -706,6 +722,7 @@ static int fhp_chip_get_touch_points(void *priv, struct point_info *points)
 
 				if (finger_num == 0) {
 					hbp_err("abnormal touch data from fw");
+					hbp_dev_healthinfo_report(fts, CHIPS_REPORT_FOCAL_TOUCH_ABNORMAL_DATA);
 					return -EIO;
 				}
 			}
@@ -713,6 +730,7 @@ static int fhp_chip_get_touch_points(void *priv, struct point_info *points)
 
 		if (event_num == 0) {
 			hbp_err("no touch point information");
+			hbp_dev_healthinfo_report(fts, CHIPS_REPORT_FOCAL_TOUCH_NO_POINT_INFO);
 			return -EIO;
 		}
 		break;
@@ -721,6 +739,7 @@ static int fhp_chip_get_touch_points(void *priv, struct point_info *points)
 		event_num = touch_buf[FTS_TOUCH_E_NUM] & 0x0F;
 		if (!event_num || (event_num > FTS_MAX_POINTS_SUPPORT)) {
 			hbp_err("invalid touch event num(%d)", event_num);
+			hbp_dev_healthinfo_report(fts, CHIPS_REPORT_FOCAL_TOUCH_INVALID_EVENT_NUM);
 			return -EINVAL;
 		}
 
@@ -732,6 +751,7 @@ static int fhp_chip_get_touch_points(void *priv, struct point_info *points)
 			if (pointid >= FTS_MAX_POINTS_SUPPORT) {
 				hbp_err("touch point ID(%d) beyond max_touch_number(%d)",
 							pointid, FTS_MAX_POINTS_SUPPORT);
+				hbp_dev_healthinfo_report(fts, CHIPS_REPORT_FOCAL_TOUCH_INVALID_ID);
 				return -EINVAL;
 			}
 
@@ -781,6 +801,7 @@ static int fhp_chip_get_touch_points(void *priv, struct point_info *points)
 
 				if (event_num == 0) {
 					hbp_err("abnormal touch data from fw");
+					hbp_dev_healthinfo_report(fts, CHIPS_REPORT_FOCAL_TOUCH_ABNORMAL_DATA);
 					return -EINVAL;
 				}
 			}
@@ -857,28 +878,9 @@ int fhp_write(u8 *writebuf, u32 writelen)
 	return fhp_chip_write(g_fts, writebuf, writelen);
 }
 
-int fhp_write_reg(u8 addr, u8 value)
-{
-	u8 writebuf[2] = { 0 };
-
-	writebuf[0] = addr;
-	writebuf[1] = value;
-	return fhp_write(writebuf, 2);
-}
-
-int fhp_write_command(u8 cmd)
-{
-	return fhp_write(&cmd, 1);
-}
-
 int fhp_read(u8 *cmd, u32 cmdlen, u8 *data, u32 datalen)
 {
 	return fhp_chip_read(g_fts, cmd, cmdlen, data, datalen);
-}
-
-int fhp_read_reg(u8 addr, u8 *value)
-{
-	return fhp_read(&addr, 1, value, 1);
 }
 
 #define PROC_READ_REGISTER                      1
@@ -1141,7 +1143,7 @@ static int fts_dev_probe(struct platform_device *pdev)
 	struct chip_info info;
 
 	if (!match_from_cmdline(&pdev->dev, &info)) {
-		return 0;
+		return -ENODEV;
 	}
 
 	fts = kzalloc(sizeof(struct fts_core), GFP_KERNEL);
@@ -1160,6 +1162,7 @@ static int fts_dev_probe(struct platform_device *pdev)
 	ret = hbp_register_devices(fts, &pdev->dev, &fts_ops, &info, &fts->bus_ops);
 	if (ret < 0) {
 		hbp_err("failed to register device:%s %d\n", info.vendor, ret);
+		hbp_dev_healthinfo_report(fts, CHIPS_REPORT_FOCAL_PROBE_REGISTER_FAIL);
 		goto err_exit;
 	}
 

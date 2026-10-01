@@ -493,7 +493,7 @@ err_irq:
 err_reset:
     if (0 == rc_intr3) {
         fp_dev->gpiod_intr3 = gpio_to_desc(fp_dev->gpio_intr3);
-        devm_gpiod_put(dev, fp_dev->gpiod_reset);
+        devm_gpiod_put(dev, fp_dev->gpiod_intr3);
     }
 err_intr3:
     return rc;

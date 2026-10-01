@@ -235,6 +235,26 @@ static int oplus_chg_ufcs_get_cable_info(struct oplus_chg_ic_dev *ic_dev, u64 *c
 	return rc;
 }
 
+static int oplus_chg_ufcs_get_cable_info_ext(struct oplus_chg_ic_dev *ic_dev, u8 *cable_info, int size)
+{
+	struct oplus_virtual_ufcs_ic *chip;
+	int rc;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	if (cable_info == NULL) {
+		chg_err("cable_info buf is NULL");
+		return -EINVAL;
+	}
+	chip = oplus_chg_ic_get_drvdata(ic_dev);
+
+	rc = ufcs_intf_get_cable_info_ext(chip->ufcs, cable_info, size);
+
+	return rc;
+}
+
 static int oplus_chg_ufcs_get_pdo_info(struct oplus_chg_ic_dev *ic_dev, u64 *pdo, int num)
 {
 	struct oplus_virtual_ufcs_ic *chip;
@@ -272,6 +292,27 @@ static int oplus_chg_ufcs_verify_adapter(struct oplus_chg_ic_dev *ic_dev,
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
 
 	rc = ufcs_intf_verify_adapter(chip->ufcs, key_index, auth_data, data_len);
+
+	return rc;
+}
+
+static int oplus_chg_ufcs_set_user_encrypt_data(
+	struct oplus_chg_ic_dev *ic_dev, u8 *encrypt_data, u8 data_len)
+{
+	struct oplus_virtual_ufcs_ic *chip;
+	int rc;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	if (encrypt_data == NULL) {
+		chg_err("encrypt_data is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_chg_ic_get_drvdata(ic_dev);
+
+	rc = ufcs_intf_set_user_encrypt_data(chip->ufcs, encrypt_data, data_len);
 
 	return rc;
 }
@@ -459,6 +500,10 @@ static void *oplus_chg_ufcs_get_func(struct oplus_chg_ic_dev *ic_dev, enum oplus
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_UFCS_GET_CABLE_INFO,
 			oplus_chg_ufcs_get_cable_info);
 		break;
+	case OPLUS_IC_FUNC_UFCS_GET_CABLE_INFO_EXT:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_UFCS_GET_CABLE_INFO_EXT,
+			oplus_chg_ufcs_get_cable_info_ext);
+		break;
 	case OPLUS_IC_FUNC_UFCS_GET_PDO_INFO:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_UFCS_GET_PDO_INFO,
 			oplus_chg_ufcs_get_pdo_info);
@@ -466,6 +511,10 @@ static void *oplus_chg_ufcs_get_func(struct oplus_chg_ic_dev *ic_dev, enum oplus
 	case OPLUS_IC_FUNC_UFCS_VERIFY_ADAPTER:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_UFCS_VERIFY_ADAPTER,
 			oplus_chg_ufcs_verify_adapter);
+		break;
+	case OPLUS_IC_FUNC_UFCS_SET_USER_ENCRYPT_DATA:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_UFCS_SET_USER_ENCRYPT_DATA,
+			oplus_chg_ufcs_set_user_encrypt_data);
 		break;
 	case OPLUS_IC_FUNC_UFCS_GET_POWER_CHANGE_INFO:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_UFCS_GET_POWER_CHANGE_INFO,

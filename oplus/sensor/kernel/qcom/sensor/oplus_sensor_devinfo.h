@@ -25,7 +25,7 @@
 
 #define REG_NUM 10
 #define PARAMETER_NUM 33
-#define FEATURE_NUM 13
+#define FEATURE_NUM 14
 #define SOURCE_NUM 3
 #define PANEL_SOURCE_NUM 2
 #define ALGO_PARAMETER_NUM 15
@@ -54,6 +54,7 @@ enum sensor_id {
     OPLUS_SARS,
     OPLUS_LIGHT_REAR,
     OPLUS_PAD_LIGHT,
+    OPLUS_FLICKER,
     SENSORS_NUM
 };
 
@@ -67,6 +68,7 @@ enum sensor_algo_id {
     OPLUS_MAG_FUSION,
     OPLUS_MEASUREMENT,
     OPLUS_EXPAND_GPIO,
+    OPLUS_DATA_LOG,
     SENSOR_ALGO_NUM
 };
 

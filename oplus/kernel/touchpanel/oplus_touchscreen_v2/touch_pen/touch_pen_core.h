@@ -60,7 +60,7 @@ enum touch_pen_downlk_cmd {
     PEN_DOWN_CMD_HOPFRQ_CFG_ACK,
     PEN_DOWN_CMD_PRESS,
     PEN_DOWN_CMD_SPEED_SWITCH,
-    PEN_DOWN_CMD_FRQ,
+    PEN_DOWN_CMD_PEN_INFO,
     PEN_DOWN_CMD_MAX,
 };
 
@@ -87,5 +87,19 @@ int touch_pen_press_debounce(struct pen_info *info, u16 press_val, u16 last_pres
 void touch_pen_up_optimize(struct pen_info *info, u16 *cur_press_val, u16 *last_press_val);
 void touch_pen_press_smooth_pre(u16 cur_press_val, u16 *last_press_val);
 int touch_pen_press_smooth(u16 press_val);
+
+/* pen pressure lift detection */
+struct pen_pressure_state {
+	int cur_press;              /* Current frame pressure value */
+	int last_one_press;         /* Previous frame pressure value */
+	int last_two_press;         /* Pressure value two frames ago */
+	int max_press;              /* Maximum pressure value when pen starts to lift */
+	bool is_pen_lift;           /* Flag to indicate if pen is starting to lift */
+	int pressure_ratio_threshold; /* Pressure ratio threshold (stored as integer, e.g., 30 for 0.3) */
+	int pressure_diff_threshold;  /* Pressure difference threshold (default: 300) */
+};
+
+bool touch_pen_pressure_lift_detect(struct pen_pressure_state *state, int current_pressure,
+    int pen_diff, int pen_max_diff);
 
 #endif

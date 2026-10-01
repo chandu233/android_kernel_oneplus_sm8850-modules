@@ -37,6 +37,7 @@
 #include <linux/kmod.h>
 #include <linux/nsproxy.h>
 #include <linux/tty_ldisc.h>
+#include "pogo_common.h"
 
 static int tty_paranoia_check(struct tty_struct *tty, struct inode *inode,
 			      const char *routine)
@@ -110,6 +111,7 @@ static inline ssize_t do_tty_write(
 	const char __user *buf,
 	size_t count)
 {
+	struct timespec64 time;
 	ssize_t ret, written = 0;
 	unsigned int chunk;
 	ret = tty_write_lock(tty, file->f_flags & O_NDELAY);
@@ -177,7 +179,12 @@ static inline ssize_t do_tty_write(
 		cond_resched();
 	}
 	if (written) {
-		tty_update_time(&file_inode(file)->i_mtime);
+		#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+			time = inode_get_mtime(file_inode(file));
+		#else
+			time = file_inode(file)->i_mtime;
+		#endif
+		tty_update_time(&time);
 		ret = written;
 	}
 out:

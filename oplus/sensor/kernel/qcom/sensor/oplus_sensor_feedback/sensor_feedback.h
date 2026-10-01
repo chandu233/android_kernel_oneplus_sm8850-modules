@@ -57,7 +57,10 @@ enum {
 	SCREEN_OFF = 2,
 };
 
-#if !IS_ENABLED(CONFIG_OPLUS_FEATURE_TRACE_SENSOR)
+/* Only define enum if CONFIG_OPLUS_FEATURE_TRACE_SENSOR is not enabled
+ * and CONFIG_OPLUS_FEATURE_TRACE_SENSOR_ERR is not enabled,
+ * to avoid redefinition conflict with oplus_trace_sensor_err.h */
+#if !IS_ENABLED(CONFIG_OPLUS_FEATURE_TRACE_SENSOR) && !IS_ENABLED(CONFIG_OPLUS_FEATURE_TRACE_SENSOR_ERR)
 enum sensor_fb_event_id {
 	FD_HEAD_EVENT_ID = 0,
 	/*1~100*/
@@ -163,6 +166,9 @@ enum sensor_fb_event_id {
 
 	/*700~750*/
 	HALL_I2C_ERR_ID = 700,
+	HALL_STYLUS_DETECT_INIT_FAIL_ID = 710,
+	HALL_STYLUS_DETECT_I2C_ERR_ID = 711,
+	HALL_STYLUS_DETECT_NO_DATA_ID = 712,
 
 	/*750~789*/
 	FOLD_DEVICE_FOLDE_COUNT_ID = 750,
@@ -238,6 +244,10 @@ enum sensor_fb_event_id {
 	/*1100~1200*/
 	HALL_STATUS_ID = 1100,
 	HALL_TRIGGER_COUNT = 1101,
+
+	/*1201~1250*/
+	EX_GPIO_I2C_RESET_ID = 1201,
+	EX_GPIO_COMPARE_ERROR_COUNT_ID = 1202,
 
 	/*10000 , sensor-hal*/
 	HAL_SENSOR_NOT_FOUND = 10000,

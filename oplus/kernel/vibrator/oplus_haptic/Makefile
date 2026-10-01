@@ -23,6 +23,9 @@ oplus_haptic-$(CONFIG_SIH_HAPTIC) += si_haptic/sih688x_func_config.o
 oplus_haptic-$(CONFIG_SIH_HAPTIC) += si_haptic/haptic_mid.o
 oplus_haptic-$(CONFIG_SIH_HAPTIC) += si_haptic/sih688x.o
 oplus_haptic-$(CONFIG_SIH_HAPTIC) += si_haptic/sih688x_reg.o
+oplus_haptic-$(CONFIG_SIH_HAPTIC) += si_haptic/sih6889_func_config.o
+oplus_haptic-$(CONFIG_SIH_HAPTIC) += si_haptic/sih6889.o
+oplus_haptic-$(CONFIG_SIH_HAPTIC) += si_haptic/sih6889_reg.o
 oplus_haptic-$(CONFIG_SIH_HAPTIC) += si_haptic/haptic_regmap.o
 
 obj-$(CONFIG_OPLUS_HAPTIC_COMMON) += oplus_haptic.o

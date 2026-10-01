@@ -148,11 +148,17 @@ inline int syna_tcm_rmi_read(struct syna_tcm_hcd *tcm_hcd,
 
 	if (ubl_byte_delay_us == 0) {
 		spi_data->xfer[0].len = 2;
+#ifdef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
+		spi_data->xfer[0].word_delay.unit = SPI_DELAY_UNIT_SCK;
+#endif
 		spi_data->xfer[0].tx_buf = spi_data->buf;
 		spi_data->xfer[0].speed_hz = ubl_max_freq;
 		spi_message_add_tail(&spi_data->xfer[0], &msg);
 		memset(&spi_data->buf[2], 0xff, length);
 		spi_data->xfer[1].len = length;
+#ifdef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
+		spi_data->xfer[1].word_delay.unit = SPI_DELAY_UNIT_SCK;
+#endif
 		spi_data->xfer[1].tx_buf = &spi_data->buf[2];
 		spi_data->xfer[1].rx_buf = data;
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 13, 0))
@@ -165,6 +171,9 @@ inline int syna_tcm_rmi_read(struct syna_tcm_hcd *tcm_hcd,
 	} else {
 		spi_data->buf[2] = 0xff;
 		for (idx = 0; idx < byte_count; idx++) {
+#ifdef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
+			spi_data->xfer[idx].word_delay.unit = SPI_DELAY_UNIT_SCK;
+#endif
 			spi_data->xfer[idx].len = 1;
 			if (idx < 2) {
 				spi_data->xfer[idx].tx_buf = &spi_data->buf[idx];
@@ -243,6 +252,9 @@ inline int syna_tcm_rmi_write(struct syna_tcm_hcd *tcm_hcd,
 
 	spi_data->xfer[0].len = byte_count;
 	spi_data->xfer[0].tx_buf = spi_data->buf;
+#ifdef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
+	spi_data->xfer[0].word_delay.unit = SPI_DELAY_UNIT_SCK;
+#endif
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 13, 0))
 	if (tcm_hcd->block_delay_us) {
 		spi_data->xfer[0].delay_usecs = tcm_hcd->block_delay_us;
@@ -301,6 +313,9 @@ static inline int syna_tcm_read(struct syna_tcm_hcd *tcm_hcd,
 		spi_data->xfer[0].len = length;
 		spi_data->xfer[0].tx_buf = spi_data->buf;
 		spi_data->xfer[0].rx_buf = data;
+#ifdef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
+		spi_data->xfer[0].word_delay.unit = SPI_DELAY_UNIT_SCK;
+#endif
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 13, 0))
 		if (tcm_hcd->block_delay_us) {
 			spi_data->xfer[0].delay_usecs = tcm_hcd->block_delay_us;
@@ -313,6 +328,9 @@ static inline int syna_tcm_read(struct syna_tcm_hcd *tcm_hcd,
 			spi_data->xfer[idx].len = 1;
 			spi_data->xfer[idx].tx_buf = spi_data->buf;
 			spi_data->xfer[idx].rx_buf = &data[idx];
+#ifdef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
+			spi_data->xfer[idx].word_delay.unit = SPI_DELAY_UNIT_SCK;
+#endif
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 13, 0))
 			spi_data->xfer[idx].delay_usecs = tcm_hcd->byte_delay_us;
 			if (tcm_hcd->block_delay_us && (idx == length - 1)) {
@@ -368,6 +386,9 @@ static inline int syna_tcm_write(struct syna_tcm_hcd *tcm_hcd,
 	if (tcm_hcd->byte_delay_us == 0) {
 		spi_data->xfer[0].len = length;
 		spi_data->xfer[0].tx_buf = data;
+#ifdef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
+		spi_data->xfer[0].word_delay.unit = SPI_DELAY_UNIT_SCK;
+#endif
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 13, 0))
 		if (tcm_hcd->block_delay_us) {
 			spi_data->xfer[0].delay_usecs = tcm_hcd->block_delay_us;
@@ -378,6 +399,9 @@ static inline int syna_tcm_write(struct syna_tcm_hcd *tcm_hcd,
 		for (idx = 0; idx < length; idx++) {
 			spi_data->xfer[idx].len = 1;
 			spi_data->xfer[idx].tx_buf = &data[idx];
+#ifdef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
+			spi_data->xfer[idx].word_delay.unit = SPI_DELAY_UNIT_SCK;
+#endif
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 13, 0))
 			spi_data->xfer[idx].delay_usecs = tcm_hcd->byte_delay_us;
 			if (tcm_hcd->block_delay_us && (idx == length - 1)) {
@@ -2934,8 +2958,10 @@ static u32 syna_trigger_reason(void *chip_data, int gesture_enable, int is_suspe
 	tcm_hcd->trigger_reason = 0;
 
 	if (tcm_hcd->zeroflash_init_done == 0) {
+#ifndef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
 		TPD_INFO("hdl not ready, disable irq\n");
 		disable_irq_nosync(tcm_hcd->s_client->irq);
+#endif
 		return retval;
 	}
 
@@ -3367,7 +3393,8 @@ static int syna_mode_switch(void *chip_data, work_mode mode, int flag)
 		}
 	}
 
-	TPD_INFO("syna_mode_switch begin, mode = %d\n", mode);
+	TPD_INFO("syna_mode_switch begin, mode = %d, flag = %d\n", mode, flag);
+
 	switch (mode) {
 	case MODE_NORMAL:
 		TPD_DETAIL("syna_mode_switch MODE_NORMAL\n");
@@ -3472,10 +3499,14 @@ static int syna_hw_reset(struct syna_tcm_hcd *tcm_hcd, struct hw_resource *hw_re
 int syna_reset_gpio(void *chip_data, bool enable)
 {
 	struct syna_tcm_hcd *tcm_hcd = (struct syna_tcm_hcd *)chip_data;
+	int actual_value = -1;
 
 	TPD_DEBUG("000 %s:gpio enable %d\n", __func__, enable);
 	if (gpio_is_valid(tcm_hcd->hw_res->reset_gpio)) {
+		gpio_direction_output(tcm_hcd->hw_res->reset_gpio, enable);
 		gpio_set_value(tcm_hcd->hw_res->reset_gpio, enable);
+		actual_value = gpio_get_value(tcm_hcd->hw_res->reset_gpio);
+		TPD_INFO("GPIO set to %d, actual value: %d\n", enable, actual_value);
 	}
 	return 0;
 }
@@ -3518,9 +3549,11 @@ static fw_check_state syna_fw_check(void *chip_data, struct resolution_info *res
 		return FW_NORMAL;
 	}
 
+#ifndef CONFIG_REMOVE_OPLUS_FUNCTION
 	if (panel_data->manufacture_info.version) {
 		sprintf(panel_data->manufacture_info.version, "0x%s", fw_ver);
 	}
+#endif
 
 	kfree(fw_ver);
 
@@ -3549,9 +3582,11 @@ void syna_fw_version_update(void *chip_data)
 		return;
 	}
 
+#ifndef CONFIG_REMOVE_OPLUS_FUNCTION
 	if (ts->panel_data.manufacture_info.version) {
 		sprintf(ts->panel_data.manufacture_info.version, "0x%s", fw_ver);
 	}
+#endif
 
 	TPD_DETAIL("Update fw id %d, custom config id 0x%s\n", ts->panel_data.tp_fw, fw_ver);
 
@@ -3578,6 +3613,7 @@ static int syna_tcm_async_work(void *chip_data)
 
 static fw_update_state copy_fw_to_buffer(struct syna_tcm_hcd *tcm_hcd, const struct firmware *fw)
 {
+#ifndef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
 	struct firmware *tp_fw;
 	if (fw) {
 		/*free already exist fw data buffer*/
@@ -3605,16 +3641,40 @@ static fw_update_state copy_fw_to_buffer(struct syna_tcm_hcd *tcm_hcd, const str
 		tcm_hcd->tp_fw_update_headfile = false;
 		TPD_INFO("copy fw to buffer success.\n");
 	}
+#else
+	if (fw) {
+		if (tcm_hcd->zeroflash_hcd->fw_entry) {
+			if (tcm_hcd->tp_fw_update_headfile) {
+				kfree(tcm_hcd->zeroflash_hcd->fw_entry);
+			} else {
+				release_firmware(tcm_hcd->zeroflash_hcd->fw_entry);
+			}
+		}
+
+		if (!fw->data || fw->size == 0) {
+			TPD_INFO("%s: CRITICAL ERROR - fw->data is NULL!\n", __func__);
+			goto exit;
+		 }
+
+		TPD_INFO("  Size: %zu bytes\n", fw->size);
+
+		tcm_hcd->zeroflash_hcd->fw_entry = fw;
+		tcm_hcd->tp_fw_update_headfile = false;
+		TPD_INFO("copy fw to buffer success.\n");
+	}
+#endif
 	else {
 		TPD_INFO("failed to get oplus tp firmware.\n");
 		return FW_UPDATE_ERROR;
 	}
-	return FW_UPDATE_ERROR;
+	return FW_UPDATE_SUCCESS;
 
 exit:
+#ifndef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
 	if(tp_fw) {
 		vfree(tp_fw);
 	}
+#endif
 	return FW_UPDATE_ERROR;
 }
 
@@ -3943,12 +4003,13 @@ static int synaptics_auto_test_preoperation(struct seq_file *s, void *chip_data,
 	uint8_t copy_len = 0;
 
 	TPD_INFO("%s  is called\n", __func__);
+	ts->lpwg_fw_support = false;
 
 	fw_name_test = kzalloc(MAX_FW_NAME_LENGTH, GFP_KERNEL);
-		if (fw_name_test == NULL) {
-			TPD_INFO("fw_name_test kzalloc error!\n");
-			return -ENOMEM;
-		}
+	if (fw_name_test == NULL) {
+		TPD_INFO("fw_name_test kzalloc error!\n");
+		return -ENOMEM;
+	}
 
 	p_node = strstr(ts->panel_data.fw_name, ".");
 	copy_len = p_node - ts->panel_data.fw_name;
@@ -3957,21 +4018,25 @@ static int synaptics_auto_test_preoperation(struct seq_file *s, void *chip_data,
 
 	ret = request_firmware(&fw, fw_name_test, ts->dev);
 	if (!ret) {
+		TPD_INFO("request_firmware(%s) success: size=%zu, data=%p\n",
+		         fw_name_test, fw->size, fw->data);
 		ts->loading_fw = true;
-			if (ts->ts_ops && ts->ts_ops->fw_update)
-				ret = ts->ts_ops->fw_update(ts->chip_data, fw, 1);
-			ts->loading_fw = false;
+		if (ts->ts_ops && ts->ts_ops->fw_update)
+			ret = ts->ts_ops->fw_update(ts->chip_data, fw, 1);
+		ts->loading_fw = false;
 	} else {
-		TPD_INFO("request_firmware(%s) fail and no need to download test fw !\n", fw_name_test);
+		TPD_INFO("request_firmware(%s) fail, skip test fw!\n", fw_name_test);
 	}
-
+#ifdef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
+	if (fw && ret) {
+#else
 	if (fw) {
+#endif
 		release_firmware(fw);
 		fw = NULL;
 	}
 
 	kfree(fw_name_test);
-
 	return 0;
 }
 
@@ -4001,18 +4066,30 @@ static int synaptics_auto_black_screen_test_endoperation(struct seq_file *s, voi
 	const struct firmware *fw = NULL;
 
 	TPD_INFO("%s  is called\n", __func__);
-
+	ts->lpwg_fw_support = true;
+#ifdef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
+	strncpy(ts->panel_data.fw_name, "tp/25031/FW_NF_TD4160_HUAXING.img", MAX_FW_NAME_LENGTH - 1);
+	ts->panel_data.fw_name[MAX_FW_NAME_LENGTH - 1] = '\0';
+#endif
+	TPD_INFO("Requesting firmware: %s\n", ts->panel_data.fw_name);
 	ret = request_firmware(&fw, ts->panel_data.fw_name, ts->dev);
-	if (!ret) {
-		ts->loading_fw = true;
-			if (ts->ts_ops && ts->ts_ops->fw_update)
-				ret = ts->ts_ops->fw_update(ts->chip_data, fw, 1);
-			ts->loading_fw = false;
-	} else {
-		TPD_INFO("request_firmware(%s) fail and upgrade to normal  firmware fail!\n", ts->panel_data.fw_name);
-	}
 
+	if (!ret) {
+		TPD_INFO("request_firmware(%s) success: size=%zu, data=%p\n",
+		         ts->panel_data.fw_name, fw->size, fw->data);
+		ts->loading_fw = true;
+		if (ts->ts_ops && ts->ts_ops->fw_update)
+			ret = ts->ts_ops->fw_update(ts->chip_data, fw, 1);
+		ts->loading_fw = false;
+	} else {
+		TPD_INFO("request_firmware(%s) failed with error: %d, upgrade to normal firmware fail!\n",
+		         ts->panel_data.fw_name, ret);
+	}
+#ifdef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
+	if (fw && ret) {
+#else
 	if (fw) {
+#endif
 		release_firmware(fw);
 		fw = NULL;
 	}
@@ -5284,11 +5361,11 @@ void tp_wait_hdl_finished(void)
 
 	do {
 		if (retry_cnt) {
-			msleep(100);
+			msleep(10);
 		}
 		retry_cnt++;
 		TPD_INFO("Wait hdl finished retry %d times...  \n", retry_cnt);
-	} while (!g_tcm_hcd->hdl_finished_flag && retry_cnt < 20);
+	} while (!g_tcm_hcd->hdl_finished_flag && retry_cnt < 200);
 }
 
 /*
@@ -5516,6 +5593,9 @@ static int syna_tcm_spi_probe(struct spi_device *spi)
 	ts->s_client = spi;
 	ts->s_client->mode = SPI_MODE_3;
 	ts->s_client->bits_per_word = 8;
+#ifdef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
+	ts->s_client->word_delay.unit = SPI_DELAY_UNIT_SCK;
+#endif
 	spi->bits_per_word = 8;
 	spi->cs_setup.value = 1;
 	spi->cs_setup.unit = 0;
@@ -5714,9 +5794,11 @@ static int __init syna_tcm_module_init(void)
 	if (!tp_judge_ic_match(SYNDRIVER_NAME)) {
 		return 0;
 	}
-
+#ifndef CONFIG_REMOVE_OPLUS_FUNCTION
+#ifndef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
 	get_oem_verified_boot_state();
-
+#endif
+#endif
 	if (spi_register_driver(&syna_spi_driver)!= 0) {
 		TPD_INFO("unable to add spi driver.\n");
 		return 0;

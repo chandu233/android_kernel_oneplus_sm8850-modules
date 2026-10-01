@@ -77,7 +77,6 @@ struct hl7138_slave_device {
 
 	enum oplus_cp_work_mode cp_work_mode;
 	bool rested;
-	bool vac_support;
 };
 
 static enum oplus_cp_work_mode g_cp_support_work_mode[] = {

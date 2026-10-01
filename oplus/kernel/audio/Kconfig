@@ -30,6 +30,15 @@ config OPLUS_MTK_AUDIO_EXT
 	  Select m if you have such device.
 	  If unsure select "N".
 
+config SND_SOC_TFA9865
+	tristate "NXP TFA9865 speaker amplifier"
+	depends on I2C
+	help
+	  Config of TFA9865. It is a Smart power
+	  amplifier which contain speaker protection,
+	  multi-band DRC, equalizer function. It would
+	  be set to yes if device with TFA9865 on it.
+
 config SND_SOC_TFA9873
 	tristate "NXP TFA9873 speaker amplifier"
 	depends on I2C
@@ -175,3 +184,27 @@ config AUDIO_NETLINK_KERNEL
 	  that can be used with other platforms
 	  Select m if you have such device.
 	  If unsure select "N".
+
+config OPLUS_FEATURE_HFCALL
+	tristate "audio hfcall support for mtk"
+	default n
+	help
+	  This adds for MTK boards
+	  that can be used with other platforms
+	  Select m if you have such device.
+	  If unsure select "N".
+
+config TFA98XX_DRV_NEED_COMPAT
+	tristate "oplus tfa98xx driver need compat"
+	default n
+	help
+	  This adds for QCOM or MTK boards
+	  that can be used with other platforms
+	  Select m if you have such device.
+	  If unsure select "N".
+
+config SND_SOC_FS181X
+	tristate "FourSemi Analog speaker amplifier"
+	depends on I2C
+	help
+	  Config of FourSemi Analog speaker amplifier.

@@ -1471,6 +1471,8 @@ static int sc8547a_retrieve_reg_flags(struct sc8547a_device *chip)
 		err_flag |= BIT(UFCS_COMM_ERR_TRAINING_ERR);
 	if (flag_buf[2] & SC8547A_FLAG_MSG_TRANS_FAIL)
 		err_flag |= BIT(UFCS_RECV_ERR_TRANS_FAIL);
+	if (flag_buf[2] & SC8547A_RX_BUFFER_BUSY_FLAG)
+		err_flag |= BIT(UFCS_RECV_ERR_BUFF_BUSY);
 	if (flag_buf[2] & SC8547A_FLAG_DATA_BYTE_TIMEOUT)
 		err_flag |= BIT(UFCS_COMM_ERR_BYTE_TIMEOUT);
 	if (flag_buf[2] & SC8547A_FLAG_BAUD_RATE_CHANGE)
@@ -1581,8 +1583,8 @@ retry:
 	}
 
 	rc = sc8547a_write_bit_mask(chip, SC8547A_ADDR_UFCS_CTRL0,
-				SEND_SOURCE_HARDRESET,
-				SEND_SOURCE_HARDRESET);
+				SC8547A_SEND_SOURCE_HARDRESET,
+				SC8547A_SEND_SOURCE_HARDRESET);
 	if (rc < 0) {
 		chg_err("I2c send handshake error\n");
 		goto retry;
@@ -1594,7 +1596,15 @@ retry:
 
 static int sc8547a_ufcs_cable_hard_reset(struct ufcs_dev *ufcs)
 {
-	return 0;
+	struct sc8547a_device *chip = ufcs->drv_data;
+	int rc;
+
+	rc = sc8547a_write_bit_mask(chip, SC8547A_ADDR_UFCS_CTRL0,
+		SC8547A_SEND_CABLE_HARDRESET, SC8547A_SEND_CABLE_HARDRESET);
+	if (rc < 0)
+		chg_err("set cable reset error, rc=%d\n", rc);
+
+	return rc;
 }
 
 static int sc8547a_ufcs_set_baud_rate(struct ufcs_dev *ufcs, enum ufcs_baud_rate baud)
@@ -1603,8 +1613,8 @@ static int sc8547a_ufcs_set_baud_rate(struct ufcs_dev *ufcs, enum ufcs_baud_rate
 	int rc;
 
 	rc = sc8547a_write_bit_mask(chip, SC8547A_ADDR_UFCS_CTRL0,
-				FLAG_BAUD_RATE_VALUE,
-				(baud << FLAG_BAUD_NUM_SHIFT));
+				SC8547A_FLAG_BAUD_RATE_VALUE,
+				(baud << SC8547A_FLAG_BAUD_NUM_SHIFT));
 	if (rc < 0)
 		chg_err("set baud rate error, rc=%d\n", rc);
 
@@ -1715,6 +1725,36 @@ static int sc8547a_ufcs_cp_watchdog_config(struct ufcs_dev *ufcs, unsigned int t
 	return 0;
 }
 
+static int sc8547a_ufcs_hiz_enable(struct ufcs_dev *ufcs, bool en)
+{
+	struct sc8547a_device *chip = ufcs->drv_data;
+	int rc = 0;
+	u8 data = 0;
+
+	if (en)
+		data = SC8547A_SEND_ENABLE_HIZ;
+	else
+		data = 0;
+	rc = sc8547a_write_bit_mask(chip, SC8547A_ADDR_GENERAL_INT_FLAG1,
+		SC8547A_SEND_ENABLE_HIZ, data);
+	if (rc < 0)
+		chg_err("set ufcs hiz %d error, rc=%d\n", en, rc);
+
+	return rc;
+}
+
+static int sc8547a_ufcs_clr_rx_buf(struct ufcs_dev *ufcs)
+{
+	struct sc8547a_device *chip = ufcs->drv_data;
+	int rc;
+
+	rc = sc8547a_write_bit_mask(chip, SC8547A_ADDR_TXRX_BUFFER_CTRL,
+		SC8547A_SEAND_CLR_RX_BUF, SC8547A_SEAND_CLR_RX_BUF);
+	if (rc < 0)
+		chg_err("clear rx buf error, rc=%d\n", rc);
+	return rc;
+}
+
 static void sc8547_create_device_node(struct device *dev)
 {
 	int ret;
@@ -1771,6 +1811,8 @@ static struct ufcs_dev_ops ufcs_ops = {
 	.enable = sc8547a_ufcs_enable,
 	.disable = sc8547a_ufcs_disable,
 	.watchdog_config = sc8547a_ufcs_cp_watchdog_config,
+	.hiz_enable = sc8547a_ufcs_hiz_enable,
+	.clr_rx_buf = sc8547a_ufcs_clr_rx_buf,
 };
 
 static int sc8547_charger_choose(struct sc8547a_device *chip)

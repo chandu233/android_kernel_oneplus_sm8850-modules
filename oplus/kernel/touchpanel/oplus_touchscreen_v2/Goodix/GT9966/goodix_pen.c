@@ -14,7 +14,6 @@ static u8 brl_pen_set_cmd_map[PEN_DOWN_CMD_MAX] = {
 	GTP_PEN_SET_CMD_CFG_ACK,
 	GTP_PEN_SET_CMD_PRESS,
 	GTP_PEN_SET_CMD_SPEED_ON,
-	GTP_PEN_DOWN_CMD_FRQ,
 };
 
 /* pencil healthinfo start */
@@ -397,9 +396,6 @@ static void goodix_pen_downlink_cmd_healthinfo(struct chip_data_brl *chip_info, 
 	case PEN_DOWN_CMD_SPEED_SWITCH:
 		tp_healthinfo_report(mon_data, HEALTH_REPORT, CMD_STR(PEN_DOWN_CMD_SPEED_SWITCH));
 		break;
-	case PEN_DOWN_CMD_FRQ:
-		tp_healthinfo_report(mon_data, HEALTH_REPORT, CMD_STR(PEN_DOWN_CMD_FRQ));
-		break;
 	default:
 		break;
 	}
@@ -410,9 +406,7 @@ int goodix_pen_downlink_data(void *chip_data, u32 cmd, u32 buf_len, u8 *buf)
 	int ret = 0;
 	u16 press_val;
 	u16 old_pval;
-	u16 frq_val;
 	u32 write_len = 0;
-	u8 frq_buf[2] = {0};
 	u8 write_buf[MAX_CMD_BUF_LEN] = {0};
 	struct pen_info pen_info;
 	struct chip_data_brl *chip_info = (struct chip_data_brl *)chip_data;
@@ -447,17 +441,6 @@ int goodix_pen_downlink_data(void *chip_data, u32 cmd, u32 buf_len, u8 *buf)
 		chip_info->pen_press = press_val;
 		goodix_pen_write_press_status(chip_info, old_pval, press_val);
 		PEN_INFO("set press:cmd 0x%x, old_pval %d new press_val %d\n", cmd, old_pval, chip_info->pen_press);
-		break;
-
-	case PEN_DOWN_CMD_FRQ:
-		/* Write frq*/
-		frq_buf[0] = buf[0];
-		frq_buf[1] = buf[1];
-		frq_val = le16_to_cpup((__le16 *)buf);
-		chip_info->pen_frq_val = frq_val;
-		PEN_INFO("set frq:cmd 0x%x, frq_val %d\n", cmd, frq_val);
-		write_len = goodix_pen_downlink_data_package(cmd, 2, frq_buf, MAX_CMD_BUF_LEN, write_buf);
-		ret = brl_send_cmd(chip_info, (struct goodix_ts_cmd *)write_buf);
 		break;
 	default:
 		PEN_ERR("invaild cmd %d\n", cmd);

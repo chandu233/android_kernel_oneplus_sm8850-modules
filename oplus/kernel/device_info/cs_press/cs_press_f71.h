@@ -171,11 +171,12 @@
 #define DEBUG_READY_REG                 0xF7
 #define DEBUG_DATA_REG                  0xF8
 
-#define DEBUG_MODE_V2_REG               0xFB
-#define DEBUG_READY_V2_REG              0xFC
-#define DEBUG_DATA_V2_REG               0xFD
+#define DEBUG_MODE_V2_REG               0xF1
+#define DEBUG_READY_V2_REG              0xF2
+#define DEBUG_DATA_V2_REG               0xF3
 
 #define DEBUG_RESET_SOURCE_REG          0xB6
+#define DEBUG_ENGINEER_TEST_REG         0xC0
 
 #define AP_RESET_MCU_REG                0x01
 #define AP_DEVICE_ID_REG                0x02
@@ -356,6 +357,8 @@ struct cs_press_t {
     int cs_shell_themal_init_flag;
     int cs_shell_themal_enable;
     int update_done;
+    bool irq_ok;
+    bool is_boot_ver_err;
 
     int camera_key_mode;
     bool is_light_tap_down;
@@ -439,6 +442,14 @@ enum SAMPLE_MODE
     NORMAL_MODE,/*100Hz*/
     GAME_MODE,  /*166Hz*/
     SAMPLE_MODE_NUM,
+};
+
+enum ENGINEER_ERROR_CODE
+{
+    ERROR_CODE_IRQ = 0xEA,
+    ERROR_CODE_RST = 0xEB,
+    ERROR_CODE_FW_UPDATE = 0xEC,
+    ERROR_CODE_IIC = 0xED,
 };
 
 enum CAMERA_KEY_MODE

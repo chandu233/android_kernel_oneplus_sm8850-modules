@@ -65,10 +65,8 @@ struct oplus_optiga_chip *g_oplus_optiga_chip;
 
 struct msm_pinctrl {
 	struct device *dev;
-	struct pinctrl_dev *pctrl;
 	struct gpio_chip chip;
 	struct notifier_block restart_nb;
-	int irq;
 
 	raw_spinlock_t lock;
 

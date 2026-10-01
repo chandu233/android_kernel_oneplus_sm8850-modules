@@ -130,3 +130,94 @@ int touch_pen_press_smooth(u16 press_val)
     return cur_press_val;
 }
 EXPORT_SYMBOL(touch_pen_press_smooth);
+
+/**
+ * touch_pen_pressure_lift_detect - Detect pen pressure lift event
+ * @state: Pointer to pen pressure state structure (must not be NULL)
+ * @current_pressure: Current pressure value
+ * @pen_diff: Current pen diff value from points->diff (e.g. from nvt_get_pen_points)
+ * @pen_max_diff: Threshold from DTS; trigger only when pen_diff < pen_max_diff (if pen_max_diff > 0)
+ *
+ * This function modifies multiple members of the @state structure:
+ * - cur_press: Updated with current_pressure
+ * - max_press: May be updated when pen lift is detected
+ * - is_pen_lift: May be updated based on pressure changes
+ * - last_one_press: Updated with previous cur_press value
+ * - last_two_press: Updated with previous last_one_press value
+ *
+ * IMPORTANT: This function does NOT provide any synchronization mechanism.
+ * The caller MUST hold the appropriate mutex (e.g., pressure_mutex) before
+ * calling this function to prevent race conditions when @state is accessed
+ * from multiple execution contexts (e.g., interrupt handlers, work threads).
+ *
+ * Returns: true if pen lift is detected and all conditions are met, false otherwise
+ */
+bool touch_pen_pressure_lift_detect(struct pen_pressure_state *state, int current_pressure,
+    int pen_diff, int pen_max_diff)
+{
+	int pressure_diff = 0;
+	int threshold_press = 0;
+
+	if (state == NULL) {
+		PEN_DEBUG("%s: state is NULL\n", __func__);
+		return false;
+	}
+
+	state->cur_press = current_pressure;
+	PEN_DEBUG("%s: cur_press=%d, last_one_press=%d, last_two_press=%d, max_press=%d, is_pen_lift=%d\n",
+		  __func__, state->cur_press, state->last_one_press,
+		  state->last_two_press, state->max_press, state->is_pen_lift);
+
+	if (state->last_one_press <= state->last_two_press &&
+	    state->cur_press < state->last_one_press) {
+		state->max_press = state->last_two_press;
+		state->is_pen_lift = true;
+		PEN_DEBUG("%s: pen lift detected, max_press=%d, is_pen_lift=true\n",
+			  __func__, state->max_press);
+	}
+
+	if (state->last_one_press >= state->last_two_press &&
+	    state->cur_press > state->last_one_press) {
+		state->max_press = 0;
+		state->is_pen_lift = false;
+		PEN_DEBUG("%s: reset pen lift state, max_press=0, is_pen_lift=false\n", __func__);
+	}
+
+	pressure_diff = state->last_one_press - state->cur_press;
+	threshold_press = state->max_press * state->pressure_ratio_threshold / 100;
+
+	PEN_DEBUG("%s: check conditions - is_pen_lift=%d, cur_press=%d, threshold_press=%d, pressure_diff=%d, diff_threshold=%d, pen_diff=%d, pen_max_diff=%d\n",
+		  __func__, state->is_pen_lift, state->cur_press, threshold_press,
+		  pressure_diff, state->pressure_diff_threshold, pen_diff, pen_max_diff);
+
+	if (state->is_pen_lift &&
+	    (state->cur_press < threshold_press) &&
+	    (pressure_diff > state->pressure_diff_threshold) &&
+	    (pen_max_diff <= 0 || pen_diff < pen_max_diff)) {
+		PEN_INFO("%s: all conditions met, need to disable 0g output\n", __func__);
+		state->last_two_press = state->last_one_press;
+		state->last_one_press = state->cur_press;
+		return true;
+	} else {
+		if (!state->is_pen_lift) {
+			PEN_DEBUG("%s: condition 1 failed: is_pen_lift=false\n", __func__);
+		} else if (state->cur_press >= threshold_press) {
+			PEN_DEBUG("%s: condition 2 failed: cur_press=%d >= threshold_press=%d\n",
+				  __func__, state->cur_press, threshold_press);
+		} else if (pressure_diff <= state->pressure_diff_threshold) {
+			PEN_DEBUG("%s: condition 3 failed: pressure_diff=%d <= diff_threshold=%d\n",
+				  __func__, pressure_diff, state->pressure_diff_threshold);
+		} else if (pen_max_diff > 0 && pen_diff >= pen_max_diff) {
+			PEN_DEBUG("%s: condition 4 failed: pen_diff=%d >= pen_max_diff=%d\n",
+				  __func__, pen_diff, pen_max_diff);
+		}
+	}
+
+	state->last_two_press = state->last_one_press;
+	state->last_one_press = state->cur_press;
+	PEN_DEBUG("%s: updated history - last_one_press=%d, last_two_press=%d\n",
+		  __func__, state->last_one_press, state->last_two_press);
+
+	return false;
+}
+EXPORT_SYMBOL(touch_pen_pressure_lift_detect);

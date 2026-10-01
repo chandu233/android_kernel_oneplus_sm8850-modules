@@ -23,7 +23,10 @@
                 "zh": "设置PDO"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int", "int"],
+            "parameter_list": [
+                "int",
+                "int"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -100,7 +103,9 @@
                 "zh": "设置看门狗超时时间"
             },
             "auto_debug_code": true,
-            "parameter_list": ["u16"],
+            "parameter_list": [
+                "u16"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -132,7 +137,9 @@
                 "zh": "获取device信息"
             },
             "auto_debug_code": true,
-            "parameter_list": ["u64 *"],
+            "parameter_list": [
+                "u64 *"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -154,7 +161,9 @@
                 "zh": "获取错误信息"
             },
             "auto_debug_code": true,
-            "parameter_list": ["u64 *"],
+            "parameter_list": [
+                "u64 *"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -176,7 +185,9 @@
                 "zh": "获取供电设备信息"
             },
             "auto_debug_code": true,
-            "parameter_list": ["u64 *"],
+            "parameter_list": [
+                "u64 *"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -198,7 +209,9 @@
                 "zh": "获取线缆信息"
             },
             "auto_debug_code": true,
-            "parameter_list": ["u64 *"],
+            "parameter_list": [
+                "u64 *"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -220,7 +233,10 @@
                 "zh": "获取pdo信息"
             },
             "auto_debug_code": true,
-            "parameter_list": ["u64 *", "int"],
+            "parameter_list": [
+                "u64 *",
+                "int"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -249,7 +265,11 @@
                 "zh": "适配器鉴权校验"
             },
             "auto_debug_code": false,
-            "parameter_list": ["u8", "u8 *", "u8"],
+            "parameter_list": [
+                "u8",
+                "u8 *",
+                "u8"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -285,7 +305,10 @@
                 "zh": "获取功率变化的信息"
             },
             "auto_debug_code": true,
-            "parameter_list": ["u32 *", "int"],
+            "parameter_list": [
+                "u32 *",
+                "int"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -314,7 +337,9 @@
                 "zh": "获取emark信息(OPLUS自定义消息)"
             },
             "auto_debug_code": true,
-            "parameter_list": ["u64 *"],
+            "parameter_list": [
+                "u64 *"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -336,7 +361,10 @@
                 "zh": "获取不同协议的功率信息(OPLUS自定义消息)"
             },
             "auto_debug_code": true,
-            "parameter_list": ["u64 *", "int"],
+            "parameter_list": [
+                "u64 *",
+                "int"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -365,7 +393,9 @@
                 "zh": "检查当前是否处于测试模式"
             },
             "auto_debug_code": true,
-            "parameter_list": ["bool *"],
+            "parameter_list": [
+                "bool *"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-1",
@@ -387,7 +417,9 @@
                 "zh": "检查电压精度测试模式是否开启"
             },
             "auto_debug_code": true,
-            "parameter_list": ["bool *"],
+            "parameter_list": [
+                "bool *"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-1",
@@ -409,7 +441,9 @@
                 "zh": "设置UFCS协议状态机的周期"
             },
             "auto_debug_code": true,
-            "parameter_list": ["u16"],
+            "parameter_list": [
+                "u16"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -448,8 +482,71 @@
                 "write": false,
                 "overwrite": false
             }
+        },
+        {
+            "lable": "OPLUS_IC_FUNC_UFCS_SET_USER_ENCRYPT_DATA",
+            "desc": {
+                "zh": "获取aidl加密数据"
+            },
+            "auto_debug_code": false,
+            "parameter_list": [
+                "u8 *",
+                "u8"
+            ],
+            "parameter_desc": [
+                {
+                    "range": "0-*",
+                    "type": "in",
+                    "desc": {
+                        "zh": "aidl加密数据"
+                    }
+                },
+                {
+                    "range": "0-*",
+                    "type": "in",
+                    "desc": {
+                        "zh": "aidl加密数据长度"
+                    }
+                }
+            ],
+            "vict": {
+                "read": false,
+                "write": false,
+                "overwrite": false
+            }
+        },
+        {
+            "lable": "OPLUS_IC_FUNC_UFCS_GET_CABLE_INFO_EXT",
+            "desc": {
+                "zh": "获取cable信息"
+            },
+            "auto_debug_code": false,
+            "parameter_list": [
+                "u8 *",
+                "int"
+            ],
+            "parameter_desc": [
+                {
+                    "range": "0-*",
+                    "type": "out",
+                    "desc": {
+                        "zh": "用于存放cable的buf"
+                    }
+                },
+                {
+                    "range": "0-*",
+                    "type": "in",
+                    "desc": {
+                        "zh": "存放cable的buf的长度"
+                    }
+                }
+            ],
+            "vict": {
+                "read": false,
+                "write": false,
+                "overwrite": false
+            }
         }
     ],
-
-    "version": "V1.2:18:2421fc1c4c0a3b54a74e84ebaf131582b72ee76bd1098ea4562911dde90caae5"
+    "version": "V1.3:20:b75b15082abf0b05d94f81461fbed1e10731a465c28c944276726e22940eea5b"
 }

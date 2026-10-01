@@ -19,6 +19,7 @@
 #include <linux/of_gpio.h>
 #include <linux/err.h>
 #include <linux/bitops.h>
+#include <linux/atomic.h>
 #include <linux/math64.h>
 #include <linux/ktime.h>
 #include <linux/sched/clock.h>
@@ -104,6 +105,7 @@ struct chip_tps6128xd {
 	int id_match_status;
 	int vout_mv;
 	bool i2c_success;
+	atomic_t tps6128xd_init_track_count;
 	int probe_gpio_status;
 	int ilim_ma;
 	bool fpga_support;
@@ -317,6 +319,7 @@ error:
 	return rc;
 }
 
+static int tps6128xd_reg_dump(struct oplus_chg_ic_dev *ic_dev);
 static int tps6128xd_hardware_init(struct chip_tps6128xd *chip)
 {
 	int rc = 0;
@@ -355,12 +358,16 @@ static int tps6128xd_hardware_init(struct chip_tps6128xd *chip)
 
 	if (rc >= 0 && (buf[1] == vout_mv_to_reg(chip->vout_mv)) &&
 	    (buf[2] == vout_mv_to_reg(chip->vout_mv)) &&
-	    (buf[3] == ilim_ma_to_reg(chip->ilim_ma)))
+	    (buf[3] == ilim_ma_to_reg(chip->ilim_ma))) {
 		chip->i2c_success = true;
-	else
+		atomic_set(&chip->tps6128xd_init_track_count, 1);
+		tps6128xd_reg_dump(chip->ic_dev);
+	} else {
 		chip->i2c_success = false;
+		atomic_set(&chip->tps6128xd_init_track_count, 0);
+	}
 
-	chg_info("i2c %s reg=%*ph\n",
+	chg_info("byb_id:%d, i2c %s reg=%*ph\n", chip->ic_dev->index,
 		  chip->i2c_success ? "success" : "fail",
 		  TPS6128XD_REG_CNT, buf);
 
@@ -374,25 +381,34 @@ struct oplus_chg_ic_virq tps6128xd_virq_table[] = {
 #define TRACK_UPLOAD_COUNT_MAX 10
 #define TRACK_LOCAL_T_NS_TO_S_THD 1000000000
 #define TRACK_DEVICE_ABNORMAL_UPLOAD_PERIOD (24 * 3600)
+#define TRACK_INIT_DELAY_TIME 12 /* 1 minute delay time */
 static int tps6128xd_push_err(struct oplus_chg_ic_dev *ic_dev,
 				   bool i2c_error, int err_code, char *reg, bool tsd)
 {
 	static int upload_count = 0;
 	static int pre_upload_time = 0;
 	int curr_time;
+	struct chip_tps6128xd *chip;
+	chip = oplus_chg_ic_get_drvdata(ic_dev);
 
 	curr_time = local_clock() / TRACK_LOCAL_T_NS_TO_S_THD;
 	if (curr_time - pre_upload_time > TRACK_DEVICE_ABNORMAL_UPLOAD_PERIOD)
 		upload_count = 0;
 
-	if (upload_count >= TRACK_UPLOAD_COUNT_MAX)
+	if (upload_count >= TRACK_UPLOAD_COUNT_MAX) {
+		chg_err("upload_count >= TRACK_UPLOAD_COUNT_MAX is true%d\n", ic_dev->index);
 		return 0;
+	}
 
 	pre_upload_time = local_clock() / TRACK_LOCAL_T_NS_TO_S_THD;
 
 	if (i2c_error)
 		oplus_chg_ic_creat_err_msg(ic_dev, OPLUS_IC_ERR_I2C, 0,
 			"$$err_scene@@i2c_err$$err_reason@@%d$$byb_id@@%d", err_code, ic_dev->index);
+	else if (chip != NULL && atomic_read(&chip->tps6128xd_init_track_count) > TRACK_INIT_DELAY_TIME)
+		oplus_chg_ic_creat_err_msg(ic_dev, OPLUS_IC_ERR_BUCK_BOOST, 0,
+			"$$err_scene@@byb_init_info$$err_reason@@%s$$reg_info@@%s$$byb_id@@%d",
+			tsd ? "TSD" : "normal", reg, ic_dev->index);
 	else
 		oplus_chg_ic_creat_err_msg(ic_dev, OPLUS_IC_ERR_BUCK_BOOST, 0,
 			"$$err_scene@@byb_work_err$$err_reason@@%s$$reg_info@@%s$$byb_id@@%d",
@@ -424,6 +440,20 @@ static int tps6128xd_exit(struct oplus_chg_ic_dev *ic_dev)
 	return 0;
 }
 
+static int tps6128xd_read_regs(struct chip_tps6128xd *chip, u8 *buf)
+{
+	int rc;
+
+	rc = tps6128xd_read(chip, CONFIG_REG, (unsigned int *)&buf[0]);
+	rc |= tps6128xd_read(chip, VOUTFLOORSET_REG, (unsigned int *)&buf[1]);
+	rc |= tps6128xd_read(chip, VOUTROOFSET_REG, (unsigned int *)&buf[2]);
+	rc |= tps6128xd_read(chip, ILIMSET_REG, (unsigned int *)&buf[3]);
+	rc |= tps6128xd_read(chip, STATUS_REG, (unsigned int *)&buf[4]);
+	rc |= tps6128xd_read(chip, E2PROMCTRL_REG, (unsigned int *)&buf[5]);
+
+	return rc;
+}
+
 #define REG_INFO_LEN 128
 static int tps6128xd_reg_dump(struct oplus_chg_ic_dev *ic_dev)
 {
@@ -432,44 +462,23 @@ static int tps6128xd_reg_dump(struct oplus_chg_ic_dev *ic_dev)
 	int rc;
 	char reg_info[REG_INFO_LEN] = { 0 };
 
-	if (ic_dev == NULL) {
-		chg_err("ic_dev is NULL\n");
+	if (ic_dev == NULL)
 		return -ENODEV;
-	}
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
 
-	if (!ic_dev->online || !chip->i2c_success)
+	if (!ic_dev->online || !chip->i2c_success || atomic_read(&chip->suspended) == 1)
 		return 0;
 
-	if (atomic_read(&chip->suspended) == 1) {
-		chg_err("in suspended\n");
-		return 0;
-	}
+	rc = tps6128xd_read_regs(chip, buf);
+	chg_err("byb_id:%d,%*ph, %d\n", ic_dev->index, TPS6128XD_REG_CNT, buf, atomic_read(&chip->tps6128xd_init_track_count));
 
-	rc = tps6128xd_read(chip, CONFIG_REG, (unsigned int *)&buf[0]);
-	if (rc < 0)
-		chg_err("read config register fail, rc=%d", rc);
-	rc = tps6128xd_read(chip, VOUTFLOORSET_REG, (unsigned int *)&buf[1]);
-	if (rc < 0)
-		chg_err("read voutfloor register fail, rc=%d", rc);
-	rc = tps6128xd_read(chip, VOUTROOFSET_REG, (unsigned int *)&buf[2]);
-	if (rc < 0)
-		chg_err("read voutroof register fail, rc=%d", rc);
-	rc = tps6128xd_read(chip, ILIMSET_REG, (unsigned int *)&buf[3]);
-	if (rc < 0)
-		chg_err("read ilim register fail, rc=%d", rc);
-	rc = tps6128xd_read(chip, STATUS_REG, (unsigned int *)&buf[4]);
-	if (rc < 0)
-		chg_err("read status register fail, rc=%d", rc);
-	rc = tps6128xd_read(chip, E2PROMCTRL_REG, (unsigned int *)&buf[5]);
-	if (rc < 0)
-		chg_err("read e2promctrl register fail, rc=%d", rc);
+	if (atomic_read(&chip->tps6128xd_init_track_count) > 0)
+		atomic_inc(&chip->tps6128xd_init_track_count);
 
-	chg_err("%*ph\n", TPS6128XD_REG_CNT, buf);
-
-	if (rc < 0 || (buf[4] & BIT(7)) || tps6128xd_debug_track) {
+	if (rc < 0 || (buf[4] & BIT(7)) || tps6128xd_debug_track || atomic_read(&chip->tps6128xd_init_track_count) > TRACK_INIT_DELAY_TIME) {
 		snprintf(reg_info, REG_INFO_LEN, "reg01~05,ff:[%*ph]", TPS6128XD_REG_CNT, buf);
 		tps6128xd_push_err(ic_dev, rc < 0, rc, reg_info, buf[4] & BIT(7));
+		atomic_set(&chip->tps6128xd_init_track_count, 0);
 	}
 	return 0;
 }
@@ -951,8 +960,10 @@ static int tps6128xd_driver_probe(struct i2c_client *client, const struct i2c_de
 	enum oplus_chg_ic_type ic_type;
 	int ic_index;
 	int rc;
+#ifdef CONFIG_OPLUS_CHG_IC_DEBUG
 	struct device_attribute **attrs;
 	struct device_attribute *attr;
+#endif
 
 	chip = devm_kzalloc(&client->dev, sizeof(struct chip_tps6128xd), GFP_KERNEL);
 	if (!chip) {
@@ -979,12 +990,6 @@ static int tps6128xd_driver_probe(struct i2c_client *client, const struct i2c_de
 		chg_err("tps6128xd gpio init failed, rc = %d!\n", rc);
 	}
 
-	rc = tps6128xd_hardware_init(chip);
-	if (rc < 0) {
-		chg_err("tps6128xd ic init failed, rc = %d!\n", rc);
-		goto gpio_init_err;
-	}
-
 	rc = of_property_read_u32(node, "oplus,ic_type", &ic_type);
 	if (rc < 0) {
 		chg_err("can't get ic type, rc=%d\n", rc);
@@ -1009,6 +1014,12 @@ static int tps6128xd_driver_probe(struct i2c_client *client, const struct i2c_de
 		rc = -ENODEV;
 		chg_err("register %s error\n", node->name);
 		goto reg_ic_err;
+	}
+
+	rc = tps6128xd_hardware_init(chip);
+	if (rc < 0) {
+		chg_err("tps6128xd ic init failed, rc = %d!\n", rc);
+		goto gpio_init_err;
 	}
 
 #ifdef CONFIG_OPLUS_CHG_IC_DEBUG
@@ -1041,7 +1052,8 @@ static int tps6128xd_driver_probe(struct i2c_client *client, const struct i2c_de
 	if (!chip->i2c_success && chip->probe_gpio_status == chip->id_match_status)
 		schedule_delayed_work(&chip->retry_init_work, msecs_to_jiffies(5000));
 #endif
-	chg_info("success!\n");
+
+	chg_info("byb_id:%d,success!\n", chip->ic_dev->index);
 	return 0;
 
 reg_ic_err:

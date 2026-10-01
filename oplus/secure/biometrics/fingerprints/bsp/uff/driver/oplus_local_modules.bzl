@@ -46,6 +46,11 @@ def define_oplus_local_modules():
             "fp_netlink.c",
             "fp_fault_inject.c",
         ]),
+        conditional_srcs = {
+            "CONFIG_UFF_FINGERPRINT_NOTIFY": {
+                True: ["fp_notify/fp_event_notify.c"],
+            },
+        },
         ko_deps = oplus_fp_ko_deps,
         copts = oplus_fp_copts,
         includes = ["."],

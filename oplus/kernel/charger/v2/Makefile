@@ -78,6 +78,7 @@ oplus_chg_v2-$(CONFIG_OPLUS_GAUGE_BQ27Z561) += gauge_ic/oplus_hal_bq27z561.o
 oplus_chg_v2-$(CONFIG_OPLUS_GAUGE_NFG8011B) += gauge_ic/oplus_hal_nfg8011b.o
 oplus_chg_v2-$(CONFIG_OPLUS_GAUGE_CW2217B) += gauge_ic/oplus_hal_cw2217b.o
 oplus_chg_v2-$(CONFIG_OPLUS_GAUGE_SN28Z729) += gauge_ic/oplus_hal_sn28z729.o
+oplus_chg_v2-$(CONFIG_OPLUS_GAUGE_SH366002) += gauge_ic/oplus_hal_sh366002.o
 oplus_chg_v2-$(CONFIG_OPLUS_GAUGE_BQ28Z610_RA) += gauge_ic/oplus_hal_bq28z610.o
 
 oplus_chg_v2-y += vooc_ic/oplus_hal_rk826.o
@@ -109,6 +110,7 @@ oplus_chg_v2-y += mms/oplus_mms_gauge.o
 oplus_chg_v2-y += mms/oplus_mms_wired.o
 oplus_chg_v2-y += mms/gauge/oplus_sili.o
 oplus_chg_v2-y += mms/sec/oplus_sec.o
+oplus_chg_v2-y += mms/gauge/oplus_chg_dual_cells_protection.o
 
 oplus_chg_v2-y += strategy/oplus_strategy.o
 oplus_chg_v2-y += strategy/oplus_strategy_cgcl.o
@@ -129,12 +131,12 @@ oplus_chg_v2-y += monitor/oplus_monitor_core.o
 oplus_chg_v2-y += monitor/oplus_chg_track.o
 oplus_chg_v2-y += monitor/oplus_chg_exception.o
 oplus_chg_v2-y += plat_ufcs/plat_ufcs_notify.o
-oplus_chg_v2-y += oplus_chg_dual_cells_protection.o
 
 oplus_chg_v2-$(CONFIG_OPLUS_CHG_RECOVERY) += recovery/oplus_chg_recovery.o
 oplus_chg_v2-$(CONFIG_OPLUS_CHG_STATE_KEEP) += recovery/state_keep/state_keep.o
 oplus_chg_v2-$(CONFIG_OPLUS_CHG_STATE_KEEP) += recovery/state_keep/detection/wired_disconnect_detection.o
 oplus_chg_v2-$(CONFIG_OPLUS_CHG_STATE_KEEP) += recovery/state_keep/detection/vooc_disconnect_detection.o
+oplus_chg_v2-$(CONFIG_OPLUS_CHG_STATE_KEEP_DCP) += recovery/state_keep/detection/dcp_disconnect_detection.o
 oplus_chg_v2-$(CONFIG_OPLUS_CHG_STATE_KEEP) += monitor/track/oplus_track_state_keep.o
 
 oplus_chg_v2-$(CONFIG_OPLUS_STATE_RETENTION) += oplus_chg_quirks.o
@@ -202,6 +204,7 @@ oplus_chg_v2-$(CONFIG_OPLUS_SC6607_CP) += voocphy/phy/oplus_sc6607_cp.o
 oplus_chg_v2-$(CONFIG_OPLUS_VOOCPHY_SC8547A) += voocphy/phy/oplus_sc8547a.o
 oplus_chg_v2-$(CONFIG_OPLUS_UFCS_MASTER_NU2112A) += ufcs_ic/oplus_hal_nu2112a.o
 oplus_chg_v2-$(CONFIG_OPLUS_UFCS_SLAVE_NU2112A) += ufcs_ic/oplus_hal_nu2112a_slave.o
+oplus_chg_v2-$(CONFIG_OPLUS_UFCS_MASTER_NU2118A) += ufcs_ic/oplus_hal_nu2118a.o
 
 oplus_chg_v2-$(CONFIG_OPLUS_CHG_MOS_CTRL) += switching_ic/oplus_mos_ctrl.o
 
@@ -217,6 +220,7 @@ oplus_chg_v2-$(CONFIG_OPLUS_WIRELESS_SC96257) += wireless_ic/oplus_hal_sc96257.o
 oplus_chg_v2-$(CONFIG_OPLUS_CHARGEPUMP_HL7227) += chargepump_ic/oplus_hal_hl7227.o
 
 oplus_chg_v2-$(CONFIG_OPLUS_BOOST_SC83107) += boost_ic/oplus_sc83107.o
+oplus_chg_v2-$(CONFIG_OPLUS_BOOST_SC83107) += boost_ic/oplus_sc83107_bcl.o
 
 oplus_chg_v2-$(CONFIG_OPLUS_DEBUG_AUTH) += debug/oplus_debug_auth.o
 

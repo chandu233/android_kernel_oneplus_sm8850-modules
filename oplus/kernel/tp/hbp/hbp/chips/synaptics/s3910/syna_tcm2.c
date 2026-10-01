@@ -25,6 +25,18 @@ void syna_hw_reset(struct syna_tcm *tcm_hcd)
 	msleep(100);
 }
 
+void syna_hw_power_on(struct syna_tcm *tcm_hcd)
+{
+	hbp_dev_power_type_ctrl(tcm_hcd, POWER_BUS, true);
+	msleep(10);
+	hbp_dev_power_type_ctrl(tcm_hcd, POWER_AVDD, true);
+	msleep(10);
+	hbp_dev_power_type_ctrl(tcm_hcd, POWER_VDDI, true);
+	msleep(10);
+	hbp_dev_power_type_ctrl(tcm_hcd, POWER_RESET, true);
+	msleep(100);
+}
+
 static int syna_spi_sync(void *priv, char *tx, char *rx, int32_t len)
 {
 	struct syna_tcm *tcm_hcd = (struct syna_tcm *)priv;
@@ -457,6 +469,17 @@ int syna_enable_hbp_mode(void *priv, bool en)
 	//      hbp_err("Fail to disalbe HBP Active Frame report\n");
 	//      goto exit;
 	// }
+
+	if (!tcm->probe_done) {
+		hbp_info("device probe not done, wait...\n");
+		retval = wait_event_interruptible_timeout(tcm->probe_waitq,
+						tcm->probe_done,
+						msecs_to_jiffies(4000));
+		if (!retval) {
+			hbp_err("Timeout waiting for device probe completion\n");
+		}
+	}
+
 	hbp_info("%s start, en=%u\n", __func__, en);
 	/* disable LBP mode: 2-LBP(default),1-HBP */
 	if (!en) {
@@ -501,9 +524,8 @@ static int syna_dev_probe(struct platform_device *pdev)
 	int ret = 0;
 	int retry = 0;
 
-	//TODO:need get from dts
 	if (!match_from_cmdline(&pdev->dev, &info)) {
-		return 0;
+		return -ENODEV;
 	}
 
 	tcm_hcd = kzalloc(sizeof(*tcm_hcd), GFP_KERNEL);
@@ -523,6 +545,8 @@ static int syna_dev_probe(struct platform_device *pdev)
 	tcm_hcd->pdev = pdev;
 	tcm_hcd->tcm_dev = tcm_dev;
 
+
+	init_waitqueue_head(&tcm_hcd->probe_waitq);
 
 	ret = hbp_register_devices(tcm_hcd,
 								&pdev->dev,
@@ -546,16 +570,21 @@ static int syna_dev_probe(struct platform_device *pdev)
 		goto err_exit;
 	}
 
+	syna_hw_power_on(tcm_hcd);
+
 	for (retry = 0; retry < 5; retry++) {
 		ret = syna_tcm_detect_device(tcm_hcd->tcm_dev);
 		if (ret >= 0) {
 			break;
 		}
-		hbp_err("Detect device fail, retry = %d.\n", retry);
-		syna_hw_reset(tcm_hcd);
+		if (ret == _EAGAIN) {
+			hbp_err("Detect device fail, retry = %d.\n", retry);
+			syna_hw_reset(tcm_hcd);
+		}
 	}
 
 	tcm_hcd->probe_done = true;
+	wake_up_interruptible(&tcm_hcd->probe_waitq);
 	hbp_info("probe end\n");
 	return 0;
 

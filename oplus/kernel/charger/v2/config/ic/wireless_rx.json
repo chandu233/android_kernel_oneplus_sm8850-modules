@@ -9,7 +9,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["bool"],
+            "parameter_list": [
+                "bool"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-1",
@@ -31,7 +33,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["bool *"],
+            "parameter_list": [
+                "bool *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -53,7 +57,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["bool *"],
+            "parameter_list": [
+                "bool *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -75,7 +81,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *"],
+            "parameter_list": [
+                "int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -97,7 +105,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int"],
+            "parameter_list": [
+                "int"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -119,7 +129,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *"],
+            "parameter_list": [
+                "int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -141,7 +153,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *"],
+            "parameter_list": [
+                "int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -163,7 +177,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *"],
+            "parameter_list": [
+                "int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -185,7 +201,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *"],
+            "parameter_list": [
+                "int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -207,7 +225,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *"],
+            "parameter_list": [
+                "int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -229,7 +249,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *"],
+            "parameter_list": [
+                "int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -251,7 +273,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *"],
+            "parameter_list": [
+                "int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -273,7 +297,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["enum oplus_chg_wls_rx_mode *"],
+            "parameter_list": [
+                "enum oplus_chg_wls_rx_mode *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -295,7 +321,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["enum oplus_chg_wls_rx_mode"],
+            "parameter_list": [
+                "enum oplus_chg_wls_rx_mode"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -317,7 +345,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["bool"],
+            "parameter_list": [
+                "bool"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -339,7 +369,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["bool"],
+            "parameter_list": [
+                "bool"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -361,7 +393,9 @@
                 "zh": "设置反充START命令"
             },
             "auto_debug_code": true,
-            "parameter_list": ["enum oplus_chg_wls_tx_start_type"],
+            "parameter_list": [
+                "enum oplus_chg_wls_tx_start_type"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -370,7 +404,7 @@
                         "zh": "0:关闭反充START, 1:开启反充START, 2:开启无线手写笔反充START"
                     }
                 }
-	    ],
+            ],
             "vict": {
                 "read": false,
                 "write": false,
@@ -383,7 +417,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["u8 *"],
+            "parameter_list": [
+                "u8 *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -405,7 +441,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["u32 *"],
+            "parameter_list": [
+                "u32 *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -427,7 +465,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *"],
+            "parameter_list": [
+                "int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -449,7 +489,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int"],
+            "parameter_list": [
+                "int"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -471,7 +513,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": false,
-            "parameter_list": ["u8 []"],
+            "parameter_list": [
+                "u8 []"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -493,7 +537,12 @@
                 "zh": "N/A"
             },
             "auto_debug_code": false,
-            "parameter_list": ["u8 []", "int", "int", "int"],
+            "parameter_list": [
+                "u8 []",
+                "int",
+                "int",
+                "int"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -536,7 +585,11 @@
                 "zh": "N/A"
             },
             "auto_debug_code": false,
-            "parameter_list": ["unsigned char []", "int", "int"],
+            "parameter_list": [
+                "unsigned char []",
+                "int",
+                "int"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -572,7 +625,10 @@
                 "zh": "N/A"
             },
             "auto_debug_code": false,
-            "parameter_list": ["void *", "void (*msg_call_back)(void *, u8 [])"],
+            "parameter_list": [
+                "void *",
+                "void (*msg_call_back)(void *, u8 [])"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -601,7 +657,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["u32 *"],
+            "parameter_list": [
+                "u32 *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -623,7 +681,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["u32 *"],
+            "parameter_list": [
+                "u32 *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -645,7 +705,10 @@
                 "zh": "N/A"
             },
             "auto_debug_code": false,
-            "parameter_list": ["unsigned char *", "int"],
+            "parameter_list": [
+                "unsigned char *",
+                "int"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -702,7 +765,9 @@
                 "zh": "N/A"
             },
             "auto_debug_code": true,
-            "parameter_list": ["enum oplus_chg_wls_event_code *"],
+            "parameter_list": [
+                "enum oplus_chg_wls_event_code *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -724,7 +789,9 @@
                 "zh": "获取全桥半桥等模式"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *"],
+            "parameter_list": [
+                "int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -746,7 +813,9 @@
                 "zh": "控制RXIC FORCE PD的信号,用于IC控制ACDRV PD从而控制USBIN的导通与否"
             },
             "auto_debug_code": true,
-            "parameter_list": ["bool"],
+            "parameter_list": [
+                "bool"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-1",
@@ -768,7 +837,9 @@
                 "zh": "控制RXIC进入/退出standby模式"
             },
             "auto_debug_code": true,
-            "parameter_list": ["bool"],
+            "parameter_list": [
+                "bool"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-1",
@@ -790,7 +861,9 @@
                 "zh": "RX IC通信电容控制"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int"],
+            "parameter_list": [
+                "int"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -812,7 +885,9 @@
                 "zh": "获取TX manufacturer id"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *"],
+            "parameter_list": [
+                "int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -848,7 +923,9 @@
                 "zh": "EPP模式下设置RX的Q值和F值"
             },
             "auto_debug_code": false,
-            "parameter_list": ["u8 []"],
+            "parameter_list": [
+                "u8 []"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -870,7 +947,9 @@
                 "zh": "获取无线手写笔蓝牙地址"
             },
             "auto_debug_code": true,
-            "parameter_list": ["u64 *"],
+            "parameter_list": [
+                "u64 *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -892,7 +971,9 @@
                 "zh": "获取无线手写笔ID"
             },
             "auto_debug_code": true,
-            "parameter_list": ["u8 *"],
+            "parameter_list": [
+                "u8 *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -914,7 +995,9 @@
                 "zh": "获取无线手写笔充电状态"
             },
             "auto_debug_code": true,
-            "parameter_list": ["u8 *"],
+            "parameter_list": [
+                "u8 *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -936,7 +1019,9 @@
                 "zh": "获取无线AC_OV标志位"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *"],
+            "parameter_list": [
+                "int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -953,6 +1038,5 @@
             }
         }
     ],
-
     "version": "V3.2:42:4fd64be39355130df06d88dbee8ffef11264abc9dc9df16deafffaca240d33a6"
 }

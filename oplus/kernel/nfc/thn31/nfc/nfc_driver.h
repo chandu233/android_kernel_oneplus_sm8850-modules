@@ -25,6 +25,7 @@
 #define MAX_I2C_WAKEUP_TIME 3
 #define I2C_WAKEUP_SLEEP_TIME1 5000
 #define I2C_WAKEUP_SLEEP_TIME2 5100
+#define BOOT_MODE_FACTORY 4
 
 /*********** PART2: Struct Area ***********/
 enum nfc_ioctl_request_table {

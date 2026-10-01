@@ -84,4 +84,6 @@ int nfc_regulator_get(struct device *i2c_dev, struct ldo *ldo);
 void nfc_regulator_put(struct ldo *ldo);
 int nfc_ldo_vote(struct ldo *ldo);
 void nfc_ldo_unvote(struct ldo *ldo);
+void nfc_set_ven_off(struct nfc_info *nfc);
+void nfc_set_ven_on(struct nfc_info *nfc);
 #endif /* _TMS_NFC_H_ */

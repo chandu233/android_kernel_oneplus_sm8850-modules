@@ -24,7 +24,7 @@ static int oplus_send_comm_to_hub(int sensor_type, int cmd, void *data, uint8_t 
     ctrl->command = cmd;
     ctrl->length = length;
     if (length){
-        memcpy(ctrl->data, data, length);
+        memmove(ctrl->data, data, length);
     }
     ret = sensor_comm_ctrl_send(ctrl, sizeof(*ctrl) + ctrl->length);
     kfree(ctrl);

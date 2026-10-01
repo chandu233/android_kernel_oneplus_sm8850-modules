@@ -713,6 +713,23 @@ static int sc2201_ufcs_cable_hard_reset(struct ufcs_dev *ufcs)
 	return rc;
 }
 
+static int sc2201_ufcs_hiz_enable(struct ufcs_dev *ufcs, bool en)
+{
+	struct oplus_sc2201 *chip = ufcs->drv_data;
+	int rc = 0;
+	u8 data = 0;
+
+	if (en)
+		data = SC2201_SEND_ENABLE_HIZ;
+	else
+		data = 0;
+	rc = sc2201_write_bit_mask(chip, SC2201_ADDR_UFCS_CTRL1, SC2201_SEND_ENABLE_HIZ, data);
+	if (rc < 0)
+		chg_err("set ufcs hiz %d error, rc=%d\n", en, rc);
+
+	return rc;
+}
+
 static irqreturn_t sc2201_int_handler(int irq, void *dev_id)
 {
 	struct oplus_sc2201 *chip = dev_id;
@@ -970,6 +987,7 @@ static struct ufcs_dev_ops sc2201_ufcs_ops = {
 	.set_baud_rate = sc2201_ufcs_set_baud_rate,
 	.enable = sc2201_ufcs_enable,
 	.disable = sc2201_ufcs_disable,
+	.hiz_enable = sc2201_ufcs_hiz_enable,
 };
 
 static struct ufcs_config sc2201_ufcs_config = {

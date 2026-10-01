@@ -1689,6 +1689,9 @@ static int nu2118a_retrieve_reg_flags(struct nu2118a_device *chip)
 	if (flag_buf[1] & NU2118A_FLAG_MSG_TRANS_FAIL)
 		err_flag |= BIT(UFCS_RECV_ERR_TRANS_FAIL);
 
+	if (flag_buf[1] & NU2118A_FLAG_RX_BUFFER_BUSY)
+		err_flag |= BIT(UFCS_RECV_ERR_BUFF_BUSY);
+
 	if (flag_buf[1] & NU2118A_FLAG_RX_OVERFLOW)
 		err_flag |= BIT(UFCS_COMM_ERR_RX_OVERFLOW);
 
@@ -2250,10 +2253,10 @@ static ssize_t nu2118a_track_reg_show(struct device *dev,
 		return -EINVAL;
 	}
 
-	int result = scnprintf(buf, PAGE_SIZE, "reg 0x11/0x12/0x13/0x14/en[0x%x, 0x%x, 0x%x, 0x%x,0x%x]\n",
-		chip->cp_reg_track[0], chip->cp_reg_track[1], chip->cp_reg_track[2],
-		chip->cp_reg_track[3], chip->cp_reg_track[4]);
-	if (result < 0)
+	int result = snprintf(buf, PAGE_SIZE, "reg 0x11/0x12/0x13/0x14/en[0x%x, 0x%x, 0x%x, 0x%x, 0x%x]\n",
+							chip->cp_reg_track[0], chip->cp_reg_track[1], chip->cp_reg_track[2],
+							chip->cp_reg_track[3], chip->cp_reg_track[4]);
+	if (result < 0 || (size_t)result >= PAGE_SIZE)
 		return -EINVAL;
 
 	return result;
@@ -2976,7 +2979,16 @@ retry:
 
 static int nu2118a_ufcs_cable_hard_reset(struct ufcs_dev *ufcs)
 {
-	return 0;
+	struct nu2118a_device *chip = ufcs->drv_data;
+	int rc;
+
+	rc = nu2118a_write_bit_mask(chip, NU2118A_ADDR_UFCS_CTRL0,
+		NU2118A_SEND_CABLE_HARDRESET, NU2118A_SEND_CABLE_HARDRESET);
+
+	if (rc < 0)
+		chg_err("set cable reset error, rc=%d\n", rc);
+
+	return rc;
 }
 
 static int nu2118a_ufcs_set_baud_rate(struct ufcs_dev *ufcs, enum ufcs_baud_rate baud)
@@ -3158,6 +3170,35 @@ static int nu2118a_ufcs_retrieve_flags(struct ufcs_dev *ufcs)
 	return nu2118a_retrieve_flags(ufcs->drv_data);
 }
 
+static int nu2118a_ufcs_hiz_enable(struct ufcs_dev *ufcs, bool en)
+{
+	struct nu2118a_device *chip = ufcs->drv_data;
+	int rc = 0;
+	u8 data = 0;
+
+	if (en)
+		data = NU2118A_SEND_ENABLE_HIZ;
+	else
+		data = 0;
+	rc = nu2118a_write_bit_mask(chip, NU2118A_ADDR_GENERAL_INT_FLAG1, NU2118A_SEND_ENABLE_HIZ, data);
+	if (rc < 0)
+		chg_err("set ufcs hiz %d error, rc=%d\n", en, rc);
+
+	return rc;
+}
+
+static int nu2118a_ufcs_clr_rx_buf(struct ufcs_dev *ufcs)
+{
+	struct nu2118a_device *chip = ufcs->drv_data;
+	int rc;
+
+	rc = nu2118a_write_bit_mask(chip, NU2118A_ADDR_GENERAL_INT_FLAG1,
+		NU2118A_SEND_CLR_RX_BUF, NU2118A_SEND_CLR_RX_BUF);
+	if (rc < 0)
+		chg_err("clear rx buf error, rc=%d\n", rc);
+	return rc;
+}
+
 static struct ufcs_dev_ops ufcs_ops = {
 	.init = nu2118a_ufcs_init,
 	.write_msg = nu2118a_ufcs_write_msg,
@@ -3171,6 +3212,8 @@ static struct ufcs_dev_ops ufcs_ops = {
 	.watchdog_config = nu2118a_ufcs_watchdog_config,
 	.baudrate_end_check_config = nu2118a_ufcs_baudrate_end_check_config,
 	.retrieve_flags = nu2118a_ufcs_retrieve_flags,
+	.hiz_enable = nu2118a_ufcs_hiz_enable,
+	.clr_rx_buf = nu2118a_ufcs_clr_rx_buf,
 };
 
 static int nu2118a_reverse_watchdog_reset(struct oplus_chg_ic_dev *ic_dev)
