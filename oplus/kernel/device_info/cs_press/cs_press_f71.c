@@ -2145,6 +2145,11 @@ static void fml_firmware_config_cb(const struct firmware *cfg, void *ctx)
     int fw_error = 0;
 
     mutex_lock(&press_lock);
+    if (g_cs_press.update_done) {
+        release_firmware(cfg);
+        mutex_unlock(&press_lock);
+        return;
+    }
     if(cfg)
     {
         fw_error = fml_firmware_send_data((unsigned char*)cfg->data, cfg->size);
@@ -2164,8 +2169,8 @@ err_release_cfg:
     cs_press_set_mode(g_cs_press.camera_key_mode);
     cs_press_set_trigger_strength(g_cs_press.strength_cfg);
 #endif
-    mutex_unlock(&press_lock);
     g_cs_press.update_done = 1;
+    mutex_unlock(&press_lock);
     LOG_INFO("end\n");
 }
 
@@ -4127,6 +4132,9 @@ static ssize_t cs_proc_fw_file_update_write(struct file *file, const char __user
     {
         g_cs_press.update_type = HIGH_VER_FILE_UPDATE;
     }
+    mutex_lock(&press_lock);
+    g_cs_press.update_done = 0;
+    mutex_unlock(&press_lock);
     err = fml_fw_update_by_file();
     if (err == 0)
         LOG_DEBUG("pass!\n");
