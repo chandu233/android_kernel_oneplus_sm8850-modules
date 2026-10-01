@@ -44,6 +44,8 @@
 #include <linux/iio/consumer.h>
 #include <linux/workqueue.h>
 #include <linux/pogo_common.h>
+#include "owb.h"
+#include "pogo_healthinfo.h"
 
 #define WAKEUP_NAME "pogo_wakeup"
 #define KEYBOARD_NAME "pogo_keyboard"
@@ -129,9 +131,16 @@ extern int kb_debug_level;
 //  CRC init value
 #define  CRC_CCITT_INIT_VAL   0x1D0F
 #define  CRC_IBM_INIT_VAL     0xC596
+#define  CRC_IBM_DUNHUANG   0xA5C9
+#define CRC_ERROR_VALUE            0xFFFF
 
 // Timer expiry time, unit-ms
 #define POWEROFF_TIMER_EXPIRY       50
+#define PLUGIN_TIMER_EXPIRY       20
+#define HEARTBEAT_TIMER_EXPIRY       50 // 50ms, note that heartbeat from keyboard is 100ms(may be adjusted in the future)
+#define TIMER_BUFFER_MS       20
+#define POWER_ON_WAKEUP_TIMEOUT_MS 2500
+#define POWER_ON_PLUGIN_TIMEOUT_MS 500
 
 // Timer unit-s
 #define POWERON_PLUG_CKECK_TIMER       5
@@ -143,6 +152,7 @@ extern int kb_debug_level;
 #define PLUGIN_CHECK_CHECK_MAX      6
 
 #define SYNC_LCD_STATE_CNT_MAX      50
+#define INT_LEVEL_CHECK_MAX         20
 
 #define KEVENT_LOG_TAG              "psw_bsp_pogopin"
 #define KEVENT_EVENT_ID             "pogopin_sn_report"
@@ -157,19 +167,28 @@ extern int kb_debug_level;
 #define PROC_PAGE_LEN		50
 #define MAX_FW_NAME_LENGTH	60
 #define ONE_WRITY_LEN_MAX    52 // 128
-#define FW_PROGERSS_1		1
+#define FW_PROGRESS_0		0
+#define FW_PROGRESS_1		1
 #define FW_PROGRESS_2		2
 #define FW_PROGRESS_3		3
 #define FW_PROGRESS_5		5
 #define FW_PROGRESS_6		6
+#define FW_PROGRESS_7		7
+#define FW_PROGRESS_10		10
 #define FW_PROGRESS_20		20
 #define FW_PROGRESS_22		22
 #define FW_PROGRESS_25		25
+#define FW_PROGRESS_30		30
 #define FW_PROGRESS_45		45
 #define FW_PROGRESS_46		46
 #define FW_PROGRESS_47		47
 #define FW_PROGRESS_48		48
 #define FW_PROGRESS_50		50
+#define FW_PROGRESS_51		51
+#define FW_PROGRESS_70		70
+#define FW_PROGRESS_71		71
+#define FW_PROGRESS_90		90
+#define FW_PROGRESS_91		91
 #define FW_PROGRESS_93		93
 #define FW_PROGRESS_96		96
 #define FW_PROGRESS_99		99
@@ -179,6 +198,51 @@ extern int kb_debug_level;
 #define KBVER_LEN_MAX      30//20
 #define TPVER_LEN       7
 #define KBLOG_LEN_MAX      106
+
+#define UART_PACKET_MIN_HEADER_SIZE      2       // main_cmd + len
+#define UART_PACKET_SYNC_HEAD_SIZE       8       // sync start
+#define UART_PACKET_SYNC_TAIL_SIZE       4       // sync end
+#define UART_PACKET_HEADER_SIZE          16      // 8sync+1start+3adds+2cmd+1len+1
+#define UART_PACKET_TAIL_SIZE            4       // (2CRC+1end+4sync)
+#define UART_PACKET_CRC_HEADER_SIZE      5
+
+#define UART_PACKET_START_OFFSET         8
+#define UART_PACKET_SRC_ADDR_OFFSET      9
+#define UART_PACKET_DST_ADDR_OFFSET      10
+#define UART_PACKET_MAIN_CMD_OFFSET      11
+#define UART_PACKET_LENGTH_OFFSET        12
+#define UART_PACKET_DATA_OFFSET          13
+//MCU VERSION
+#define KBMCU_VESION_1_0_7   0x0107
+//disconect count
+#define DEFAULT_PLUGIN_DISCONNECT_COUNT     40 // 2s
+#define DFU_PLUGIN_DISCONNECT_COUNT     160 //8s
+#define DEFAULT_DISCONNECT_COUNT         10      // 0.5s
+#define DFU_DISCONNECT_COUNT            40      // 2s
+#define DFU_RESET_DISCONNECT_COUNT      400     // 20s
+#define TP_OTA_START_DISCONNECT_COUNT   300     // 15s
+#define KB_OTA_PROGRESS_INCREMENT   1      // add 1 one time
+#define OTA_SLEEP_INTERVAL        50      // 50ms
+#define TP_OTA_PROGRESS_INCREMENT   10      // add 10 one time
+#define OTA_STATUS_INACTIVE             0
+#define OTA_STATUS_ACTIVE               1
+#define TRIPLE_OTA_RESET_DISCONNECT_COUNT    80 // 4S
+#define WRITE_MAX_RETRIES 3
+#define WRITE_DELAY_MS 50
+#define READ_DELAY_MS 100
+#define TRIPLE_TP_INFO_READ_MAX_RETRIES 4
+#define TRIPLE_PT_INFO_READ_MAX_RETRIES 4
+#define TRIPLE_PT_TP_END_LEN 10
+#define TRIPLE_PT_TP_END_ACK_LEN 5
+#define TRIPLE_TP_END_READ_MAX_RETRIES 4
+#define TRIPLE_PT_END_READ_MAX_RETRIES 4
+#define TRIPLE_KB_INFO_READ_MAX_RETRIES 4
+#define TRIPLE_KB_DATA_WRITE_AND_READ_MAX_RETRIES 1
+#define TRIPLE_KB_OTA_PROGRESS_INCREMENT   10      // add 10 one time
+#define TRIPLE_TP_OTA_SLEEP_INTERVAL        100      // 100ms
+#define TRIPLE_TP_OTA_PROGRESS_INCREMENT   10   // add 12 one time
+#define TRIPLE_PT_OTA_SLEEP_INTERVAL        100      // 100ms
+#define TRIPLE_PT_OTA_PROGRESS_INCREMENT   15   // add 15 one time
 
 enum {
     KEYBOARD_PLUG_IN_EVENT = 0x01,
@@ -207,6 +271,10 @@ enum {
     KEYBOARD_REPORT_UART_CLOSE_EVENT,
     KEYBOARD_REPORT_TP_DIST_EVENT,
     KEYBOARD_REPORT_TP_DEBUG_EVENT,
+    KEYBOARD_POWER_OFF_CHECK_EVENT,
+    KEYBOARD_SET_BRIGHTNESS_EVENT,
+    KEYBOARD_SET_TOUCH_PRESS_EVENT,
+    KEYBOARD_SET_PT_DISABLE_EVENT,
     POGO_KEYBOARD_EVENT_MAX, //add new event befor it
 };
 
@@ -236,14 +304,61 @@ enum updateStatus{
     FW_UPDATE_SUC,
 };
 
+enum {
+    TRIPLE_OTA_READY = 0x00,
+    TRIPLE_OTA_START,
+    TRIPLE_OTA_RETRY,
+    TRIPLE_OTA_FAIL,
+    TRIPLE_OTA_SUCCESS,
+};
+
+enum ota_device_type {
+    OTA_DEVICE_TP = ONE_WIRE_BUS_PACKET_USER_GENERAL_OTA_TP_INFO_START_CMD,  // Touchpad
+    OTA_DEVICE_PT = ONE_WIRE_BUS_PACKET_USER_GENERAL_OTA_PT_INFO_START_CMD   // Pressure sensor
+};
+
+enum ota_data_device_type {
+    OTA_DATA_DEVICE_TP = ONE_WIRE_BUS_PACKET_USER_GENERAL_OTA_TP_DATAS_CMD,  // Touchpad datas cmd
+    OTA_DATA_DEVICE_PT = ONE_WIRE_BUS_PACKET_USER_GENERAL_OTA_PT_DATAS_CMD   // Pressure sensor datas cmd
+};
+
+enum ota_end_device_type {
+    OTA_END_DEVICE_TP = ONE_WIRE_BUS_PACKET_USER_GENERAL_OTA_TP_INFO_END_CMD,  // Touchpad end cmd
+    OTA_END_DEVICE_PT = ONE_WIRE_BUS_PACKET_USER_GENERAL_OTA_PT_INFO_END_CMD   // Pressure sensor end cmd
+};
+
+typedef enum {
+    TRIPLE_DEVICE_KB = 0,
+    TRIPLE_DEVICE_TP = 1,
+    TRIPLE_DEVICE_PT = 2,
+    MAX_DEVICES
+} triple_device_type_t;
+
+typedef struct {
+    int (*ota_start)(u32 len);
+    int (*ota_write_datas)(const unsigned char *fw_data, u32 len, int *count);
+    int (*ota_end)(u32 len, int count, u32 checksum);
+    const char *device_name;
+} ota_device_ops_t;
+
+typedef struct {
+    const char *name;
+    int (*data_send)(const unsigned char *fw_data, u32 count,
+                    u32 checksum, u32 addr, int len);
+    int (*ota_progress)(void);
+    int progress_value;
+} triple_device_info_t;
+
 struct touch_event {
     unsigned int x;
     unsigned int y;
     unsigned char id;
     unsigned char area;
+    unsigned char palm;
     unsigned char is_down;
     unsigned char is_left;
     unsigned char is_right;
+    unsigned int pt_val;
 };
 
 struct pogo_keyboard_event {
@@ -348,6 +463,7 @@ struct pogo_keyboard_data {
     struct hrtimer heartbeat_timer;         // timer for monitoring keyboard heartbeat report periodically.
     struct hrtimer poweroff_timer;
     struct hrtimer plugin_check_timer;
+    struct hrtimer int_level_timer;
 
     int disconnect_count; // numbers of heartbeat packet for plug-out detection after keyboard initialization complete.
     int plug_in_count; // numbers of heartbeat packet for plug-out detection before keyboard initialization complete.
@@ -356,6 +472,11 @@ struct pogo_keyboard_data {
     int poweroff_timer_check_count;
     int check_connect_count;
     int check_disconnect_count;
+    int max_disconnect_count;
+    int max_plug_in_disconnect_count;
+    int int_level_high_count;
+    int int_level_low_count;
+    spinlock_t int_level_lock;
 
     struct drm_panel *active_panel;
     void *notifier_cookie;
@@ -370,6 +491,7 @@ struct pogo_keyboard_data {
     struct pogo_uevent *pogo;
     struct pogo_uevent *nfc;
     struct pogo_uevent *pogo_uart;
+
 
     char *tty_name;
     char *keyboard_name;
@@ -388,6 +510,7 @@ struct pogo_keyboard_data {
     bool get_crc_ibm_from_dts;
     unsigned short pogo_id_product;
     bool is_confidential;
+    bool blank_vcc_off_support; // vcc off when plug out kb under blank
 
     //for pogopin firmware update
     bool pogopin_fw_support;
@@ -400,23 +523,45 @@ struct pogo_keyboard_data {
     struct wakeup_source *pogopin_wakelock;
     int kpdmcu_mcu_version;
     int kpdmcu_fw_data_ver;
+    int kpdmcu_tp_version;
+    int kpdmcu_fw_tp_ver;
+    int kpdmcu_pt_version;
+    int kpdmcu_fw_pt_ver;
     u32 kpdmcu_fw_cnt;
     unsigned char report_kbver[KBVER_LEN_MAX];
     u8 kbver_len;
-    u8 kpd_fw_status;
     int fw_update_progress;
     bool kpdmcu_update_end;
     bool kpdmcu_fw_update_force;
     bool is_kpdmcu_need_fw_update;
     bool pogopin_ota_dfu;
+    int dfu_boot;
+    int tp_ota_status;
     u32 dfu_fwinfo_start_addr;
     unsigned char report_tpver[TPVER_LEN];
+    bool pogopin_triple_ota;
+    unsigned char report_ptver[TPVER_LEN];
+    u32 triple_ota_fwinfo_start_addr;
+    atomic_t triple_tp_status;
+    atomic_t triple_pt_status;
+    atomic_t triple_kb_status;
+    atomic_t kpd_fw_status;
+    bool triple_pt_need_update;
 
     //for trx test
     struct work_struct kpd_trx_test_work;
     u8 kblog_len;
     unsigned char report_kblog[KBLOG_LEN_MAX];
     unsigned char nfc_status;
+    // for kb brightness
+    atomic_t brightness_level;
+    // for touch press
+    atomic_t touch_press_level;
+    //for health monitor
+    struct monitor_data monitor_data;
+    struct mutex monitor_mutex;
+    // for keyboard cover status
+    atomic_t cover_status;
 };
 
 typedef struct {
@@ -453,5 +598,6 @@ extern ssize_t pogo_tty_write(struct file *file, const char __user *buf, size_t 
 //for ota
 extern void kpdmcu_fw_data_version_thread(struct work_struct *work);
 extern void kpdmcu_fw_update_thread(struct work_struct *work);
-
+extern int pogo_keyboard_set_lcd_state(bool state);
+extern void update_fw_status(struct pogo_keyboard_data *client, int new_status);
 #endif

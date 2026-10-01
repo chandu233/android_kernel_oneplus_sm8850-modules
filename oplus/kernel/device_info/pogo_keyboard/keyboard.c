@@ -1,4 +1,5 @@
 #include "pogo_keyboard.h"
+#include "pogo_healthinfo.h"
 
 
 #define KEYBOARD_NUM_KEYS   256
@@ -64,6 +65,7 @@ int pogo_keyboard_input_wakeup_init(void)
 
     if (!input_dev) {
         kb_err("input_allocate_device err \n");
+        POGO_HEALTH_REPORT(POGO_HEALTH_REPORT_ALLOC_FAIL);
         return -ENOMEM;
     }
     input_dev->name = WAKEUP_NAME;
@@ -81,6 +83,7 @@ int pogo_keyboard_input_wakeup_init(void)
         input_unregister_device(input_dev);
         input_free_device(input_dev);
         kb_err("input_register_device err \n");
+        POGO_HEALTH_REPORT(POGO_HEALTH_REPORT_INIT_FAIL);
         return ret;
     }
     pogo_keyboard_client->input_wakeup = input_dev;
@@ -116,6 +119,7 @@ int pogo_keyboard_input_init(char *keyboard_name)
     }
     if (!pogo_keyboard_input) {
         kb_err("input_allocate_device err \n");
+        POGO_HEALTH_REPORT(POGO_HEALTH_REPORT_ALLOC_FAIL);
         return -ENOMEM;
     }
 
@@ -153,6 +157,7 @@ int pogo_keyboard_input_init(char *keyboard_name)
     if (ret) {
         input_free_device(pogo_keyboard_input);
         kb_err("input_register_device err \n");
+        POGO_HEALTH_REPORT(POGO_HEALTH_REPORT_KB_INIT_FAIL);
         return ret;
     }
     pogo_keyboard_client->input_pogo_keyboard = pogo_keyboard_input;
