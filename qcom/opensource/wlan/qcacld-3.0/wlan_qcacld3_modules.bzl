@@ -2782,22 +2782,19 @@ def _define_module_for_target_variant_chipset(target, variant, chipset):
             "//build_dir/{}/linux-{}/dataipa-{}:{}_{}_ipam".format(tgt, board, ipa_ver, target, variant),
         ]
 
-    deps = deps + select({
-        ":wonder_enabled": [
-	    # Add dependency of wonder here
-        ],
-        "//conditions:default": [],
-    })
-
     wonder_srcs = "wonder_srcs_{}".format(tvc)
-    native.filegroup(
-        name = wonder_srcs,
-        srcs = select({
+    wonder_inputs = ["core/hdd/inc/wlan_hdd_wondertap.h"]
+    if target != "canoe":
+        wonder_inputs = select({
             ":wonder_enabled": [
                 "core/hdd/src/wlan_hdd_wondertap.c",
             ],
-            "//conditions:default": ["core/hdd/inc/wlan_hdd_wondertap.h"],
-        }),
+            "//conditions:default": wonder_inputs,
+        })
+
+    native.filegroup(
+        name = wonder_srcs,
+        srcs = wonder_inputs,
         visibility = ["//visibility:private"],
     )
 

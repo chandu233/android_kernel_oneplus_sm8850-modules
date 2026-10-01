@@ -781,6 +781,9 @@ struct icnss_priv {
 	u32 rf_subtype;
 	u8 is_slate_rfa;
 	struct completion slate_boot_complete;
+#ifdef OPLUS_FEATURE_WIFI_BDF
+	const char *bdf_name, *region_name;
+#endif
 #ifdef SLATE_MODULE_ENABLED
 	struct seb_notif_info *seb_handle;
 	struct notifier_block seb_nb;
