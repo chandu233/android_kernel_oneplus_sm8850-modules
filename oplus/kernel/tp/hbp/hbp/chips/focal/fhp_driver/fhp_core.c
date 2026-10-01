@@ -265,23 +265,9 @@ int fhp_write(u8 *writebuf, u32 writelen)
 	return fhp_chip_write(g_fts, writebuf, writelen);
 }
 
-int fhp_write_reg(u8 addr, u8 value)
-{
-	u8 writebuf[2] = { 0 };
-
-	writebuf[0] = addr;
-	writebuf[1] = value;
-	return fhp_write(writebuf, 2);
-}
-
 int fhp_read(u8 *cmd, u32 cmdlen, u8 *data, u32 datalen)
 {
 	return fhp_chip_read(g_fts, cmd, cmdlen, data, datalen);
-}
-
-int fhp_read_reg(u8 addr, u8 *value)
-{
-	return fhp_read(&addr, 1, value, 1);
 }
 
 
@@ -495,7 +481,7 @@ static int fts_dev_probe(struct platform_device *pdev)
 	struct chip_info info;
 
 	if (!match_from_cmdline(&pdev->dev, &info)) {
-		return 0;
+		return -ENODEV;
 	}
 
 	fts = kzalloc(sizeof(struct fts_core), GFP_KERNEL);

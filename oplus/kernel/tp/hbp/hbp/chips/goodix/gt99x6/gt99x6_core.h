@@ -108,12 +108,18 @@ enum gesture_id {
 #define GOODIX_RELEASE_HOLD              0x44
 #define GOODIX_FINGERPRINT_ERR_REPORT   0x80
 #define GOODIX_TOUCH_HOLD_EARLY_DOWN 0x81
+#define GOODIX_PEN_DETECT                0xDD
 
 /* gesture type for fingerprint end */
 
 #define GTP_SENSOR_ID_DEFAULT            255
 #define GTP_SENSOR_ID_ERR                0
 
+/* power off sequence delay (ms) */
+#define POWER_OFF_RESET_DELAY_MS		 5
+#define POWER_OFF_AVDD_DELAY_MS			 10
+#define POWER_OFF_VDDI_DELAY_MS			 10
+#define POWER_OFF_BUS_DELAY_MS			 20
 enum _FTS_FP_ERROR_TYPE {
 	FTS_FINGERPRINT_DOWN_BEFORE_FP_ENABLE = 0,
 	FTS_FINGERPRINT_X_Y_NOT_MATCH = 0x08,
