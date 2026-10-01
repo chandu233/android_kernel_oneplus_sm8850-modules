@@ -17,6 +17,118 @@ def define_oplus_local_modules():
         ko_oem_qmi_deps = []
 
     define_oplus_ddk_module(
+        name = "oplus_network_data_module",
+        srcs = native.glob([
+            "**/*.h",
+            "data_module/data_main.c",
+            "data_module/comm_netlink/comm_netlink.c",
+            "data_module/comm_netlink/protobuf-c.c",
+            "data_module/proto-src/netlink_msg.pb-c.c",
+            "data_module/dpi/dpi_core.c",
+            "data_module/dpi/log_stream.c",
+            "data_module/dpi/tmgp_sgame.c",
+            "data_module/dpi/heytap_market.c",
+            "data_module/cls_dpi/cls_dpi.c",
+            "data_module/dpi/zoom.c",
+            "data_module/dpi/tencent_meeting.c",
+            "data_module/dpi/wechat.c",
+            "data_module/oplus_game_main_stream_monitor/oplus_game_main_stream_monitor.c",
+            "tmgp_sgame/wzry_stats.c",
+        ]),
+        includes = ["."],
+    )
+
+    define_oplus_ddk_module(
+        name = "oplus_network_linkpower_module",
+        conditional_srcs = {
+            "CONFIG_OPLUS_DDK_MTK" : {
+                True: [
+                    "linkpower_module/ccci_wakeup_hook/ccci_wakeup_hook.c"
+                ],
+                False: [
+                    "linkpower_module/heartbeat_proxy/qualcomm/heartbeat_proxy_qcom.c",
+                    "linkpower_module/qrtr_hook/qrtr_hook.c"
+                ],
+            }
+        },
+        srcs = native.glob([
+            "**/*.h",
+            "linkpower_module/linkpower_main.c",
+            "linkpower_module/linkpower_netlink/linkpower_netlink.c",
+            "linkpower_module/sk_pid_hook/sk_pid_hook.c",
+        ]),
+        conditional_defines = {
+            "mtk": ["MTK_PLATFORM"],
+            "qcom": ["QCOM_PLATFORM"],
+        },
+        includes = ["."],
+    )
+
+    define_oplus_ddk_module(
+        name = "oplus_network_app_monitor",
+        srcs = native.glob([
+            "**/*.h",
+            "oplus_apps_monitor/oplus_apps_monitor.c",
+            "oplus_apps_monitor/oplus_apps_power_monitor.c",
+        ]),
+        includes = ["."],
+    )
+
+    define_oplus_ddk_module(
+        name = "oplus_network_dns_hook",
+        srcs = native.glob([
+            "**/*.h",
+            "oplus_dns_hook/oplus_dns_hook.c",
+        ]),
+        includes = ["."],
+    )
+
+    define_oplus_ddk_module(
+        name = "oplus_network_game_first",
+        srcs = native.glob([
+            "**/*.h",
+            "oplus_game_first/oplus_game_first.c",
+        ]),
+        includes = ["."],
+    )
+
+    define_oplus_ddk_module(
+        name = "oplus_network_qr_scan",
+        srcs = native.glob([
+            "**/*.h",
+            "oplus_qr_scan/oplus_qr_scan.c",
+        ]),
+        includes = ["."],
+    )
+
+    define_oplus_ddk_module(
+        name = "oplus_network_score",
+        srcs = native.glob([
+            "**/*.h",
+            "oplus_score/oplus_score.c",
+        ]),
+        includes = ["."],
+    )
+
+    define_oplus_ddk_module(
+        name = "oplus_network_stats_calc",
+        srcs = native.glob([
+            "**/*.h",
+            "oplus_stats_calc/oplus_stats_calc.c",
+        ]),
+        includes = ["."],
+    )
+
+    define_oplus_ddk_module(
+        name = "oplus_network_vnet",
+        srcs = native.glob([
+            "**/*.h",
+            "oplus_vnet/oplus_vnet.c",
+        ]),
+        includes = ["."],
+    )
+
+    define_oplus_ddk_module(
         name = "oplus_network_rf_cable_monitor",
         srcs = native.glob([
             "**/*.h",
@@ -69,6 +181,18 @@ def define_oplus_local_modules():
             "qcom":  ["QCOM_PLATFORM"],
         },
         includes = ["."],
+    )
+
+    define_oplus_ddk_module(
+        name = "oplus_networks_tuning",
+        srcs = native.glob([
+            "oplus_network_tuning/**/*.h",
+            "oplus_network_tuning/oplus_network_tuning.c",
+            "oplus_network_tuning/oplus_tcp_congest_control/*.c",
+            "oplus_network_tuning/oplus_tcp_syn/*.c",
+            "oplus_network_tuning/oplus_dev_check/*.c",
+        ]),
+        includes = ["oplus_network_tuning"],
     )
 
     ddk_headers(
