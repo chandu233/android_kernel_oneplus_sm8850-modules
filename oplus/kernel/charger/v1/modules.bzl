@@ -107,11 +107,6 @@ conditional_ko_deps = {
              modules_label("oplus/kernel/dft/bazel:oplus_bsp_dft_kernel_fb"),
         ],
     },
-    "CONFIG_OPLUS_FEATURE_FEEDBACK": {
-        True: [
-             modules_label("oplus/kernel/dft/bazel:oplus_bsp_dft_kernel_fb"),
-        ],
-    },
     "CONFIG_OPLUS_FEATURE_OLC": {
         True: [
             modules_label("oplus/kernel/dft/bazel:oplus_bsp_dft_olc"),
