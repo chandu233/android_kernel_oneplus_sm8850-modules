@@ -43,8 +43,8 @@ static void write_fingerprint_msg(struct fingerprint_message_t* g_fingerprint_ms
             break;
         case E_FP_LCD:
             g_fingerprint_msg->module = E_FP_LCD;
-            g_fingerprint_msg->event = event == 1 ? E_FP_EVENT_UI_READY : E_FP_EVENT_UI_DISAPPEAR;
-            // pr_info("kernel module:%d event:%d - %d", g_fingerprint_msg->module, event, g_fingerprint_msg->event);
+            g_fingerprint_msg->event = event;
+            copy_msg_buffer(g_fingerprint_msg, data, size);
             break;
         case E_FP_HAL:
             g_fingerprint_msg->module = E_FP_HAL;

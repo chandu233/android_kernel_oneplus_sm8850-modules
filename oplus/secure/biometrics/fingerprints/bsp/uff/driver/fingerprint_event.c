@@ -140,11 +140,9 @@ int send_fingerprint_msg(int module, int event, void *data,
         break;
     case E_FP_LCD:
         g_fingerprint_msg.module = E_FP_LCD;
-        g_fingerprint_msg.event =
-            event == 1 ? E_FP_EVENT_UI_READY : E_FP_EVENT_UI_DISAPPEAR;
+        g_fingerprint_msg.event = event;
+        copy_msg_buffer(&g_fingerprint_msg, data, size);
         need_report = 1;
-
-        //pr_info("kernel module:%d event:%d - %d", g_fingerprint_msg.module, event, g_fingerprint_msg.event);
         break;
     case E_FP_HAL:
         g_fingerprint_msg.module = E_FP_HAL;

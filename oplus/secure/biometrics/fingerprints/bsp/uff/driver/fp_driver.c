@@ -105,6 +105,9 @@
 #include "fp_driver.h"
 #include "include/fingerprint_event.h"
 #include "include/fp_netlink.h"
+#if IS_ENABLED(CONFIG_UFF_FINGERPRINT_NOTIFY)
+#include "fp_notify/fp_event_notify.h"
+#endif
 #include <linux/kconfig.h>
 #if (IS_ENABLED(CONFIG_OPLUS_FEATURE_BSP_DRV_VND_INJECT_TEST) || IS_ENABLED(CONFIG_FP_INJECT_ENABLE))
 #include "include/fp_fault_inject.h"
@@ -463,6 +466,18 @@ static void fp_auto_send_touchup(void)
     opticalfp_irq_handler_uff(&tp_info);
 }
 
+static int fp_read_light_reg_verify(void)
+{
+    int err = 0;
+#if IS_ENABLED(CONFIG_UFF_FINGERPRINT_NOTIFY)
+    fp_event_call_notifier(FP_EVENT_ACTION_READ_LIGHT_REG_VERIFY, NULL);
+#else
+    err = -EFAULT;
+    pr_err("%s, not support CONFIG_UFF_FINGERPRINT_NOTIFY!!!!!!\n", __func__);
+#endif
+    return err;
+}
+
 static long fp_ioctl(struct file *filp, unsigned int cmd, unsigned long arg) {
     struct fp_dev *fp_dev        = &fp_dev_data;
     int            retval        = 0;
@@ -690,8 +705,12 @@ static long fp_ioctl(struct file *filp, unsigned int cmd, unsigned long arg) {
             pr_info("%s FP_IOC_INTR3_DISABLE\n", __func__);
             fp_disable_intr3(fp_dev);
             break;
+        case FP_IOC_READ_LIGHT_REG_VERIFY:
+            pr_info("%s FP_IOC_READ_LIGHT_REG_VERIFY\n", __func__);
+            retval = fp_read_light_reg_verify();
+            break;
         default:
-            pr_warn("unsupport cmd:0x%x\n", cmd);
+            pr_warn("%s unsupport cmd:0x%x\n", __func__, cmd);
             break;
     }
 
@@ -817,6 +836,7 @@ static const struct file_operations fp_fops = {
 #if (IS_ENABLED(CONFIG_DRM_PANEL_NOTIFY) || IS_ENABLED(CONFIG_QCOM_PANEL_EVENT_NOTIFIER))
 static void fp_panel_notifier_callback(enum panel_event_notifier_tag tag, struct panel_event_notification *notification, void *client_data)
 {
+    unsigned int light_reg_verify = 0; // refer to enum type light_reg_verify_type_t
     if (!notification) {
         pr_err("%s display notification NULL!\n", __func__);
         return;
@@ -824,12 +844,17 @@ static void fp_panel_notifier_callback(enum panel_event_notifier_tag tag, struct
 
     switch ((int)notification->notif_type) {
         case (int)DRM_PANEL_EVENT_ONSCREENFINGERPRINT_UI_READY:
-            pr_err("[%s] UI ready\n", __func__);
-            send_fingerprint_msg_by_type(E_FP_LCD, 1, NULL, 0);
+            pr_info("[%s] UI ready\n", __func__);
+            send_fingerprint_msg_by_type(E_FP_LCD, E_FP_EVENT_UI_READY, NULL, 0);
             break;
         case (int)DRM_PANEL_EVENT_ONSCREENFINGERPRINT_UI_DISAPPEAR:
-            pr_err("[%s] UI disappear\n", __func__);
-            send_fingerprint_msg_by_type(E_FP_LCD, 0, NULL, 0);
+            pr_info("[%s] UI disappear\n", __func__);
+            send_fingerprint_msg_by_type(E_FP_LCD, E_FP_EVENT_UI_DISAPPEAR, NULL, 0);
+            break;
+        case (int)DRM_PANEL_EVENT_ONSCREENFINGERPRINT_READ_LIGHT_REG_VERIFY:
+            light_reg_verify = notification->notif_data.data;
+            pr_info("[%s] UI light_reg_verify: %d\n", __func__, light_reg_verify);
+            send_fingerprint_msg_by_type(E_FP_LCD, E_FP_EVENT_LCD_READ_LIGHT_REG_VERIFY, &light_reg_verify, sizeof(light_reg_verify));
             break;
         default:
             break;
@@ -878,11 +903,8 @@ static int fp_check_panel_dt(struct fp_dev *fp_dev)
 
 static int oplus_fb_notifier_call(struct notifier_block *nb, unsigned long val, void *data) {
     struct fb_event *evdata = data;
-    char             msg    = 0;
-
-    pr_info("[%s] val = %lu", __func__, val);
-    if (val == ONSCREENFINGERPRINT_EVENT) {
-        uint8_t op_mode = 0x0;
+    uint8_t op_mode               = 0;
+    unsigned int light_reg_verify = 0; // refer to enum type light_reg_verify_type_t
 
 #if defined(CONFIG_DRM_MEDIATEK_V2)
         (void)evdata;
@@ -891,22 +913,24 @@ static int oplus_fb_notifier_call(struct notifier_block *nb, unsigned long val, 
         op_mode = *(uint8_t *)evdata->data;
 #endif
 
+    if (val == ONSCREENFINGERPRINT_EVENT) {
         switch (op_mode) {
             case 0:
-                pr_info("[%s] UI disappear :%d\n", __func__, op_mode);
-                msg = NETLINK_EVENT_UI_DISAPPEAR;
+                pr_info("[%s] UI disappear: %d\n", __func__, op_mode);
+                send_fingerprint_msg_by_type(E_FP_LCD, E_FP_EVENT_UI_DISAPPEAR, NULL, 0);
                 break;
             case 1:
-                pr_info("[%s] UI ready uiready:%d\n", __func__, op_mode);
-                msg = NETLINK_EVENT_UI_READY;
-                // fp_sendnlmsg(&msg);
+                pr_info("[%s] UI ready: %d\n", __func__, op_mode);
+                send_fingerprint_msg_by_type(E_FP_LCD, E_FP_EVENT_UI_READY, NULL, 0);
                 break;
             default:
-                pr_info("[%s] Unknown ONSCREENFINGERPRINT_EVENT data \n", __func__);
+                pr_err("[%s] Unknown ONSCREENFINGERPRINT_EVENT data, op_mode = %d\n", __func__, op_mode);
                 break;
         }
-
-        send_fingerprint_msg_by_type(E_FP_LCD, (int)op_mode, NULL, 0);
+    } else if (val == ONSCREENFINGERPRINT_EVENT_READ_LIGHT_REG_VERIFY) {
+        light_reg_verify = op_mode;
+        pr_info("[%s] UI light_reg_verify: %d\n", __func__, light_reg_verify);
+        send_fingerprint_msg_by_type(E_FP_LCD, E_FP_EVENT_LCD_READ_LIGHT_REG_VERIFY, &light_reg_verify, sizeof(light_reg_verify));
     }
 
     return NOTIFY_OK;
