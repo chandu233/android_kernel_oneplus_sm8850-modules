@@ -3299,6 +3299,24 @@ static int wcd939x_tx_mode_put(struct snd_kcontrol *kcontrol,
 		return ret;
 
 	mode_val = ucontrol->value.enumerated.item[0];
+#ifdef OPLUS_ARCH_EXTENDS
+// keep tx0 and tx1, tx2 and tx3 in the same hifi mode, CR#4403453
+	if (mode_val != ADC_MODE_INVALID) {
+		if (wcd939x->tx_mode[path] == ADC_MODE_HIFI) {
+			dev_dbg(component->dev, "%s: Hifi mode can't be changed\n", __func__);
+			return 0;
+		}
+
+		if (mode_val == ADC_MODE_HIFI)
+			wcd939x->tx_mode[path] =
+				(wcd939x->tx_mode[path ^ 1] ? wcd939x->tx_mode[path ^ 1] : mode_val);
+		else
+			wcd939x->tx_mode[path] =
+				((wcd939x->tx_mode[path ^ 1] == ADC_MODE_HIFI) ? ADC_MODE_HIFI : mode_val);
+	} else {
+		wcd939x->tx_mode[path] = ADC_MODE_INVALID;
+	}
+#else /* OPLUS_ARCH_EXTENDS */
 	if (wcd939x->tx_mode[path] == ADC_MODE_HIFI && mode_val != ADC_MODE_INVALID) {
 		dev_dbg(component->dev, "%s: mode: %d\n", __func__,
 			 wcd939x->tx_mode[path]);
@@ -3308,7 +3326,7 @@ static int wcd939x_tx_mode_put(struct snd_kcontrol *kcontrol,
 	dev_dbg(component->dev, "%s: mode: %d\n", __func__, mode_val);
 
 	wcd939x->tx_mode[path] = mode_val;
-
+#endif /* OPLUS_ARCH_EXTENDS */
 	return 0;
 }
 

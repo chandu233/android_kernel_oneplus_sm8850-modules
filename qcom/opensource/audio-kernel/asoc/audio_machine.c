@@ -119,6 +119,7 @@ struct dmic_supply_data {
 	int max_uV;
 	int supply_enable_cnt;
 	bool supply_enabled;
+	bool is_level_shifter;
 	struct pinctrl_state *bias_enable;
 	struct pinctrl_state *bias_disable;
 	int enable_cnt;
@@ -548,10 +549,11 @@ static int dmic_power_supply_by_ldo(
 			struct msm_asoc_mach_data *pdata, int event)
 {
 	struct dmic_supply_data *supply_data = NULL;
-	int ret = 0;
+	struct dmic_supply_data *level_shifter_supply = NULL;
+	int ret = 0, err;
 
 	if (!component || !pdata || !pdata->num_dmic_supplies) {
-		dev_info(component->dev, "%s: error parameter\n", __func__);
+		pr_err("%s: error parameter\n", __func__);
 		return -EINVAL;
 	}
 
@@ -562,14 +564,38 @@ static int dmic_power_supply_by_ldo(
 
 	dev_info(component->dev, "%s: enter, micb_num=%d, event=%d\n", __func__, micb_num, event);
 
+	for (int i = 0; i < pdata->num_dmic_supplies; i++) {
+		if (pdata->dmic_supply[i].is_level_shifter) {
+			level_shifter_supply = &pdata->dmic_supply[i];
+			break;
+		}
+	}
 	supply_data = &pdata->dmic_supply[micb_num];
+	if (level_shifter_supply == supply_data)
+		level_shifter_supply = NULL;
+	/* All microphone paths acquire the shared supply before their own lock. */
+	if (level_shifter_supply)
+		mutex_lock(&level_shifter_supply->mlock);
 	mutex_lock(&supply_data->mlock);
 
 	switch (event) {
 		case SND_SOC_DAPM_PRE_PMU:
+			if (level_shifter_supply) {
+				ret = dmic_regulator_enable(level_shifter_supply, true);
+				if (ret) {
+					dev_err(component->dev, "%s: level_shifter_supply enable failed %d\n", __func__, ret);
+					goto unlock;
+				}
+			}
 			ret = dmic_regulator_enable(supply_data, true);
-			if (ret)
-				break;
+			if (ret) {
+				dev_err(component->dev, "%s: dmic enable failed %d\n", __func__, ret);
+				if (level_shifter_supply) {
+					dmic_regulator_enable(level_shifter_supply, false);
+				}
+				goto unlock;
+			}
+
 			if (!IS_ERR_OR_NULL(supply_data->bias_enable)) {
 				if (supply_data->enable_cnt == 0) {
 					pinctrl_select_state(pdata->dmic_en_pinctrl, supply_data->bias_enable);
@@ -591,6 +617,17 @@ static int dmic_power_supply_by_ldo(
 				dev_info(component->dev, "%s: dmic power off, enable_cnt=%d\n", __func__, supply_data->enable_cnt);
 			}
 			ret = dmic_regulator_enable(supply_data, false);
+			if (ret) {
+				dev_err(component->dev, "%s: dmic disable failed %d\n", __func__, ret);
+			}
+
+			if (level_shifter_supply) {
+				err = dmic_regulator_enable(level_shifter_supply, false);
+				if (err)
+					dev_err(component->dev, "%s: level_shifter_supply disable failed %d\n", __func__, err);
+				if (!ret)
+					ret = err;
+			}
 			break;
 
 		default:
@@ -599,7 +636,10 @@ static int dmic_power_supply_by_ldo(
 			break;
 	}
 
+unlock:
 	mutex_unlock(&supply_data->mlock);
+	if (level_shifter_supply)
+		mutex_unlock(&level_shifter_supply->mlock);
 
 	return ret;
 }
@@ -3115,6 +3155,7 @@ static int dmic_power_supply_init(struct platform_device *pdev,
 			continue;
 		}
 
+		pdata->dmic_supply[i].is_level_shifter = strstr(name, "level-shifter") != NULL;
 		snprintf(voltage_name, sizeof(voltage_name), "%s-voltage", name);
 		snprintf(bias_enable_name, sizeof(bias_enable_name), "dmic%d_micbias_pull_high", i);
 		snprintf(bias_disable_name, sizeof(bias_disable_name), "dmic%d_micbias_pull_low", i);
@@ -3257,6 +3298,7 @@ static int msm_asoc_machine_probe(struct platform_device *pdev)
 #endif
 	if ((pdata->wcd_usbss_handle) || (pdata->fsa_handle))
 		wcd_mbhc_cfg.swap_gnd_mic = msm_usbc_swap_gnd_mic;
+
 
 	ret = devm_snd_soc_register_card(&pdev->dev, card);
 	if (ret == -EPROBE_DEFER) {
