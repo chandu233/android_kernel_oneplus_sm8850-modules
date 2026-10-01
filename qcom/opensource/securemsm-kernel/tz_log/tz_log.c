@@ -482,6 +482,7 @@ struct tzdbg {
 	bool is_full_encrypted_tz_logs_enabled;
 	int tz_diag_minor_version;
 	int tz_diag_major_version;
+	struct mutex lock;
 };
 
 struct tzbsp_encr_log_t {
@@ -1685,6 +1686,8 @@ static int _disp_rm_log_stats(size_t count)
 static int _disp_qsee_log_stats_2nd(struct clients_info_t *clients_info,
 		size_t count, bool check_log_state)
 {
+	int ret;
+
 	if (!tzdbg.tz_qsee_plain_log_enabled)
 		return 0;
 
@@ -1696,18 +1699,24 @@ static int _disp_qsee_log_stats_2nd(struct clients_info_t *clients_info,
 		g_qsee_log->log_pos.wrap, g_qsee_log->log_pos.offset,
 		g_qsee_log_v2->log_pos.wrap, g_qsee_log_v2->log_pos.offset);
 
-	if (check_log_state)
-		return check_tz_qsee_log_state(g_qsee_log, &clients_info->log_start,
-			g_qsee_log_v2, &clients_info->log_start_v2);
+	ret = mutex_lock_interruptible(&tzdbg.lock);
+	if (ret)
+		return ret;
 
-	if (!tzdbg.is_enlarged_buf)
-		return _disp_log_stats(g_qsee_log, &clients_info->log_start,
+	if (check_log_state)
+		ret = check_tz_qsee_log_state(g_qsee_log, &clients_info->log_start,
+			g_qsee_log_v2, &clients_info->log_start_v2);
+	else if (!tzdbg.is_enlarged_buf)
+		ret = _disp_log_stats(g_qsee_log, &clients_info->log_start,
 			QSEE_LOG_BUF_SIZE - sizeof(struct tzdbg_log_pos_t),
 			count, TZDBG_QSEE_LOG_2ND);
+	else
+		ret = _disp_log_stats_v2(g_qsee_log_v2, &clients_info->log_start_v2,
+			QSEE_LOG_BUF_SIZE_V2 - sizeof(struct tzdbg_log_pos_v2_t),
+			count, TZDBG_QSEE_LOG_2ND);
 
-	return _disp_log_stats_v2(g_qsee_log_v2, &clients_info->log_start_v2,
-		QSEE_LOG_BUF_SIZE_V2 - sizeof(struct tzdbg_log_pos_v2_t),
-		count, TZDBG_QSEE_LOG_2ND);
+	mutex_unlock(&tzdbg.lock);
+	return ret;
 }
 
 static int _disp_qsee_log_stats(size_t count, bool check_log_state)
@@ -2794,6 +2803,8 @@ static int tz_log_probe(struct platform_device *pdev)
 #if (KERNEL_VERSION(6, 12, 0) <= LINUX_VERSION_CODE) && defined(CONFIG_TZLOG_TIME_CONSOLIDATE)
 	tzdbg_enable_tz_time();
 #endif
+
+	mutex_init(&tzdbg.lock);
 
 	if (tzdbg_fs_init(pdev))
 		goto exit_free_disp_buf;
