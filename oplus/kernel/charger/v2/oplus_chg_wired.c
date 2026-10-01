@@ -20,15 +20,6 @@
 #include <linux/list.h>
 #include <linux/power_supply.h>
 
-/* for gamepad with usb audio */
-#include <linux/kernel.h>
-#include <linux/notifier.h>
-#include <linux/usb.h>
-#include <linux/hid.h>
-#include <linux/atomic.h>
-#include <linux/workqueue.h>
-#include <linux/jiffies.h>
-
 #ifndef CONFIG_DISABLE_OPLUS_FUNCTION
 #include <soc/oplus/system/boot_mode.h>
 #include <soc/oplus/device_info.h>
@@ -56,6 +47,7 @@
 #include <mt-plat/mtk_boot_common.h>
 #endif
 #include <oplus_chg_wls.h>
+#include <oplus_gamepad.h>
 
 #define PDQC_CONFIG_WAIT_TIME_MS	15000
 #define QC_CHECK_WAIT_TIME_MS		20000
@@ -271,118 +263,6 @@ static struct oplus_wired_spec_config default_config = {
 		}
 	}
 };
-
-/* for gamepad with usb audio */
-#define PD_GET_SINK_CAP_INTERVAL_MS	 900
-static void pd_get_sink_cap_work(struct work_struct *work);
-static DECLARE_DELAYED_WORK(pd_get_sink_cap_dwork, pd_get_sink_cap_work);
-
-static const struct usb_device_id hub_phantom_csc_list[] = {
-	{ USB_DEVICE(0x1a40, 0x0101) },
-	{ USB_DEVICE(0x1a86, 0x8091) },
-	{ } /* terminating entry */
-};
-
-/* Device that must not be disrupted by hub resets */
-static const struct usb_device_id hub_protected_dev_list[] = {
-	{ USB_DEVICE(0x22d9, 0x386b) },
-	{ } /* terminating entry */
-};
-
-static int oplus_usb_match_device(struct usb_device *dev, const struct usb_device_id *id)
-{
-	if ((id->match_flags & USB_DEVICE_ID_MATCH_VENDOR) &&
-		id->idVendor != le16_to_cpu(dev->descriptor.idVendor))
-		return 0;
-
-	if ((id->match_flags & USB_DEVICE_ID_MATCH_PRODUCT) &&
-		id->idProduct != le16_to_cpu(dev->descriptor.idProduct))
-		return 0;
-
-	/* No need to test id->bcdDevice_lo != 0, since 0 is never */
-	/*   greater than any unsigned number. */
-	if ((id->match_flags & USB_DEVICE_ID_MATCH_DEV_LO) &&
-		(id->bcdDevice_lo > le16_to_cpu(dev->descriptor.bcdDevice)))
-		return 0;
-
-	if ((id->match_flags & USB_DEVICE_ID_MATCH_DEV_HI) &&
-		(id->bcdDevice_hi < le16_to_cpu(dev->descriptor.bcdDevice)))
-		return 0;
-
-	if ((id->match_flags & USB_DEVICE_ID_MATCH_DEV_CLASS) &&
-		(id->bDeviceClass != dev->descriptor.bDeviceClass))
-		return 0;
-
-	if ((id->match_flags & USB_DEVICE_ID_MATCH_DEV_SUBCLASS) &&
-		(id->bDeviceSubClass != dev->descriptor.bDeviceSubClass))
-		return 0;
-
-	if ((id->match_flags & USB_DEVICE_ID_MATCH_DEV_PROTOCOL) &&
-		(id->bDeviceProtocol != dev->descriptor.bDeviceProtocol))
-		return 0;
-
-	return 1;
-}
-
-static bool is_mcu_device(struct usb_device *udev)
-{
-	const struct usb_device_id *id;
-
-	for (id = hub_protected_dev_list; id->match_flags; id++) {
-		if (oplus_usb_match_device(udev, id))
-			return true;
-	}
-	return false;
-}
-
-static bool is_hub_device(struct usb_device *udev)
-{
-	const struct usb_device_id *id;
-
-	for (id = hub_phantom_csc_list; id->match_flags; id++) {
-		if (oplus_usb_match_device(udev, id))
-			return true;
-	}
-	return false;
-}
-
-static bool is_device_on_hub(struct usb_device *udev)
-{
-	struct usb_device *hub_udev;
-
-	if (udev == NULL || udev->parent == NULL)
-		return false;
-
-	hub_udev = udev->parent;
-	chg_info("GAMEPAD: hub device(%04x, %04x)\n",
-		le16_to_cpu(hub_udev->descriptor.idVendor), le16_to_cpu(hub_udev->descriptor.idProduct));
-	if (is_hub_device(hub_udev))
-		return true;
-	return false;
-}
-
-#define VDM_INFO_MAX	5
-static void pd_get_sink_cap_work(struct work_struct *work)
-{
-	int rc = 0;
-	if (!oplus_wired_is_gamepad_active()) {
-		chg_info("gamepad not active, skip send get sink cap\n");
-		return;
-	}
-
-	rc = oplus_wired_send_get_sink_cap();
-
-	schedule_delayed_work(&pd_get_sink_cap_dwork,
-			      msecs_to_jiffies(PD_GET_SINK_CAP_INTERVAL_MS));
-}
-
-static void pd_get_sink_cap_start(void)
-{
-	if (delayed_work_pending(&pd_get_sink_cap_dwork))
-		return;
-
-	mod_delayed_work(system_wq, &pd_get_sink_cap_dwork, 0);
-}
 
 static const char *const oplus_wired_chg_mode_text[] = {
 	[OPLUS_WIRED_CHG_MODE_UNKNOWN] = "unknown",
@@ -1918,6 +1798,7 @@ static void oplus_wired_plugin_work(struct work_struct *work)
 		vote(chip->icl_votable, PD_PDO_ICL_VOTER, false, 0, true);
 		vote(chip->icl_votable, COMMON_POWER_CHECK, false, 0, true);
 		vote(chip->icl_votable, WLS_TX_VOTER, false, 0, true);
+		vote(chip->icl_votable, SVOOC_SUSPEND_ICL_VOTER, false, 0, false);
 		chip->need_common_power_check = false;
 		chip->pd_retry_count = 0;
 		chip->qc_retry_count = 0;
@@ -3363,66 +3244,6 @@ static void oplus_wired_shutdown(struct platform_device *pdev)
 #include "config/dynamic_cfg/oplus_wired_cfg.h"
 #endif
 
-static int hub_phantom_csc_notify(struct notifier_block *nb,
-	unsigned long action, void *data)
-{
-	struct usb_device *udev = data;
-
-	static atomic_t other_device_cnt = ATOMIC_INIT(0);
-	static atomic_t is_mcu_connected = ATOMIC_INIT(0);
-	static atomic_t is_hub_connected = ATOMIC_INIT(0);
-
-	if (udev == NULL)
-		return NOTIFY_DONE;
-
-	if (action != USB_DEVICE_REMOVE && action != USB_DEVICE_ADD)
-		return NOTIFY_DONE;
-
-	if (action == USB_DEVICE_REMOVE) {
-		chg_info("OPLUS PD: remove device(%04x, %04x)\n",
-		le16_to_cpu(udev->descriptor.idVendor), le16_to_cpu(udev->descriptor.idProduct));
-		if (is_hub_device(udev))
-			atomic_set(&is_hub_connected, 0);
-		else if (is_mcu_device(udev))
-			atomic_set(&is_mcu_connected, 0);
-		else if (is_device_on_hub(udev))
-			atomic_dec(&other_device_cnt);
-
-		chg_info("OPLUS PD: hub: %d, mcu: %d others: %d\n", atomic_read(&is_hub_connected),
-			atomic_read(&is_mcu_connected), atomic_read(&other_device_cnt));
-		if (atomic_read(&is_hub_connected) == 0 || atomic_read(&other_device_cnt) <= 0) {
-			chg_info("OPLUS PD: cancel get sink cap\n");
-			atomic_set(&other_device_cnt, 0);
-			cancel_delayed_work_sync(&pd_get_sink_cap_dwork);
-		}
-		return NOTIFY_DONE;
-	}
-	if (action == USB_DEVICE_ADD) {
-		chg_info("OPLUS PD: add device(%04x, %04x)\n",
-			le16_to_cpu(udev->descriptor.idVendor), le16_to_cpu(udev->descriptor.idProduct));
-		if (is_hub_device(udev))
-			atomic_set(&is_hub_connected, 1);
-		else if (is_mcu_device(udev))
-			atomic_set(&is_mcu_connected, 1);
-		else if (is_device_on_hub(udev))
-			atomic_inc(&other_device_cnt);
-
-		chg_info("OPLUS PD: hub: %d, mcu: %d others: %d\n", atomic_read(&is_hub_connected),
-			atomic_read(&is_mcu_connected), atomic_read(&other_device_cnt));
-		if (atomic_read(&other_device_cnt) > 0 && atomic_read(&is_hub_connected)
-			&& atomic_read(&is_mcu_connected)) {
-			chg_info("OPLUS PD: all devices connected, start get sink cap\n");
-			pd_get_sink_cap_start();
-		}
-	}
-
-	return NOTIFY_DONE;
-}
-
-static struct notifier_block hub_phantom_csc_notifier = {
-	.notifier_call = hub_phantom_csc_notify,
-};
-
 static int oplus_wired_probe(struct platform_device *pdev)
 {
 	struct oplus_chg_wired *chip;
@@ -3502,8 +3323,7 @@ static int oplus_wired_probe(struct platform_device *pdev)
 	oplus_mms_wait_topic("dischg_boost", oplus_wired_subscribe_dischg_boost_topic, chip);
 	if (chip->spec.wls_tx_limit_wired_icl != 0)
 		oplus_mms_wait_topic("wireless", oplus_wired_subscribe_wlschg_topic, chip);
-
-	usb_register_notify(&hub_phantom_csc_notifier);
+	oplus_gamepad_init();
 
 #if IS_ENABLED(CONFIG_OPLUS_CHG_STATE_KEEP)
 	oplus_mms_wait_topic("state_keep", oplus_wired_subscribe_keep_topic, chip);
@@ -3543,6 +3363,8 @@ static int oplus_wired_remove(struct platform_device *pdev)
 	struct oplus_chg_wired *chip = platform_get_drvdata(pdev);
 	int i = 0;
 
+	oplus_gamepad_exit();
+
 #if IS_ENABLED(CONFIG_OPLUS_DYNAMIC_CONFIG_CHARGER)
 	oplus_wired_unreg_debug_config(chip);
 #endif
@@ -3566,8 +3388,6 @@ static int oplus_wired_remove(struct platform_device *pdev)
 	destroy_votable(chip->input_suspend_votable);
 	destroy_votable(chip->icl_votable);
 	destroy_votable(chip->fcc_votable);
-	usb_unregister_notify(&hub_phantom_csc_notifier);
-	cancel_delayed_work_sync(&pd_get_sink_cap_dwork);
 	for (i = 0; i < OPLUS_WIRED_CHG_MODE_MAX; i++) {
 		if (chip->config.strategy_data[i])
 			devm_kfree(&pdev->dev, chip->config.strategy_data[i]);

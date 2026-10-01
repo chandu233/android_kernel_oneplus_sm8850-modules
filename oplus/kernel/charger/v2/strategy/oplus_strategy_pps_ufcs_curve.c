@@ -14,6 +14,7 @@
 #include <oplus_mms_gauge.h>
 #include <oplus_chg_comm.h>
 #include <oplus_strategy.h>
+#include <oplus_chg_ai_cv.h>
 
 enum puc_soc_range {
 	PUC_BATT_CURVE_SOC_RANGE_MIN = 0,
@@ -52,7 +53,157 @@ struct puc_strategy {
 	int curr_level;
 	unsigned long timeout;
 	unsigned long over_time;
+
+	struct oplus_chg_strategy *ctd_strategy;
 };
+
+static void puc_try_alloc_ctd(struct puc_strategy *puc, struct device_node *node)
+{
+	if (!puc || !node)
+		return;
+	puc->ctd_strategy = oplus_chg_strategy_alloc_by_node("cycle_tier_derating", node);
+	if (IS_ERR_OR_NULL(puc->ctd_strategy))
+		puc->ctd_strategy = NULL;
+}
+
+static struct oplus_chg_strategy *puc_finish_alloc_ctd(struct puc_strategy *puc,
+						      struct device_node *node)
+{
+	puc_try_alloc_ctd(puc, node);
+	return (struct oplus_chg_strategy *)puc;
+}
+
+static void puc_try_alloc_ctd_from_common(struct puc_strategy *puc)
+{
+	struct device_node *ctd_node;
+
+	if (!puc)
+		return;
+	ctd_node = of_find_compatible_node(NULL, NULL, "oplus,common-charge");
+	if (!ctd_node)
+		return;
+	puc_try_alloc_ctd(puc, ctd_node);
+	of_node_put(ctd_node);
+}
+
+static struct oplus_chg_strategy *puc_finish_alloc_ctd_common(struct puc_strategy *puc)
+{
+	puc_try_alloc_ctd_from_common(puc);
+	return (struct oplus_chg_strategy *)puc;
+}
+
+static void puc_try_init_ctd(struct puc_strategy *puc)
+{
+	if (!puc || !puc->ctd_strategy)
+		return;
+	if (oplus_chg_strategy_init(puc->ctd_strategy) < 0) {
+		oplus_chg_strategy_release(puc->ctd_strategy);
+		puc->ctd_strategy = NULL;
+	}
+}
+
+static void puc_apply_ctd_derate(struct oplus_chg_strategy *ctd, int target_ibus,
+				 int *eff_ibus, int *max_delta_mv)
+{
+	int derated = target_ibus;
+	int delta = 0;
+
+	if (!ctd || target_ibus <= 0)
+		return;
+
+	oplus_chg_strategy_set_process_data(ctd, "curve_ibus", target_ibus);
+	if (oplus_chg_strategy_get_data(ctd, &derated) >= 0 && derated > 0)
+		*eff_ibus = min(*eff_ibus, derated);
+	if (oplus_chg_strategy_get_custom_data(ctd, "vbat_delta_mv", &delta) >= 0)
+		*max_delta_mv = max(*max_delta_mv, delta);
+}
+
+static void puc_apply_ai_derate(int target_ibus, int *eff_ibus, int *max_delta_mv)
+{
+	int derated;
+	int delta;
+
+	if (target_ibus <= 0)
+		return;
+
+	derated = oplus_ai_cv_query_derate_ibus(target_ibus);
+	if (derated > 0 && derated < target_ibus)
+		*eff_ibus = min(*eff_ibus, derated);
+	delta = oplus_ai_cv_query_vbat_delta_mv(target_ibus);
+	if (delta > 0)
+		*max_delta_mv = max(*max_delta_mv, delta);
+}
+
+static void puc_calc_eff_vbat(int target_vbat, int max_delta_mv, int *eff_vbat_out)
+{
+	if (target_vbat > 0 && max_delta_mv > 0) {
+		int eff = target_vbat - max_delta_mv;
+
+		*eff_vbat_out = eff > 0 ? eff : target_vbat;
+	} else {
+		*eff_vbat_out = target_vbat;
+	}
+}
+
+static void puc_query_constraints(struct puc_strategy *puc,
+				  struct puc_strategy_data *d,
+				  int *eff_vbat_out, int *eff_ibus_out)
+{
+	int eff_ibus;
+	int max_delta_mv = 0;
+
+	if (!puc || !d || !eff_vbat_out || !eff_ibus_out)
+		return;
+
+	eff_ibus = d->target_ibus;
+	if (d->target_ibus > 0) {
+		puc_apply_ctd_derate(puc->ctd_strategy, d->target_ibus,
+				     &eff_ibus, &max_delta_mv);
+		puc_apply_ai_derate(d->target_ibus, &eff_ibus, &max_delta_mv);
+	}
+
+	*eff_ibus_out = eff_ibus;
+	puc_calc_eff_vbat(d->target_vbat, max_delta_mv, eff_vbat_out);
+}
+
+static void puc_fill_eff_constraints(struct puc_strategy *puc,
+				     struct puc_strategy_data *data,
+				     int *eff_vbat, int *eff_ibus)
+{
+	puc_query_constraints(puc, data, eff_vbat, eff_ibus);
+	if (*eff_vbat <= 0)
+		*eff_vbat = data->target_vbat;
+	if (*eff_ibus <= 0)
+		*eff_ibus = data->target_ibus;
+}
+
+static void puc_apply_level_update(struct puc_strategy *puc,
+				   struct puc_strategy_data *data,
+				   int *eff_vbat, int *eff_ibus)
+{
+	if (data->target_time > 0)
+		puc->timeout = jiffies + msecs_to_jiffies(data->target_time * 1000);
+	else
+		puc->timeout = 0;
+	puc->over_time = 0;
+	puc_fill_eff_constraints(puc, data, eff_vbat, eff_ibus);
+	chg_info("level[%d]: %d %d %d %d %d\n", puc->curr_level,
+		 data->target_vbus, data->target_vbat,
+		 data->target_ibus, data->exit, data->target_time);
+}
+
+static void puc_fill_ret_data(struct puc_strategy *puc,
+			      struct puc_strategy_data *data,
+			      struct puc_strategy_ret_data *ret_data,
+			      int eff_vbat, int eff_ibus)
+{
+	ret_data->target_vbus = data->target_vbus;
+	ret_data->target_vbat = eff_vbat;
+	ret_data->target_ibus = eff_ibus;
+	ret_data->index = puc->curr_level;
+	ret_data->last_gear = !!data->exit;
+	ret_data->exit = false;
+}
 
 #define PUC_DATA_SIZE	sizeof(struct puc_strategy_data)
 
@@ -382,7 +533,7 @@ puc_strategy_alloc_by_node(struct device_node *node)
 		}
 	}
 
-	return (struct oplus_chg_strategy *)puc;
+	return puc_finish_alloc_ctd(puc, node);
 
 data_err:
 	for (i = 0; i < PUC_BATT_CURVE_SOC_RANGE_MAX; i++) {
@@ -556,7 +707,7 @@ static struct oplus_chg_strategy *puc_strategy_alloc_by_param_head(const char *n
 		}
 	}
 
-	return (struct oplus_chg_strategy *)puc;
+	return puc_finish_alloc_ctd_common(puc);
 
 data_err:
 	for (i = 0; i < PUC_BATT_CURVE_SOC_RANGE_MAX; i++) {
@@ -585,6 +736,11 @@ static int puc_strategy_release(struct oplus_chg_strategy *strategy)
 		return -EINVAL;
 	}
 	puc = (struct puc_strategy *)strategy;
+
+	if (puc->ctd_strategy) {
+		oplus_chg_strategy_release(puc->ctd_strategy);
+		puc->ctd_strategy = NULL;
+	}
 
 	for (i = 0; i < PUC_BATT_CURVE_SOC_RANGE_MAX; i++) {
 		for (j = 0; j < PUC_BATT_CURVE_TEMP_RANGE_MAX; j++) {
@@ -644,8 +800,15 @@ static int puc_strategy_init(struct oplus_chg_strategy *strategy)
 	else
 		puc->timeout = 0;
 	puc->over_time = 0;
+	puc_try_init_ctd(puc);
 
 	return 0;
+}
+
+static int puc_strategy_set_process_data(struct oplus_chg_strategy *strategy,
+					const char *type, unsigned long arg)
+{
+	return -ENOTSUPP;
 }
 
 static int puc_strategy_get_data(struct oplus_chg_strategy *strategy, void *ret)
@@ -655,6 +818,8 @@ static int puc_strategy_get_data(struct oplus_chg_strategy *strategy, void *ret)
 	struct puc_strategy_data *data;
 	int vbat;
 	int rc;
+	int eff_vbat_mv = 0;
+	int eff_ibus_ma = 0;
 	bool curve_level_update = false;
 
 #define VBAT_OVER_TIME_MS	2500
@@ -689,7 +854,8 @@ static int puc_strategy_get_data(struct oplus_chg_strategy *strategy, void *ret)
 		chg_info("timeout, switch to next level(=%d)\n", puc->curr_level);
 		goto out;
 	}
-	if (vbat > data->target_vbat) {
+	puc_fill_eff_constraints(puc, data, &eff_vbat_mv, &eff_ibus_ma);
+	if (vbat > eff_vbat_mv) {
 		if (puc->over_time == 0) {
 			puc->over_time = msecs_to_jiffies(VBAT_OVER_TIME_MS) + jiffies;
 		} else if (time_is_before_jiffies(puc->over_time)) {
@@ -718,22 +884,10 @@ out:
 
 	if (curve_level_update) {
 		data = &puc->curve->data[puc->curr_level];
-		if (data->target_time > 0)
-			puc->timeout = jiffies + msecs_to_jiffies(data->target_time * 1000);
-		else
-			puc->timeout = 0;
-		puc->over_time = 0;
-		chg_info("level[%d]: %d %d %d %d %d\n", puc->curr_level,
-			 data->target_vbus, data->target_vbat,
-			 data->target_ibus, data->exit, data->target_time);
+		puc_apply_level_update(puc, data, &eff_vbat_mv, &eff_ibus_ma);
 	}
 
-	ret_data->target_vbus = data->target_vbus;
-	ret_data->target_vbat = data->target_vbat;
-	ret_data->target_ibus = data->target_ibus;
-	ret_data->index = puc->curr_level;
-	ret_data->last_gear = !!data->exit;
-	ret_data->exit = false;
+	puc_fill_ret_data(puc, data, ret_data, eff_vbat_mv, eff_ibus_ma);
 
 	return 0;
 }
@@ -767,6 +921,7 @@ static struct oplus_chg_strategy_desc puc_strategy_desc = {
 	.strategy_alloc_by_param_head = puc_strategy_alloc_by_param_head,
 #endif
 	.strategy_get_data = puc_strategy_get_data,
+	.strategy_set_process_data = puc_strategy_set_process_data,
 	.strategy_get_metadata = puc_strategy_get_metadata,
 };
 

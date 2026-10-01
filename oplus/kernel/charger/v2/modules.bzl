@@ -218,6 +218,8 @@ def define_oplus_chg_v2_module():
         "v2/strategy/oplus_strategy_low_curr_full.c",
         "v2/strategy/oplus_strategy_pps_ufcs_curve_v2.c",
         "v2/strategy/oplus_strategy_cycle_current_derating.c",
+        "v2/strategy/oplus_strategy_cycle_tier_derating.c",
+        "v2/curve_algo/oplus_chg_ai_cv.c",
         "v2/strategy/oplus_strategy_ddrc.c",
         "v2/strategy/oplus_strategy_ddrc_v2.c",
         "v2/strategy/oplus_strategy_battery_smooth.c",
@@ -228,7 +230,8 @@ def define_oplus_chg_v2_module():
         "v2/monitor/oplus_chg_track.c",
         "v2/monitor/oplus_chg_exception.c",
         "v2/plat_ufcs/plat_ufcs_notify.c",
-        "v2/oplus_dischg_boost.c"
+        "v2/oplus_dischg_boost.c",
+        "v2/oplus_gamepad.c"
     ]) + [
         ":oplus_chg_v2_ic_cfg"
     ]
