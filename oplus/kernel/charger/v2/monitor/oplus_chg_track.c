@@ -1008,6 +1008,7 @@ struct oplus_chg_track {
 	oplus_chg_track_trigger dual_chan_err_load_trigger;
 	oplus_chg_track_trigger usb_lpd_load_trigger;
 	oplus_chg_track_trigger cycle_current_derating_trigger;
+	oplus_chg_track_trigger cycle_tier_derating_trigger;
 	struct delayed_work uisoc_load_trigger_work;
 	struct delayed_work soc_trigger_work;
 	struct delayed_work uisoc_trigger_work;
@@ -1292,6 +1293,7 @@ static struct flag_reason_table track_flag_reason_table[] = {
 	{ TRACK_NOTIFY_FLAG_CHG_SLOW_R_COOLDOWN, "R_CoolDown" },
 	{ TRACK_NOTIFY_FLAG_CHG_SLOW_QUIET_MODE, "QuietModeLong" },
 	{ TRACK_NOTIFY_FLAG_CHG_SLOW_CYCLE_CURR_DERATING, "CycleCurrentDerating" },
+	{ TRACK_NOTIFY_FLAG_CHG_SLOW_CYCLE_TIER_DERATING, "CycleTierDerating" },
 
 	{ TRACK_NOTIFY_FLAG_FAST_CHARGING_BREAK, "FastChgBreak" },
 	{ TRACK_NOTIFY_FLAG_GENERAL_CHARGING_BREAK, "GeneralChgBreak" },
@@ -3958,6 +3960,24 @@ static int oplus_chg_track_pack_cool_down_stats(
 	return 0;
 }
 
+static int oplus_chg_track_append_cycle_derating_info(struct oplus_monitor *monitor,
+						     oplus_chg_track_trigger *p_trigger_data,
+						     int index)
+{
+	if (!monitor || !p_trigger_data || !monitor->track)
+		return index;
+
+	if (monitor->tier_derating_trig)
+		index += scnprintf(&(p_trigger_data->crux_info[index]),
+			OPLUS_CHG_TRACK_CURX_INFO_LEN - index, "%s",
+			monitor->track->cycle_tier_derating_trigger.crux_info);
+	if (monitor->curr_derating_trig)
+		index += scnprintf(&(p_trigger_data->crux_info[index]),
+			OPLUS_CHG_TRACK_CURX_INFO_LEN - index, "%s",
+			monitor->track->cycle_current_derating_trigger.crux_info);
+	return index;
+}
+
 static void
 oplus_chg_track_record_charger_info(struct oplus_monitor *monitor,
 				    oplus_chg_track_trigger *p_trigger_data,
@@ -4363,10 +4383,7 @@ oplus_chg_track_record_charger_info(struct oplus_monitor *monitor,
 	index += scnprintf(&(p_trigger_data->crux_info[index]),
 			  OPLUS_CHG_TRACK_CURX_INFO_LEN - index,
 			  "$$Boost_Mode@@%d", cv_mode ? 1 : 0);
-	if (monitor->curr_derating_trig && monitor->track)
-		index += scnprintf(&(p_trigger_data->crux_info[index]),
-			OPLUS_CHG_TRACK_CURX_INFO_LEN - index, "%s",
-			monitor->track->cycle_current_derating_trigger.crux_info);
+	index = oplus_chg_track_append_cycle_derating_info(monitor, p_trigger_data, index);
 
 	oplus_chg_track_record_general_info(monitor, track_status, p_trigger_data, index);
 }
@@ -9107,6 +9124,18 @@ static bool oplus_chg_track_protocol_fastchg_to_normal(struct oplus_chg_track *c
 
 	return false;
 }
+
+static int oplus_chg_track_get_cycle_derating_slow_flag(struct oplus_monitor *monitor)
+{
+	if (!monitor)
+		return TRACK_NOTIFY_FLAG_CHG_SLOW_OTHER;
+	if (monitor->tier_derating_trig)
+		return TRACK_NOTIFY_FLAG_CHG_SLOW_CYCLE_TIER_DERATING;
+	if (monitor->curr_derating_trig)
+		return TRACK_NOTIFY_FLAG_CHG_SLOW_CYCLE_CURR_DERATING;
+	return TRACK_NOTIFY_FLAG_CHG_SLOW_OTHER;
+}
+
 static int oplus_chg_track_get_speed_slow_reason(
 	struct oplus_chg_track_status *track_status)
 {
@@ -9199,12 +9228,9 @@ static int oplus_chg_track_get_speed_slow_reason(
 		 track_status->power_info.power_type == TRACK_CHG_TYPE_WIRELESS)
 		chip->slow_charging_trigger.flag_reason =
 			TRACK_NOTIFY_FLAG_CHG_SLOW_VERITY_FAIL;
-	else if (chip->monitor && chip->monitor->curr_derating_trig)
-		chip->slow_charging_trigger.flag_reason =
-			TRACK_NOTIFY_FLAG_CHG_SLOW_CYCLE_CURR_DERATING;
 	else
 		chip->slow_charging_trigger.flag_reason =
-			TRACK_NOTIFY_FLAG_CHG_SLOW_OTHER;
+			oplus_chg_track_get_cycle_derating_slow_flag(chip->monitor);
 
 	if (track_status->debug_slow_charging_reason)
 		chip->slow_charging_trigger.flag_reason =
@@ -10617,6 +10643,34 @@ static int oplus_chg_track_upload_cycle_current_derating_info(struct oplus_chg_t
 	scnprintf(track->cycle_current_derating_trigger.crux_info, OPLUS_CHG_TRACK_CURX_INFO_LEN, "%s", data.strval);
 
 	return 0;
+}
+
+static int oplus_chg_track_upload_cycle_tier_derating_info(struct oplus_chg_track *track)
+{
+	union mms_msg_data data = { 0 };
+	int rc;
+
+	if (!track || !track->monitor || !track->monitor->err_topic) {
+		chg_err("invalid track/monitor/err_topic\n");
+		return -EINVAL;
+	}
+
+	rc = oplus_mms_get_item_data(track->monitor->err_topic, ERR_ITEM_CYCLE_TIER_DERATING, &data, false);
+	if (rc < 0) {
+		chg_err("get msg data error, rc=%d\n", rc);
+		return rc;
+	}
+	track->monitor->tier_derating_trig = true;
+	scnprintf(track->cycle_tier_derating_trigger.crux_info, OPLUS_CHG_TRACK_CURX_INFO_LEN, "%s", data.strval);
+
+	return 0;
+}
+
+static int oplus_chg_track_upload_cycle_derating_info(struct oplus_chg_track *track, u32 id)
+{
+	if (id == ERR_ITEM_CYCLE_TIER_DERATING)
+		return oplus_chg_track_upload_cycle_tier_derating_info(track);
+	return oplus_chg_track_upload_cycle_current_derating_info(track);
 }
 
 static int oplus_chg_track_upload_deep_dischg_info(struct oplus_chg_track *chip , u32 id)
@@ -13497,8 +13551,8 @@ static void oplus_chg_track_err_subs_callback(struct mms_subscribe *subs,
 			oplus_chg_track_upload_pps_info(track);
 			break;
 		case ERR_ITEM_CYCLE_CURRENT_DERATING:
-			oplus_chg_track_upload_cycle_current_derating_info(track);
-			break;
+		case ERR_ITEM_CYCLE_TIER_DERATING:
+			oplus_chg_track_upload_cycle_derating_info(track, id); break;
 		case ERR_ITEM_DEEP_DISCHG_INFO:
 		case ERR_ITEM_SUB_DEEP_DISCHG_INFO:
 			oplus_chg_track_upload_deep_dischg_info(track, id);

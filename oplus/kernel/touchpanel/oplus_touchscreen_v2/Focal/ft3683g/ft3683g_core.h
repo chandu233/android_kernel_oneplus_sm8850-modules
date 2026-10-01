@@ -394,6 +394,7 @@ struct chip_data_ft3683g {
 	int *rawdata_linearity;
 	int tp_index;
 	int print_count;
+	int print_count_glove;
 	int *node_valid;
 	int *node_valid_sc;
 	int gesture_state;
@@ -445,6 +446,7 @@ struct chip_data_ft3683g {
 	bool charger_connected;
 	fod_trigger_type fod_trigger;
 	bool water_mode;
+	u8 last_waterlevel; /* last rain level for health report; init 0xFF */
 	int extreme_game_report_rate;
 	bool extreme_game_flag;
 	bool fingerprint_error_report_support;              /*fingerprint error report support*/

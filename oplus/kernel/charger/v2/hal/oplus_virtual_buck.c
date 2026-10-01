@@ -3299,6 +3299,11 @@ static int oplus_chg_vb_send_get_sink_cap(struct oplus_chg_ic_dev *ic_dev)
 		return -ENODEV;
 	}
 	vb = oplus_chg_ic_get_drvdata(ic_dev);
+	if (vb == NULL) {
+		chg_err("oplus_virtual_buck_ic is NULL");
+		return -ENODEV;
+	}
+
 	for (i = 0; i < vb->child_num; i++) {
 		if (!func_is_support(&vb->child_list[i], OPLUS_IC_FUNC_BUCK_SEND_GET_SINK_CAP)) {
 			rc = -ENOTSUPP;
@@ -3314,7 +3319,7 @@ static int oplus_chg_vb_send_get_sink_cap(struct oplus_chg_ic_dev *ic_dev)
 		return 0;
 	}
 	if (rc == -ENOTSUPP)
-		chg_err("no child ic support get vdm info function\n");
+		chg_err("no child ic support get sink cap function\n");
 	return rc;
 }
 

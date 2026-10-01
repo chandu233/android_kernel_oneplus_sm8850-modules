@@ -3058,7 +3058,7 @@ static int init_parse_dts(struct device *dev, struct touchpanel_data *ts)
 		TP_BOOT_INFO(ts->tp_index, "click_sensitive_level_array not specified %d\n", rc);
 	} else {
 		ts->click_sensitive_level_array_support = true;
-		for (i=0; i < SENSITIVE_LEVEL_NUM; i++) {
+		for (i=0; i < CLICK_SENSITIVE_LEVEL_NUM; i++) {
 			ts->click_sensitive_level_array[i] = temp_array[i];
 		}
 		ts->click_sensitive_level_used_array = (u32 *)&(ts->click_sensitive_level_array);

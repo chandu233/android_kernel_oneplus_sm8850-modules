@@ -42,6 +42,7 @@ enum err_topic_item {
 	ERR_ITEM_SEC_IC_MEM_INFO,
 	ERR_ITEM_SHUTDOWN_VOL,
 	ERR_ITEM_CYCLE_CURRENT_DERATING,
+	ERR_ITEM_CYCLE_TIER_DERATING,
 };
 
 enum oplus_chg_track_mcu_voocphy_break_code {
