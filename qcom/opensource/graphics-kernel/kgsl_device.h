@@ -355,6 +355,8 @@ struct kgsl_device {
 	u32 debugbus_en;
 	/** @gpu_niden_en: GPU NIDEN debug capability */
 	u32 gpu_niden_en;
+	/** @cpr_rev: CPR revision for voltage-level compatibility */
+	u32 cpr_rev;
 	/** @soc_code: Identifier containing product and feature code */
 	u32 soc_code;
 	/** @gmu_fault: Set when a gmu or rgmu fault is encountered */

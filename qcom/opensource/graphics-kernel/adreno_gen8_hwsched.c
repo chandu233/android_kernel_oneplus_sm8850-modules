@@ -1821,6 +1821,8 @@ DCVS_TUNABLES_SYSFS(max_freq_mhz, GPU_TUNING_KEY_MAX_GPU_FREQUENCY);
 DCVS_TUNABLES_SYSFS(mod_percent, GPU_TUNING_KEY_MOD_PERCENT);
 DCVS_TUNABLES_SYSFS(bus_min_freq_mhz, GPU_TUNING_KEY_BUS_MIN_FREQUENCY);
 DCVS_TUNABLES_SYSFS(bus_max_freq_mhz, GPU_TUNING_KEY_BUS_MAX_FREQUENCY);
+DCVS_TUNABLES_SYSFS(bus_min_ab_mbps, GPU_TUNING_KEY_BUS_MIN_AB_MBPS);
+DCVS_TUNABLES_SYSFS(bus_max_ab_mbps, GPU_TUNING_KEY_BUS_MAX_AB_MBPS);
 
 static struct attribute *dcvs_tunables_attrs[] = {
 	&dcvs_attr_penalty_up.attr.attr,
@@ -1838,6 +1840,8 @@ static struct attribute *dcvs_tunables_attrs[] = {
 	&dcvs_attr_mod_percent.attr.attr,
 	&dcvs_attr_bus_min_freq_mhz.attr.attr,
 	&dcvs_attr_bus_max_freq_mhz.attr.attr,
+	&dcvs_attr_bus_min_ab_mbps.attr.attr,
+	&dcvs_attr_bus_max_ab_mbps.attr.attr,
 	NULL,
 };
 
@@ -1868,8 +1872,8 @@ static const char * const dcvs_tunables_strings[] = {
 	[GPU_TUNING_KEY_MOD_PERCENT] = "mod_percent",
 	[GPU_TUNING_KEY_BUS_MIN_FREQUENCY] = "bus_min_freq_mhz",
 	[GPU_TUNING_KEY_BUS_MAX_FREQUENCY] = "bus_max_freq_mhz",
-	[GPU_TUNING_KEY_MIN_AB_MBPS] = NULL,
-	[GPU_TUNING_KEY_MAX_AB_MBPS] = NULL,
+	[GPU_TUNING_KEY_BUS_MIN_AB_MBPS] = "bus_min_ab_mbps",
+	[GPU_TUNING_KEY_BUS_MAX_AB_MBPS] = "bus_max_ab_mbps",
 	[GPU_TUNING_KEY_MAX] = NULL
 };
 

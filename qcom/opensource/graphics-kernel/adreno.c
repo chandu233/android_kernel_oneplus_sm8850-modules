@@ -26,6 +26,7 @@
 #if (KERNEL_VERSION(6, 10, 0) <= LINUX_VERSION_CODE)
 #include <linux/soc/qcom/socinfo.h>
 #endif
+#include <dt-bindings/regulator/qcom,rpmh-regulator-levels.h>
 
 #include "adreno.h"
 #include "adreno_a6xx.h"
@@ -796,6 +797,26 @@ static int adreno_of_parse_pwrlevels(struct adreno_device *adreno_dev,
 		level->bus_max = level->bus_freq;
 		kgsl_of_property_read_ddrtype(child,
 			"qcom,bus-max", &level->bus_max);
+
+		/* Map LOW_SVS_D2_1 and LOW_SVS_D3 to LOW_SVS_D2 for cpr_rev0 */
+		if (adreno_is_gen8_2_1(adreno_dev) && (device->cpr_rev == 0)) {
+		#ifdef RPMH_REGULATOR_LEVEL_LOW_SVS_D2_1
+			if (voltage == RPMH_REGULATOR_LEVEL_LOW_SVS_D2_1) {
+				dev_err_once(device->dev,
+					"Voltage override due to CPR Rev ID: 0x%x\n",
+					device->cpr_rev);
+				level->voltage_level = RPMH_REGULATOR_LEVEL_LOW_SVS_D2;
+			}
+		#endif
+		#ifdef RPMH_REGULATOR_LEVEL_LOW_SVS_D3
+			if (voltage == RPMH_REGULATOR_LEVEL_LOW_SVS_D3) {
+				dev_err_once(device->dev,
+					"Voltage override due to CPR Rev ID: 0x%x\n",
+					device->cpr_rev);
+				level->voltage_level = RPMH_REGULATOR_LEVEL_LOW_SVS_D2;
+			}
+		#endif
+		}
 	}
 
 	adreno_build_opp_table(&device->pdev->dev, pwr);
@@ -1490,6 +1511,10 @@ int adreno_device_probe(struct platform_device *pdev,
 		dev_err(device->dev, "failed to read gpu_niden_en nvmem cell\n");
 
 	device->gpu_niden_en = status;
+	if (adreno_is_gen8_2_1(adreno_dev)) {
+		status = adreno_read_fuse(pdev, "cpr_rev");
+		device->cpr_rev = status;
+	}
 
 	adreno_read_soc_code(device);
 
