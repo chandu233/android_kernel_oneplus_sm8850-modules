@@ -196,6 +196,11 @@ def _define_modules_for_target_variant(target, variant):
             local_defines = [
                 "OPLUS_FEATURE_WIFI_MAC",
                 "OPLUS_FEATURE_WIFI_BDF",
+                "OPLUS_FEATURE_WIFI_DCS_SWITCH",
+                "OPLUS_FEATURE_WIFI_FTM",
+                "OPLUS_BUG_STABILITY",
+                "OPLUS_FEATURE_SOFTAP_DCS_SWITCH",
+                "OPLUS_FEATURE_WIFI_VENDOR_FT",
             ],
             #endif /* OPLUS_FEATURE_WIFI_FTM */
             conditional_srcs = {
@@ -252,6 +257,10 @@ def _define_modules_for_target_variant(target, variant):
             kconfig = "icnss2/Kconfig",
             copts = [],
             defconfig = defconfig,
+            local_defines = ["OPLUS_FEATURE_WIFI_MAC", "OPLUS_FEATURE_WIFI_BDF",
+                "OPLUS_FEATURE_WIFI_DCS_SWITCH", "OPLUS_FEATURE_WIFI_FTM",
+                "OPLUS_BUG_STABILITY", "OPLUS_FEATURE_SOFTAP_DCS_SWITCH",
+                "OPLUS_FEATURE_WIFI_VENDOR_FT"],
             conditional_srcs = {
                 "CONFIG_ICNSS2_QMI": {
                     True: [

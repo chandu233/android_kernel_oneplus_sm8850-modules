@@ -2735,7 +2735,11 @@ static int32_t wlan_crypto_rsn_suite_to_cipher(const uint8_t *sel)
  * Convert an RSN key management/authentication algorithm
  * to an internal code.
  */
-static int32_t wlan_crypto_rsn_suite_to_keymgmt(const uint8_t *sel)
+
+#ifndef OPLUS_FEATURE_WIFI_VENDOR_FT
+static
+#endif
+int32_t wlan_crypto_rsn_suite_to_keymgmt(const uint8_t *sel)
 {
 	uint32_t w = LE_READ_4(sel);
 	int32_t status = -1;

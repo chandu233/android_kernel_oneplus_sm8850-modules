@@ -4878,6 +4878,18 @@ static int drv_cmd_conc_set_dwell_time(struct wlan_hdd_link_info *link_info,
 	return hdd_conc_set_dwell_time(link_info->adapter, command);
 }
 
+#ifdef OPLUS_BUG_STABILITY
+int wlan_hdd_is_wfd(void)
+{
+	struct hdd_context *hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
+	if (hdd_ctx != NULL) {
+		return ((hdd_ctx->miracast_value == MIRACAST_SOURCE) ||
+				(hdd_ctx->miracast_value == MIRACAST_SINK));
+	}
+	return 0;
+}
+#endif /* OPLUS_BUG_STABILITY */
+
 static int drv_cmd_miracast(struct wlan_hdd_link_info *link_info,
 			    struct hdd_context *hdd_ctx,
 			    uint8_t *command,

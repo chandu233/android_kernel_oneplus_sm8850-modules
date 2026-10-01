@@ -11731,6 +11731,41 @@ uint32_t dot11f_unpack_ie_vendor_vht_ie(tpAniSirGlobal pCtx,
 
 #define SigIevendor_vht_ie (0x00ad)
 
+#ifdef OPLUS_FEATURE_WIFI_VENDOR_FT
+uint32_t dot11f_unpack_ie_vendor_ft_ie(tpAniSirGlobal pCtx,
+					 uint8_t *pBuf, uint8_t ielen,
+					 tDot11fIEvendor_ft_ie *pDst,
+					 bool append_ie)
+{
+	size_t offset = 1, elem_len;
+	uint8_t caps;
+
+	if (pDst->present)
+		return DOT11F_DUPLICATE_IE;
+	/* OUI/type are removed by the dispatcher; skip the version byte. */
+	if (ielen < offset + 2)
+		return DOT11F_INCOMPLETE_IE;
+	if (pBuf[offset] == DOT11F_EID_FTINFO) {
+		elem_len = pBuf[offset + 1] + 2;
+		if (elem_len > ielen - offset)
+			return DOT11F_INCOMPLETE_IE;
+		offset += elem_len;
+	}
+	if (ielen - offset < 5 ||
+	    pBuf[offset] != DOT11F_EID_MOBILITYDOMAIN ||
+	    pBuf[offset + 1] != 3)
+		return DOT11F_INCOMPLETE_IE;
+	framesntohs(pCtx, &pDst->MDID, pBuf + offset + 2, 0);
+	caps = pBuf[offset + 4];
+	pDst->overDSCap = caps & 1;
+	pDst->resourceReqCap = (caps >> 1) & 1;
+	pDst->reserved = (caps >> 2) & 0x3f;
+	pDst->present = 1;
+	return DOT11F_PARSE_SUCCESS;
+}
+
+#define SigIeVendorFt_ie (0x00c0)
+#endif /* OPLUS_FEATURE_WIFI_VENDOR_FT */
 
 static const tFFDefn FFS_AddTSRequest[] = {
 	{ "Category", offsetof(tDot11fAddTSRequest, Category), SigFfCategory,
@@ -12561,6 +12596,11 @@ static const tIEDefn IES_Beacon[] = {
 	offsetof(tDot11fIEreduced_neighbor_report, present), 0,
 	"reduced_neighbor_report", 0, 7, 22, SigIereduced_neighbor_report,
 	{0, 0, 0, 0, 0}, 0, DOT11F_EID_REDUCED_NEIGHBOR_REPORT, 0, 0, },
+#ifdef OPLUS_FEATURE_WIFI_VENDOR_FT
+	{ offsetof(tDot11fBeacon, vendor_ft_ie), offsetof(tDot11fIEvendor_ft_ie,
+	present), 0, "vendor_ft_ie", 0, 7, 107, SigIeVendorFt_ie, {0, 15, 226, 200, 4},
+	5, DOT11F_EID_VENDOR_FT_IE, 0, 0, },
+#endif /* OPLUS_FEATURE_WIFI_VENDOR_FT */
 	{0, 0, 0, NULL, 0, 0, 0, 0, {0, 0, 0, 0, 0}, 0, 0xff, 0, },};
 
 uint32_t dot11f_unpack_beacon(tpAniSirGlobal pCtx,
@@ -12574,6 +12614,15 @@ uint32_t dot11f_unpack_beacon(tpAniSirGlobal pCtx,
 		      (uint8_t *)pFrm, sizeof(*pFrm), append_ie);
 
 	(void)i;
+
+#ifdef OPLUS_FEATURE_WIFI_VENDOR_FT
+	if (pFrm->vendor_ft_ie.present) {
+		/* Vendor FT info */
+		qdf_mem_copy((uint8_t *) &(pFrm->MobilityDomain),
+			     (uint8_t *) &(pFrm->vendor_ft_ie),
+			     sizeof(tDot11fIEMobilityDomain));
+	}
+#endif /* OPLUS_FEATURE_WIFI_VENDOR_FT */
 	return status;
 
 } /* End dot11f_unpack_beacon. */
@@ -13077,6 +13126,11 @@ static const tIEDefn IES_BeaconIEs[] = {
 	offsetof(tDot11fIEreduced_neighbor_report, present), 0,
 	"reduced_neighbor_report", 0, 7, 22, SigIereduced_neighbor_report,
 	{0, 0, 0, 0, 0}, 0, DOT11F_EID_REDUCED_NEIGHBOR_REPORT, 0, 0, },
+#ifdef OPLUS_FEATURE_WIFI_VENDOR_FT
+	{ offsetof(tDot11fBeaconIEs, vendor_ft_ie), offsetof(tDot11fIEvendor_ft_ie,
+	present), 0, "vendor_ft_ie", 0, 7, 107, SigIeVendorFt_ie, {0, 15, 226, 200, 4},
+	5, DOT11F_EID_VENDOR_FT_IE, 0, 0, },
+#endif /* OPLUS_FEATURE_WIFI_VENDOR_FT */
 	{0, 0, 0, NULL, 0, 0, 0, 0, {0, 0, 0, 0, 0}, 0, 0xff, 0, },};
 
 uint32_t dot11f_unpack_beacon_i_es(tpAniSirGlobal pCtx,
@@ -13090,6 +13144,15 @@ uint32_t dot11f_unpack_beacon_i_es(tpAniSirGlobal pCtx,
 		      (uint8_t *)pFrm, sizeof(*pFrm), append_ie);
 
 	(void)i;
+
+#ifdef OPLUS_FEATURE_WIFI_VENDOR_FT
+	if (pFrm->vendor_ft_ie.present) {
+		/* Vendor FT info */
+		qdf_mem_copy((uint8_t *) &(pFrm->MobilityDomain),
+			     (uint8_t *) &(pFrm->vendor_ft_ie),
+			     sizeof(tDot11fIEMobilityDomain));
+	}
+#endif /* OPLUS_FEATURE_WIFI_VENDOR_FT */
 	return status;
 
 } /* End dot11f_unpack_beacon_i_es. */
@@ -13767,6 +13830,11 @@ static const tIEDefn IES_ProbeResponse[] = {
 	offsetof(tDot11fProbeResponse, num_reduced_neighbor_report),
 	"reduced_neighbor_report", 2, 7, 22, SigIereduced_neighbor_report,
 	{0, 0, 0, 0, 0}, 0, DOT11F_EID_REDUCED_NEIGHBOR_REPORT, 0, 0, },
+#ifdef OPLUS_FEATURE_WIFI_VENDOR_FT
+	{ offsetof(tDot11fProbeResponse, vendor_ft_ie), offsetof(tDot11fIEvendor_ft_ie,
+	present), 0, "vendor_ft_ie", 0, 7, 107, SigIeVendorFt_ie, {0, 15, 226, 200, 4},
+	5, DOT11F_EID_VENDOR_FT_IE, 0, 0, },
+#endif /* OPLUS_FEATURE_WIFI_VENDOR_FT */
 	{0, 0, 0, NULL, 0, 0, 0, 0, {0, 0, 0, 0, 0}, 0, 0xff, 0, },};
 
 uint32_t dot11f_unpack_probe_response(tpAniSirGlobal pCtx,
@@ -13780,6 +13848,15 @@ uint32_t dot11f_unpack_probe_response(tpAniSirGlobal pCtx,
 		      (uint8_t *)pFrm, sizeof(*pFrm), append_ie);
 
 	(void)i;
+
+#ifdef OPLUS_FEATURE_WIFI_VENDOR_FT
+	if (pFrm->vendor_ft_ie.present) {
+		/* Vendor FT info */
+		qdf_mem_copy((uint8_t *) &(pFrm->MobilityDomain),
+			     (uint8_t *) &(pFrm->vendor_ft_ie),
+			     sizeof(tDot11fIEMobilityDomain));
+	}
+#endif /* OPLUS_FEATURE_WIFI_VENDOR_FT */
 	return status;
 
 } /* End dot11f_unpack_probe_response. */
@@ -17744,6 +17821,18 @@ static uint32_t unpack_core(tpAniSirGlobal pCtx,
 						    countOffset),
 						    append_ie);
 					break;
+#ifdef OPLUS_FEATURE_WIFI_VENDOR_FT
+				case SigIeVendorFt_ie:
+					status |=
+						dot11f_unpack_ie_vendor_ft_ie(
+						    pCtx, pBufRemaining, len,
+						    (tDot11fIEvendor_ft_ie *)
+						    (pFrm + pIe->offset +
+						    sizeof(tDot11fIEvendor_ft_ie) *
+						    countOffset),
+						    append_ie);
+					break;
+#endif /* OPLUS_FEATURE_WIFI_VENDOR_FT */
 				default:
 					FRAMES_LOG1(pCtx, FRLOGE, FRFL("INTERNAL ERROR"
 						     ": I don't know about the IE signature %d"
@@ -35452,6 +35541,11 @@ static uint32_t pack_core(tpAniSirGlobal pCtx,
 				sizeof(tDot11fIEvendor_vht_ie) * i),
 				pBufRemaining, nBufRemaining, &len);
 			break;
+#ifdef OPLUS_FEATURE_WIFI_VENDOR_FT
+			// no need for pack this ie, directly ignore it.
+			case SigIeVendorFt_ie:
+			break;
+#endif /* OPLUS_FEATURE_WIFI_VENDOR_FT */
 			default:
 				FRAMES_LOG1(pCtx, FRLOGE, FRFL("INTERNAL ERROR-- I don"
 				"'t know about the IE %d; this is most likely a b"

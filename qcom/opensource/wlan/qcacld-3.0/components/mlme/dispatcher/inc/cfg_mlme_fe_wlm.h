@@ -393,6 +393,27 @@
 			       sizeof(CFG_MAX_LATENCY_FLAGS) - 1,\
 			       CFG_DEFAULT_ULTLOW_FLAGS, \
 			       "WLM flags for ultralow level")
+#ifdef OPLUS_BUG_STABILITY
+// Add for: extended latency level
+#define CFG_DEFAULT_LOW_EXT_FLAGS "0x184c03"
+#define CFG_LATENCY_FLAGS_LOW_EXT \
+		CFG_INI_STRING("wlm_latency_flags_low_ext",\
+			       0, \
+			       sizeof(CFG_MAX_LATENCY_FLAGS) - 1,\
+			       CFG_DEFAULT_LOW_EXT_FLAGS, \
+			       "WLM flags for low ext level")
+
+#define CFG_DEFAULT_ULTLOW_EXT_FLAGS "0x180c03"
+#define CFG_LATENCY_FLAGS_ULTLOW_EXT \
+		CFG_INI_STRING("wlm_latency_flags_ultralow_ext",\
+			       0, \
+			       sizeof(CFG_MAX_LATENCY_FLAGS) - 1,\
+			       CFG_DEFAULT_ULTLOW_EXT_FLAGS, \
+			       "WLM flags for ultralow ext level")
+#else
+#define CFG_LATENCY_FLAGS_LOW_EXT
+#define CFG_LATENCY_FLAGS_ULTLOW_EXT
+#endif /* OPLUS_BUG_STABILITY */
 
 #define CFG_FE_WLM_ALL \
 	CFG(CFG_LATENCY_ENABLE) \
@@ -402,6 +423,8 @@
 	CFG(CFG_LATENCY_FLAGS_NORMAL) \
 	CFG(CFG_LATENCY_FLAGS_XR) \
 	CFG(CFG_LATENCY_FLAGS_LOW) \
-	CFG(CFG_LATENCY_FLAGS_ULTLOW)
+	CFG(CFG_LATENCY_FLAGS_ULTLOW) \
+	CFG(CFG_LATENCY_FLAGS_LOW_EXT) \
+	CFG(CFG_LATENCY_FLAGS_ULTLOW_EXT)
 
 #endif /* __CFG_MLME_FE_WLM_H */

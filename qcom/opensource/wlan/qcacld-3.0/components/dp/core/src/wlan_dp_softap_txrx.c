@@ -42,6 +42,11 @@
 #include <qdf_trace.h>
 #include <qdf_nbuf.h>
 #include <qdf_net_stats.h>
+#ifdef OPLUS_BUG_STABILITY
+#include <net/ip.h>
+#include <linux/udp.h>
+#include <net/checksum.h>
+#endif
 
 #ifdef FEATURE_WDS
 #include <cdp_txrx_ctrl.h>
@@ -291,6 +296,45 @@ static void dp_softap_notify_dhcp_ind(void *link_context, qdf_nbuf_t nbuf)
 	dp_post_dhcp_ind(dp_link, dest_mac_addr, false);
 }
 
+#ifdef OPLUS_BUG_STABILITY
+static void qdf_nbuf_clear_dhcp_bc_flags(qdf_nbuf_t buf)
+{
+	struct iphdr *iph;
+	struct udphdr *udph;
+	unsigned int udp_offset, flags_offset;
+	__be16 old_flags, new_flags;
+
+	if (!pskb_may_pull(buf, ETH_HLEN + sizeof(*iph)) ||
+	    ((struct ethhdr *)buf->data)->h_proto != htons(ETH_P_IP))
+		return;
+	iph = (struct iphdr *)(buf->data + ETH_HLEN);
+	if (iph->version != 4 || iph->ihl < 5 || iph->protocol != IPPROTO_UDP ||
+	    (ntohs(iph->frag_off) & (IP_MF | IP_OFFSET)))
+		return;
+	udp_offset = ETH_HLEN + iph->ihl * 4;
+	/* BOOTP flags follow op/htype/hlen/hops, xid and secs (10 bytes). */
+	flags_offset = udp_offset + sizeof(*udph) + 10;
+	if (ntohs(iph->tot_len) < flags_offset + 2 - ETH_HLEN ||
+	    skb_ensure_writable(buf, flags_offset + 2))
+		return;
+	udph = (struct udphdr *)(buf->data + udp_offset);
+	if (udph->source != htons(68) || udph->dest != htons(67) ||
+	    ntohs(udph->len) < sizeof(*udph) + 12)
+		return;
+	memcpy(&old_flags, buf->data + flags_offset, sizeof(old_flags));
+	new_flags = old_flags & htons(0x7fff);
+	if (old_flags == new_flags)
+		return;
+	if (udph->check) {
+		inet_proto_csum_replace2(&udph->check, buf, old_flags, new_flags, false);
+		if (!udph->check)
+			udph->check = CSUM_MANGLED_0;
+	}
+	memcpy(buf->data + flags_offset, &new_flags, sizeof(new_flags));
+}
+
+#endif /* OPLUS_BUG_STABILITY */
+
 int dp_softap_inspect_dhcp_packet(struct wlan_dp_link *dp_link,
 				  qdf_nbuf_t nbuf,
 				  enum qdf_proto_dir dir)
@@ -310,10 +354,20 @@ int dp_softap_inspect_dhcp_packet(struct wlan_dp_link *dp_link,
 	    ((dir == QDF_TX && QDF_NBUF_CB_PACKET_TYPE_DHCP ==
 				QDF_NBUF_CB_GET_PACKET_TYPE(nbuf)) ||
 	     (dir == QDF_RX && qdf_nbuf_is_ipv4_dhcp_pkt(nbuf) == true))) {
-		src_mac = (struct qdf_mac_addr *)(qdf_nbuf_data(nbuf) +
-						  DHCP_CLIENT_MAC_ADDR_OFFSET);
 
 		subtype = qdf_nbuf_get_dhcp_subtype(nbuf);
+
+#ifdef OPLUS_BUG_STABILITY
+		if ((dir == QDF_RX) && (dp_intf->device_mode == QDF_P2P_GO_MODE)) {
+			if (wlan_hdd_is_wfd()) {
+				dp_info("this is wfd mode, will clear dhcp bc flags");
+				qdf_nbuf_clear_dhcp_bc_flags(nbuf);
+			}
+		}
+#endif /* OPLUS_BUG_STABILITY */
+
+		src_mac = (struct qdf_mac_addr *)(qdf_nbuf_data(nbuf) +
+						  DHCP_CLIENT_MAC_ADDR_OFFSET);
 
 		peer = wlan_objmgr_get_peer_by_mac(dp_intf->dp_ctx->psoc,
 						   src_mac->bytes,

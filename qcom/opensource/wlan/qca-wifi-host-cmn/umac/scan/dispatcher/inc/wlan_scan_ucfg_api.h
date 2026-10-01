@@ -1174,6 +1174,16 @@ bool ucfg_scan_is_snr_monitor_enabled(struct wlan_objmgr_psoc *psoc)
 	return wlan_scan_is_snr_monitor_enabled(psoc);
 }
 
+#ifdef OPLUS_FEATURE_WIFI_VENDOR_FT
+/**
+ * ucfg_scan_is_vendor_ft_enabled() - API to get vendor ft enabled
+ * @psoc: pointer to psoc object
+ *
+ * Return: value.
+ */
+bool ucfg_scan_is_vendor_ft_enabled(struct wlan_objmgr_psoc *psoc);
+#endif /* OPLUS_FEATURE_WIFI_VENDOR_FT */
+
 static inline bool
 ucfg_scan_get_cached_scan_report_fw_cap(struct wlan_objmgr_pdev *pdev)
 {

@@ -552,6 +552,29 @@ QDF_STATUS cm_roam_full_scan_6ghz_on_disc(struct wlan_objmgr_psoc *psoc,
 QDF_STATUS
 cm_set_roam_scan_high_rssi_offset(struct wlan_objmgr_psoc *psoc,
 				  uint8_t vdev_id, uint8_t param_value);
+
+#ifdef OPLUS_BUG_STABILITY
+// OPLUS command to config roaming params
+/**
+ * cm_set_roam_bad_rssi_offset_2G() - Set the bad offset 2G in high RSSI at
+ * which roam scan is triggered in 2.4/5 GHz.
+ * @psoc: PSOC pointer
+ * @vdev_id: vdev id
+ * @param_value: Set the bad rssi offset 2G for roam scan trigger
+ * * 1-16 - Set an offset value in this range
+ * * 0    - Disable
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS
+cm_set_roam_bad_rssi_offset_2G(struct wlan_objmgr_psoc *psoc,
+				  uint8_t vdev_id, uint32_t param_value);
+
+QDF_STATUS
+cm_set_roam_per_enable(struct wlan_objmgr_psoc *psoc,
+				  uint8_t vdev_id, uint32_t param_value);
+#endif /* OPLUS_BUG_STABILITY */
+
 #else
 static inline QDF_STATUS
 cm_roam_send_rt_stats_config(struct wlan_objmgr_psoc *psoc,
@@ -900,4 +923,13 @@ void cm_fill_rso_channel_list(struct wlan_objmgr_psoc *psoc,
 			      struct rso_config *rso_cfg,
 			      struct wlan_roam_scan_channel_list *chan_info,
 			      uint8_t reason);
+
+#ifdef OPLUS_BUG_STABILITY
+// OPLUS command to config roaming params
+void cm_roam_fill_scan_btm_offload(struct wlan_objmgr_psoc *psoc,
+			 struct wlan_objmgr_vdev *vdev,
+			 struct wlan_roam_btm_config *params,
+			 struct rso_config *rso_cfg);
+#endif /* OPLUS_BUG_STABILITY */
+
 #endif /* _WLAN_CM_ROAM_OFFLOAD_H_ */

@@ -1404,6 +1404,76 @@ wlan_cm_set_roam_scan_high_rssi_offset(struct wlan_objmgr_psoc *psoc,
  */
 uint8_t wlan_cm_get_roam_scan_high_rssi_offset(struct wlan_objmgr_psoc *psoc);
 
+#ifdef OPLUS_BUG_STABILITY
+// OPLUS command to config roaming params
+/**
+ * wlan_cm_set_roam_bad_rssi_offset_2G() - Set the bad offset 2g in high RSSI
+ * at which roam scan is triggered in 2.4/5 GHz.
+ * @psoc: PSOC pointer
+ * @roam_bad_rssi_offset_2g: Set the bad RSSI offset 2g for roam scan trigger
+ * * 1-16 - Set an offset value in this range
+ * * 0    - Disable
+ *
+ * Return: none
+ */
+void
+wlan_cm_set_roam_bad_rssi_offset_2G(struct wlan_objmgr_psoc *psoc,
+				       uint32_t roam_bad_rssi_offset_2g);
+
+/**
+ * wlan_cm_get_roam_bad_rssi_offset() - Get the the bad offset 2g in high RSSI
+ * at which roam scan is triggered in 2.4/5 GHz.
+ * @psoc: PSOC pointer
+ *
+ * Return: the bad offset 2g for roam scan trigger
+ */
+uint32_t wlan_cm_get_roam_bad_rssi_offset_2G(struct wlan_objmgr_psoc *psoc);
+
+/**
+ * wlan_cm_set_roam_scan_hi_rssi_delta() - Set the roam scan hi rssi delta
+ * at which roam scan is triggered in 2.4/5 GHz.
+ * @psoc: PSOC pointer
+ * @roam_scan_hi_rssi_delta: Set the roam scan hi rssi delta
+ * * 1-16 - Set an offset value in this range
+ * * 0    - Disable
+ *
+ * Return: none
+ */
+void
+wlan_cm_set_roam_scan_hi_rssi_delta(struct wlan_objmgr_psoc *psoc,
+				       uint32_t roam_scan_hi_rssi_delta);
+
+/**
+ * wlan_cm_get_roam_scan_hi_rssi_delta() - Get the roam scan hi rssi delta
+ * at which roam scan is triggered in 2.4/5 GHz.
+ * @psoc: PSOC pointer
+ *
+ * Return: the roam scan hi rssi delta
+ */
+uint32_t wlan_cm_get_roam_scan_hi_rssi_delta(struct wlan_objmgr_psoc *psoc);
+
+/**
+ * wlan_cm_set_roam_per_enable() - Set the roam per enable
+ * @psoc: PSOC pointer
+ * @roam_per_enable: Set the the roam per enable
+ * * 1    - enable
+ * * 0    - Disable
+ *
+ * Return: none
+ */
+void
+wlan_cm_set_roam_per_enable(struct wlan_objmgr_psoc *psoc,
+				       uint32_t roam_per_enable);
+
+/**
+ * wlan_cm_get_roam_per_enable() - Get the roam per enable
+ * @psoc: PSOC pointer
+ *
+ * Return: the roam per enable
+ */
+uint32_t wlan_cm_get_roam_per_enable(struct wlan_objmgr_psoc *psoc);
+#endif /* OPLUS_BUG_STABILITY */
+
 #ifdef WLAN_FEATURE_ROAM_INFO_STATS
 /**
  * mlme_cm_alloc_roam_stats_info() - alloc roam stats info buffer

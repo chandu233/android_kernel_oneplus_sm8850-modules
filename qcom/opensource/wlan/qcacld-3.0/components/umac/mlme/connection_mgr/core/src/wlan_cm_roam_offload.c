@@ -3519,6 +3519,34 @@ cm_roam_scan_btm_offload(struct wlan_objmgr_psoc *psoc,
 	params->btm_candidate_min_score = btm_cfg->btm_trig_min_candidate_score;
 }
 
+#ifdef OPLUS_BUG_STABILITY
+// OPLUS command to config roaming params
+void
+cm_roam_fill_scan_btm_offload(struct wlan_objmgr_psoc *psoc,
+			 struct wlan_objmgr_vdev *vdev,
+			 struct wlan_roam_btm_config *params,
+			 struct rso_config *rso_cfg)
+{
+	struct wlan_mlme_psoc_ext_obj *mlme_obj;
+	struct wlan_mlme_btm *btm_cfg;
+
+	mlme_obj = mlme_get_psoc_ext_obj(psoc);
+	if (!mlme_obj)
+		return;
+
+	btm_cfg = &mlme_obj->cfg.btm;
+	params->vdev_id = wlan_vdev_get_id(vdev);
+	cm_update_btm_offload_config(psoc, vdev, ROAM_SCAN_OFFLOAD_START,
+				     &params->btm_offload_config);
+	params->btm_solicited_timeout = btm_cfg->btm_solicited_timeout;
+	params->btm_max_attempt_cnt = btm_cfg->btm_max_attempt_cnt;
+	params->btm_sticky_time = btm_cfg->btm_sticky_time;
+	params->disassoc_timer_threshold = btm_cfg->disassoc_timer_threshold;
+	params->btm_query_bitmask = btm_cfg->btm_query_bitmask;
+	params->btm_candidate_min_score = btm_cfg->btm_trig_min_candidate_score;
+}
+#endif /* OPLUS_BUG_STABILITY */
+
 #ifdef WLAN_FEATURE_11BE_MLO
 /**
  * cm_roam_mlo_config() - set roam mlo offload parameters
@@ -4300,6 +4328,94 @@ rel_vdev_ref:
 
 	return status;
 }
+
+#ifdef OPLUS_BUG_STABILITY
+// OPLUS command to config roaming params
+QDF_STATUS cm_set_roam_bad_rssi_offset_2G(struct wlan_objmgr_psoc *psoc,
+					     uint8_t vdev_id,
+					     uint32_t param_value)
+{
+	struct rso_config *rso_cfg;
+	struct wlan_objmgr_vdev *vdev;
+	struct wlan_roam_offload_scan_rssi_params *roam_rssi_params;
+	QDF_STATUS status = QDF_STATUS_E_INVAL;
+
+	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(psoc, vdev_id,
+						    WLAN_MLME_CM_ID);
+	if (!vdev) {
+		mlme_err("vdev object is NULL for vdev %d", vdev_id);
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	rso_cfg = wlan_cm_get_rso_config(vdev);
+	if (!rso_cfg)
+		goto rel_vdev_ref;
+
+	roam_rssi_params = qdf_mem_malloc(sizeof(*roam_rssi_params));
+	if (!roam_rssi_params)
+		goto rel_vdev_ref;
+
+	wlan_cm_set_roam_bad_rssi_offset_2G(psoc, param_value);
+	if (param_value == 0) {
+		wlan_cm_set_roam_scan_hi_rssi_delta(psoc, param_value);
+	} else {
+		wlan_cm_set_roam_scan_hi_rssi_delta(psoc, 10);
+	}
+	rso_cfg->cfg_param.hi_rssi_scan_rssi_delta = wlan_cm_get_roam_scan_hi_rssi_delta(psoc);
+	qdf_mem_zero(roam_rssi_params, sizeof(*roam_rssi_params));
+	cm_roam_scan_offload_rssi_thresh(psoc, vdev_id,
+					 roam_rssi_params, rso_cfg);
+	mlme_debug("vdev:%d Configured bad RSSI offset 2G=%d, 5 GHZ roam flag=%d",
+		   vdev_id, roam_rssi_params->roam_bad_rssi_thresh_offset_2g,
+		   (roam_rssi_params->flags &
+		    ROAM_SCAN_RSSI_THRESHOLD_FLAG_ROAM_HI_RSSI_EN_ON_5G));
+
+	status = wlan_cm_tgt_send_roam_scan_offload_rssi_params(
+							vdev, roam_rssi_params);
+	if (QDF_IS_STATUS_ERROR(status))
+		mlme_err("fail to set roam bad RSSI offset 2G");
+
+	qdf_mem_free(roam_rssi_params);
+rel_vdev_ref:
+	wlan_objmgr_vdev_release_ref(vdev, WLAN_MLME_CM_ID);
+
+	return status;
+}
+
+QDF_STATUS cm_set_roam_per_enable(struct wlan_objmgr_psoc *psoc,
+					     uint8_t vdev_id,
+					     uint32_t param_value)
+{
+	struct wlan_per_roam_config_req *roam_per_params;
+
+	QDF_STATUS status = QDF_STATUS_E_INVAL;
+
+	roam_per_params = qdf_mem_malloc(sizeof(*roam_per_params));
+	if (!roam_per_params)
+		return QDF_STATUS_E_NOMEM;
+
+	wlan_cm_set_roam_per_enable(psoc, param_value);
+	qdf_mem_zero(roam_per_params, sizeof(*roam_per_params));
+	roam_per_params->vdev_id = vdev_id;
+	status = cm_roam_fill_per_roam_request(psoc, roam_per_params);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		qdf_mem_free(roam_per_params);
+		mlme_debug("fail to fill per config");
+		return status;
+	}
+
+	mlme_debug("vdev:%d Configured per enable=%d.",
+		   vdev_id, roam_per_params->per_config.enable);
+
+	status = wlan_cm_tgt_send_roam_per_config(psoc, vdev_id, roam_per_params);
+	if (QDF_IS_STATUS_ERROR(status))
+		mlme_err("fail to set roam per enable");
+
+	qdf_mem_free(roam_per_params);
+
+	return status;
+}
+#endif /* OPLUS_BUG_STABILITY */
 #endif
 
 #ifdef WLAN_ADAPTIVE_11R

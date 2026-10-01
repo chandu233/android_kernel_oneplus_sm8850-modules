@@ -65,6 +65,11 @@
 #include "power.h"
 #include "genl.h"
 
+#ifdef OPLUS_FEATURE_WIFI_MAC
+#include <soc/oplus/system/boot_mode.h>
+#include <soc/oplus/system/oplus_project.h>
+#endif /* OPLUS_FEATURE_WIFI_MAC */
+
 #define MAX_PROP_SIZE			32
 #define NUM_LOG_PAGES			10
 #define NUM_LOG_LONG_PAGES		4
@@ -147,6 +152,11 @@ enum icnss_pdr_cause_index {
 	ICNSS_ROOT_PD_SHUTDOWN,
 	ICNSS_HOST_ERROR,
 };
+
+#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+//Add for wifi switch monitor
+static unsigned int cnssprobestate = 0;
+#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
 
 static const char * const icnss_pdr_cause[] = {
 	[ICNSS_FW_CRASH] = "FW crash",
@@ -1104,7 +1114,12 @@ static int icnss_setup_dms_mac(struct icnss_priv *priv)
 	/* DTSI property use-nv-mac is used to force DMS MAC address for WLAN.
 	 * Thus assert on failure to get MAC from DMS even after retries
 	 */
+	#ifndef OPLUS_FEATURE_WIFI_MAC
+	//Add for boot wlan mode not use NV mac
 	if (priv->use_nv_mac) {
+	#else
+	if ((get_boot_mode() !=  MSM_BOOT_MODE__WLAN) && priv->use_nv_mac) {
+	#endif /* OPLUS_FEATURE_WIFI_MAC */
 		for (i = 0; i < ICNSS_DMS_QMI_CONNECTION_WAIT_RETRY; i++) {
 			if (priv->dms.mac_valid)
 				break;
@@ -1116,7 +1131,9 @@ static int icnss_setup_dms_mac(struct icnss_priv *priv)
 		}
 		if (!priv->dms.nv_mac_not_prov && !priv->dms.mac_valid) {
 			icnss_pr_err("Unable to get MAC from DMS after retries\n");
+			#ifndef OPLUS_FEATURE_WIFI_MAC
 			ICNSS_ASSERT(0);
+			#endif /* OPLUS_FEATURE_WIFI_MAC */
 			return -EINVAL;
 		}
 	}
@@ -2963,10 +2980,16 @@ static void icnss_driver_event_work(struct work_struct *work)
 								 event->data);
 			break;
 		case ICNSS_DRIVER_EVENT_IDLE_SHUTDOWN:
+			#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+			idle_shutdown = true;
+			#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
 			ret = icnss_driver_event_idle_shutdown(priv,
 							       event->data);
 			break;
 		case ICNSS_DRIVER_EVENT_IDLE_RESTART:
+			#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+			idle_shutdown = false;
+			#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
 			ret = icnss_driver_event_idle_restart(priv,
 							      event->data);
 			break;
@@ -6457,6 +6480,136 @@ static inline void icnss_runtime_pm_init(struct icnss_priv *priv)
 	pm_runtime_enable(&priv->pdev->dev);
 }
 
+#if defined(OPLUS_FEATURE_WIFI_DCS_SWITCH) || defined(OPLUS_FEATURE_WIFI_FTM)
+static DEFINE_MUTEX(oplus_diag_lock);
+static struct icnss_priv *oplus_diag_priv;
+
+static void oplus_diag_publish(struct icnss_priv *priv)
+{
+	mutex_lock(&oplus_diag_lock);
+	if (!oplus_diag_priv)
+		oplus_diag_priv = priv;
+	mutex_unlock(&oplus_diag_lock);
+}
+
+static void oplus_diag_unpublish(struct icnss_priv *priv)
+{
+	mutex_lock(&oplus_diag_lock);
+	if (oplus_diag_priv == priv)
+		oplus_diag_priv = NULL;
+	mutex_unlock(&oplus_diag_lock);
+}
+#else
+static inline void oplus_diag_publish(struct icnss_priv *priv) {}
+static inline void oplus_diag_unpublish(struct icnss_priv *priv) {}
+#endif
+
+#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+//Add for wifi switch monitor
+extern ssize_t icnss_show_cnss_debug(struct device_driver *driver, char *buf);
+bool idle_shutdown = false;
+
+static ssize_t icnss_show_fw_ready(struct device_driver *driver, char *buf)
+{
+	struct icnss_priv *penv;
+	ssize_t ret;
+	bool firmware_ready = false;
+	bool bdfloadsuccess = false;
+	bool regdbloadsuccess = false;
+	bool cnssprobesuccess = false;
+	bool plat_env_null = false;
+	bool pcie_link_down = false;
+	bool pcie_bus_fail = false;
+	bool pcie_enumerate_fail = false;
+	bool pcie_l1_fail = false;
+	bool driver_bad = false;
+
+	mutex_lock(&oplus_diag_lock);
+	penv = oplus_diag_priv;
+	if (!penv) {
+		icnss_pr_err("icnss_show_fw_ready plat_env is NULL!\n");
+		plat_env_null = true;
+	} else {
+		firmware_ready = test_bit(ICNSS_FW_READY, &penv->state);
+		regdbloadsuccess = test_bit(CNSS_LOAD_REGDB_SUCCESS, &penv->loadRegdbState);
+		bdfloadsuccess = test_bit(CNSS_LOAD_BDF_SUCCESS, &penv->loadBdfState);
+		plat_env_null = false;
+		pcie_link_down = test_bit(CNSS_PCIE_LINK_DOWN,&penv->pcieLinkDown);
+		pcie_bus_fail = test_bit(CNSS_PCIEBUS_FAIL, &penv->pcieBusState);
+		pcie_enumerate_fail = test_bit(CNSS_PCIE_ENUM_FAIL, &penv->pcieEnumState);
+		pcie_l1_fail = test_bit(CNSS_PCIE_L1_FAIL,&penv->pcieL1Fail);
+		driver_bad = (test_bit(ICNSS_PD_RESTART, &penv->state)
+				|| test_bit(ICNSS_FW_DOWN, &penv->state));
+	}
+	cnssprobesuccess = (cnssprobestate == CNSS_PROBE_SUCCESS);
+	ret = sysfs_emit(buf, "%s:%s:%s:%s:%s:%s:%s:%s:%s:%s_%s:%s_%s:%s",
+           (idle_shutdown ? "idle_shutdown" : (firmware_ready ? "fwstatus_ready" : "fwstatus_not_ready")),
+           (regdbloadsuccess ? "regdb_loadsuccess" : "regdb_loadfail"),
+           (bdfloadsuccess ? "bdf_loadsuccess" : "bdf_loadfail"),
+           (cnssprobesuccess ? "cnssprobe_success" : "cnssprobe_fail"),
+           (plat_env_null ? "platenv_fail" : "platenv_success"),
+           (pcie_link_down ? "pcie_link_down" : "pcie_link_up"),
+           (pcie_bus_fail ? "pcie_bus_fail" : "pcie_bus_success"),
+           (pcie_enumerate_fail ? "pcie_enumerate_fail" : "pcie_enumerate_success"),
+           (pcie_l1_fail ? "pcie_l1_fail" : "pcie_l1_success"),
+           "bdf_name", ((penv && penv->bdf_name && strlen(penv->bdf_name)) ? penv->bdf_name : ""),
+           "region_name", ((penv && penv->region_name && strlen(penv->region_name)) ? penv->region_name : ""),
+           (driver_bad ? "driver_bad" : "driver_good")
+           );
+	mutex_unlock(&oplus_diag_lock);
+	return ret;
+}
+
+struct driver_attribute fw_ready_attr = {
+	.attr = {
+		.name = "firmware_ready",
+		.mode = S_IRUGO,
+	},
+	.show = icnss_show_fw_ready,
+	//read only so we don't need to impl store func
+};
+
+struct driver_attribute cnss_debug_attr = {
+	.attr = {
+		.name = "cnss_debug",
+		.mode = S_IRUGO,
+	},
+	.show = icnss_show_cnss_debug,
+};
+
+#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
+
+#ifdef OPLUS_FEATURE_WIFI_FTM
+//Add for QCOM WCN chip id
+
+static ssize_t icnss_show_device_id(struct device_driver *driver, char *buf)
+{
+	struct icnss_priv *penv;
+	ssize_t ret;
+    unsigned long device_id = 0;
+	mutex_lock(&oplus_diag_lock);
+	penv = oplus_diag_priv;
+    if (!penv) {
+        icnss_pr_err("icnss_show_device_id penv is NULL!\n");
+    } else {
+        device_id = penv->device_id;
+    }
+    ret = sysfs_emit(buf, "0x%lx", device_id);
+	mutex_unlock(&oplus_diag_lock);
+	return ret;
+}
+
+struct driver_attribute device_id_attr = {
+	.attr = {
+		.name = "device_id",
+		.mode = S_IRUGO,
+	},
+	.show = icnss_show_device_id,
+	//read only so we don't need to impl store func
+};
+#endif /* OPLUS_FEATURE_WIFI_FTM */
+
+
 static inline void icnss_runtime_pm_deinit(struct icnss_priv *priv)
 {
 	pm_runtime_disable(&priv->pdev->dev);
@@ -6755,6 +6908,7 @@ static int icnss_probe(struct platform_device *pdev)
 
 	icnss_init_control_params(priv);
 
+
 	icnss_read_device_configs(priv);
 
 	ret = icnss_resource_parse(priv);
@@ -6885,6 +7039,13 @@ static int icnss_probe(struct platform_device *pdev)
 	icnss_register_ims_service(priv);
 	INIT_LIST_HEAD(&priv->icnss_tcdev_list);
 
+	#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+	//Add for: check fw status for switch issue
+	cnssprobestate = CNSS_PROBE_SUCCESS;
+	#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
+
+	oplus_diag_publish(priv);
+
 	icnss_pr_info("Platform driver probed successfully\n");
 
 	return 0;
@@ -6901,6 +7062,12 @@ out_free_resources:
 	icnss_put_resources(priv);
 out_reset_drvdata:
 	dev_set_drvdata(dev, NULL);
+
+#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+//Add for: check fw status for switch issue
+	cnssprobestate = CNSS_PROBE_FAIL;
+#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
+
 	return ret;
 }
 
@@ -6936,6 +7103,8 @@ static void icnss_remove(struct platform_device *pdev)
 #endif
 {
 	struct icnss_priv *priv = dev_get_drvdata(&pdev->dev);
+
+	oplus_diag_unpublish(priv);
 
 	icnss_pr_info("Removing driver: state: 0x%lx\n", priv->state);
 
@@ -7297,10 +7466,23 @@ static const struct dev_pm_ops icnss_pm_ops = {
 			   icnss_pm_runtime_idle)
 };
 
+static struct attribute *oplus_diag_attrs[] = {
+#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+	&fw_ready_attr.attr,
+	&cnss_debug_attr.attr,
+#endif
+#ifdef OPLUS_FEATURE_WIFI_FTM
+	&device_id_attr.attr,
+#endif
+	NULL,
+};
+ATTRIBUTE_GROUPS(oplus_diag);
+
 static struct platform_driver icnss_driver = {
 	.probe  = icnss_probe,
 	.remove = icnss_remove,
 	.driver = {
+		.groups = oplus_diag_groups,
 		.name = "icnss2",
 		.pm = &icnss_pm_ops,
 		.of_match_table = icnss_dt_match,

@@ -4032,7 +4032,11 @@ reg_update_list_for_dfs_channel(struct wlan_objmgr_pdev *pdev,
 		return;
 	}
 
-	if (!wlan_reg_is_dfs_for_freq(pdev, res_msg[chan_enum].freq))
+	if (!WLAN_REG_IS_5GHZ_CH_FREQ(res_msg[chan_enum].freq))
+		return;
+
+	if (!wlan_reg_is_dfs_for_freq(pdev, res_msg[chan_enum].freq) &&
+	    !wlan_reg_is_freq_indoor(pdev, res_msg[chan_enum].freq))
 		return;
 
 	if (!dfs_master_capable ||

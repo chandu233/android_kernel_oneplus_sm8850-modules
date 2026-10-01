@@ -820,6 +820,108 @@ static int icnss_control_params_debug_open(struct inode *inode,
 			   inode->i_private);
 }
 
+#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+//Add for wifi switch monitor
+static int oplus_cnss_switch_debug_show(struct seq_file *s, void *data)
+{
+	seq_puts(s, "\nUsage: echo <params_name>=<value> > /sys/kernel/debug/icnss/oplus_cnss_switch_debug\n");
+	seq_puts(s, "<params_name> can be one of below:\n");
+	seq_puts(s, "debug_cnss: debug cnss error file flag test\n");
+	seq_puts(s, "idle_shutdown: idle shut down flag test\n\n");
+	seq_puts(s, "firmware_ready: firmware_ready flag test\n");
+	seq_puts(s, "pcie_link_down: pcie status flag test\n");
+	return 0;
+}
+
+static ssize_t oplus_cnss_switch_debug_write(struct file *fp,
+					  const char __user *user_buf,
+					  size_t count, loff_t *off)
+{
+	struct icnss_priv *plat_priv =
+		((struct seq_file *)fp->private_data)->private;
+
+	char buf[64];
+	char *sptr, *token;
+	//value for the cmd￡odebug_cnss, debug error log msgs
+	char *cmd, *value;
+	//val for other cmd
+	u32 val;
+
+	unsigned int len = 0;
+	const char *delim = " ";
+
+	if (!plat_priv)
+		return -ENODEV;
+
+	len = min(count, sizeof(buf) - 1);
+	if (copy_from_user(buf, user_buf, len))
+		return -EFAULT;
+
+	buf[len] = '\0';
+	sptr = buf;
+
+	cmd = strsep(&sptr, delim);
+	if (!cmd)
+		return -EINVAL;
+	if (!sptr)
+		return -EINVAL;
+	value = sptr;
+
+	//for cmd debug_cnss
+	if (strcmp(cmd, "debug_cnss") == 0) {
+		icnss_pr_err("%s",value);
+	}
+
+	//for other cmd
+	token = strsep(&sptr, delim);
+	if (!token)
+		return -EINVAL;
+	if (kstrtou32(token, 0, &val))
+		return -EINVAL;
+
+	if (strcmp(cmd, "idle_shutdown") == 0) {
+		if (val == 1) {
+			icnss_pr_err("idle_shutdown true");
+			idle_shutdown = true;
+		} else {
+			icnss_pr_err("idle_shutdown falsa");
+			idle_shutdown = false;
+		}
+	} else if (strcmp(cmd, "firmware_ready") == 0) {
+		if (val == 1) {
+			set_bit(ICNSS_FW_READY, &plat_priv->state);
+		} else {
+			clear_bit(ICNSS_FW_READY, &plat_priv->state);
+		}
+	} else if (strcmp(cmd, "pcie_link_down") == 0) {
+		if (val == 1) {
+			set_bit(CNSS_PCIE_LINK_DOWN,&plat_priv->pcieLinkDown);
+		} else {
+			clear_bit(CNSS_PCIE_LINK_DOWN,&plat_priv->pcieLinkDown);
+		}
+	} else
+		return -EINVAL;
+
+	return count;
+}
+
+static int oplus_cnss_switch_debug_open(struct inode *inode,
+					  struct file *file)
+{
+	return single_open(file, oplus_cnss_switch_debug_show,
+			   inode->i_private);
+}
+
+static const struct file_operations oplus_cnss_switch_debug_fops = {
+	.read = seq_read,
+	.write = oplus_cnss_switch_debug_write,
+	.open = oplus_cnss_switch_debug_open,
+	.owner = THIS_MODULE,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH*/
+
 static const struct file_operations icnss_control_params_debug_fops = {
 	.read		= seq_read,
 	.write		= icnss_control_params_debug_write,
@@ -855,6 +957,11 @@ int icnss_debugfs_create(struct icnss_priv *priv)
 						&icnss_regwrite_fops);
 		debugfs_create_file("control_params", 0600, root_dentry, priv,
 					&icnss_control_params_debug_fops);
+#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+//Add for wifi switch monitor
+		debugfs_create_file("oplus_cnss_switch_debug", 0600, root_dentry,
+			    priv, &oplus_cnss_switch_debug_fops);
+#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH*/
 out:
 		return ret;
 }
@@ -878,6 +985,85 @@ int icnss_debugfs_create(struct icnss_priv *priv)
 							     &icnss_stats_fops);
 	return 0;
 }
+#endif
+
+#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+//Add for wifi switch monitor
+static struct cel_list *cel_head;
+static struct cel_list *cel_tail;
+static unsigned int cel_list_length;
+static DEFINE_SPINLOCK(cel_lock);
+
+void oplus_cnss_error_log_add(char *fmt, ...)
+{
+	struct cel_list *entry, *old = NULL;
+	unsigned long flags;
+	va_list args;
+
+	entry = kmalloc(sizeof(*entry), GFP_ATOMIC);
+	if (!entry)
+		return;
+	va_start(args, fmt);
+	vsnprintf(entry->message, sizeof(entry->message), fmt, args);
+	va_end(args);
+	entry->time_s = ktime_get_seconds();
+	entry->next = NULL;
+
+	spin_lock_irqsave(&cel_lock, flags);
+	if (cel_list_length >= MAX_CNSS_ERROE_LIST_LENGTH) {
+		old = cel_head;
+		cel_head = old->next;
+		if (!cel_head)
+			cel_tail = NULL;
+		cel_list_length--;
+	}
+	if (cel_tail)
+		cel_tail->next = entry;
+	else
+		cel_head = entry;
+	cel_tail = entry;
+	cel_list_length++;
+	spin_unlock_irqrestore(&cel_lock, flags);
+	kfree(old);
+}
+
+ssize_t icnss_show_cnss_debug(struct device_driver *driver, char *buf)
+{
+	struct cel_list *entry;
+	unsigned long flags;
+	size_t length = 0;
+	const size_t limit = min_t(size_t, MAX_BUFFER_SIZE, PAGE_SIZE);
+
+	buf[0] = '\0';
+	spin_lock_irqsave(&cel_lock, flags);
+	if (!cel_head)
+		length = scnprintf(buf, limit, "good");
+	for (entry = cel_head; entry && length < limit - 1;
+	     entry = entry->next)
+		length += scnprintf(buf + length, limit - length, "[%llu]%s\n",
+				    entry->time_s, entry->message);
+	spin_unlock_irqrestore(&cel_lock, flags);
+	return length;
+}
+
+void oplus_free_cnss_error_logs(void)
+{
+	struct cel_list *entry, *next;
+	unsigned long flags;
+
+	spin_lock_irqsave(&cel_lock, flags);
+	entry = cel_head;
+	cel_head = NULL;
+	cel_tail = NULL;
+	cel_list_length = 0;
+	spin_unlock_irqrestore(&cel_lock, flags);
+	while (entry) {
+		next = entry->next;
+		kfree(entry);
+		entry = next;
+	}
+}
+
 #endif
 
 void icnss_debugfs_destroy(struct icnss_priv *priv)
@@ -930,4 +1116,8 @@ void icnss_debug_deinit(void)
 		ipc_log_context_destroy(icnss_ipc_soc_wake_context);
 		icnss_ipc_soc_wake_context = NULL;
 	}
+#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+//Add for wifi switch monito
+	oplus_free_cnss_error_logs();
+#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
 }

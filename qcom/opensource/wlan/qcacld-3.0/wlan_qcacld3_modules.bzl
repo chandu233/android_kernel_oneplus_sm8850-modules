@@ -2784,7 +2784,8 @@ def _define_module_for_target_variant_chipset(target, variant, chipset):
 
     deps = deps + select({
         ":wonder_enabled": [
-	    # Add dependency of wonder here
+	    modules_label("oplus/kernel/wifi/wonder:wonder"),
+            modules_label("oplus/kernel/wifi/wonder:wonder_headers"),
         ],
         "//conditions:default": [],
     })
@@ -2839,7 +2840,12 @@ def _define_module_for_target_variant_chipset(target, variant, chipset):
         includes = ipaths + ["."],
         kconfig = kconfig,
         defconfig = defconfig,
-        local_defines = ["OPLUS_BUG_STABILITY"],
+        local_defines = [
+            "OPLUS_BUG_STABILITY", "OPLUS_FEATURE_WIFI_BDF",
+            "OPLUS_FEATURE_WIFI_MAC", "OPLUS_FEATURE_WIFI_FTM",
+            "OPLUS_FEATURE_WIFI_DCS_SWITCH", "OPLUS_FEATURE_CONN_POWER_MONITOR",
+            "OPLUS_FEATURE_WIFI_VENDOR_FT",
+        ],
         conditional_srcs = combined_conditional_srcs,
         copts = copts,
         out = out,

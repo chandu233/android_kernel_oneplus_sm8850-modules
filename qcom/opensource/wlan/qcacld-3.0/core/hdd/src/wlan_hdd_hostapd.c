@@ -157,6 +157,11 @@
 #ifndef BSS_MEMBERSHIP_SELECTOR_HT_PHY
 #define BSS_MEMBERSHIP_SELECTOR_HT_PHY  127
 #endif
+#ifdef OPLUS_FEATURE_SOFTAP_DCS_SWITCH
+//Add for softap connect fail monitor
+#include <linux/workqueue.h>
+#include <linux/fs.h>
+#endif /* OPLUS_FEATURE_SOFTAP_DCS_SWITCH */
 
 #ifndef BSS_MEMBERSHIP_SELECTOR_VHT_PHY
 #define BSS_MEMBERSHIP_SELECTOR_VHT_PHY 126
@@ -261,6 +266,137 @@ static const struct index_vht_data_rate_type supported_vht_mcs_rate_nss2[] = {
 };
 
 /* Function definitions */
+
+#ifdef OPLUS_FEATURE_SOFTAP_DCS_SWITCH
+//Add for softap connect fail monitor
+#define MAX_ENVP_SIZE 7
+#define HOSTAPD_EVENT_LENGTH 128
+static DEFINE_SPINLOCK(hostapd_event_lock);
+static DEFINE_MUTEX(hostapd_event_lifecycle_lock);
+static unsigned int hostapd_event_users;
+static bool hostapd_event_pending;
+static unsigned int hostapd_event_count;
+static char hostapd_event_data[MAX_ENVP_SIZE - 1][HOSTAPD_EVENT_LENGTH];
+static void hostapdWorkHandler(struct work_struct *data);
+static DECLARE_WORK(mWork, hostapdWorkHandler);
+
+void hostapd_driver_send_uevent(struct hdd_adapter *sta_adapter, uint32_t reasoncode,
+                                uint8_t *macaddr, eSapDisassocReason reason)
+{
+	char event[] = "HOSTAPD_EVENT=sta_connect";
+	char sta_connect_event[30] = {'\0'};
+	char disassoc_reason[30] = {'\0'};
+	char reason_code[30] = {'\0'};
+	char sta_mode[30] = {'\0'};
+	char sta_addr[30] = {'\0'};
+	char *envp[7];
+
+	snprintf(sta_connect_event, sizeof(sta_connect_event), "STA_CONNECT_EVENT=disassoc");
+	snprintf(disassoc_reason, sizeof(disassoc_reason), "DISASSOCREASON=%d", reason);
+	snprintf(reason_code, sizeof(reason_code), "DISASSOCCODE=%d", reasoncode);
+
+	if (sta_adapter) {
+		snprintf(sta_mode, sizeof(sta_mode), "STAMODE=%s", qdf_opmode_str(sta_adapter->device_mode));
+	} else {
+		snprintf(sta_mode, sizeof(sta_mode), "STAMODE=unknown");
+	}
+
+	if (macaddr) {
+		snprintf(sta_addr, sizeof(sta_addr), "STAADDR=" QDF_MAC_ADDR_FMT, QDF_MAC_ADDR_REF(macaddr));
+	} else {
+		snprintf(sta_addr, sizeof(sta_addr), "STAADDR=unknown");
+	}
+
+	envp[0] = (char *)&event;
+	envp[1] = (char *)&sta_connect_event;
+	envp[2] = (char *)&disassoc_reason;
+	envp[3] = (char *)&reason_code;
+	envp[4] = (char *)&sta_mode;
+	envp[5] = (char *)&sta_addr;
+	envp[6] = NULL;
+
+	hostapdConnSendUevent(envp);
+}
+
+static void hostapdWorkHandler(struct work_struct *data)
+{
+	char events[MAX_ENVP_SIZE - 1][HOSTAPD_EVENT_LENGTH];
+	char *envp[MAX_ENVP_SIZE];
+	qdf_device_t qdf_dev;
+	unsigned long flags;
+	unsigned int count, i;
+
+	spin_lock_irqsave(&hostapd_event_lock, flags);
+	if (!hostapd_event_pending) {
+		spin_unlock_irqrestore(&hostapd_event_lock, flags);
+		return;
+	}
+	count = hostapd_event_count;
+	memcpy(events, hostapd_event_data, sizeof(events));
+	hostapd_event_pending = false;
+	spin_unlock_irqrestore(&hostapd_event_lock, flags);
+	for (i = 0; i < count; i++)
+		envp[i] = events[i];
+	envp[count] = NULL;
+	qdf_dev = cds_get_context(QDF_MODULE_ID_QDF_DEVICE);
+	if (qdf_dev && qdf_dev->dev)
+		kobject_uevent_env(&qdf_dev->dev->kobj, KOBJ_CHANGE, envp);
+}
+
+void hostapdConnUeventInit(void)
+{
+	unsigned long flags;
+
+	mutex_lock(&hostapd_event_lifecycle_lock);
+	spin_lock_irqsave(&hostapd_event_lock, flags);
+	hostapd_event_users++;
+	spin_unlock_irqrestore(&hostapd_event_lock, flags);
+	mutex_unlock(&hostapd_event_lifecycle_lock);
+}
+
+void hostapdConnUeventDeinit(void)
+{
+	unsigned long flags;
+	bool last_user;
+
+	mutex_lock(&hostapd_event_lifecycle_lock);
+	spin_lock_irqsave(&hostapd_event_lock, flags);
+	if (hostapd_event_users)
+		hostapd_event_users--;
+	last_user = !hostapd_event_users;
+	if (last_user)
+		hostapd_event_pending = false;
+	spin_unlock_irqrestore(&hostapd_event_lock, flags);
+	if (last_user)
+		cancel_work_sync(&mWork);
+	mutex_unlock(&hostapd_event_lifecycle_lock);
+}
+
+void hostapdConnSendUevent(char *envp[])
+{
+	unsigned long flags;
+	unsigned int i;
+
+	if (!envp || !envp[0])
+		return;
+	spin_lock_irqsave(&hostapd_event_lock, flags);
+	if (!hostapd_event_users || hostapd_event_pending)
+		goto unlock;
+	for (i = 0; i < MAX_ENVP_SIZE - 1 && envp[i]; i++) {
+		if (strscpy(hostapd_event_data[i], envp[i],
+			    HOSTAPD_EVENT_LENGTH) < 0)
+			goto unlock;
+	}
+	if (envp[i])
+		goto unlock;
+	hostapd_event_count = i;
+	hostapd_event_pending = true;
+	schedule_work(&mWork);
+unlock:
+	spin_unlock_irqrestore(&hostapd_event_lock, flags);
+}
+
+#endif /* OPLUS_FEATURE_SOFTAP_DCS_SWITCH */
 
 /**
  * hdd_sap_context_init() - Initialize SAP context.
@@ -582,6 +718,12 @@ static int __hdd_hostapd_open(struct net_device *dev)
 	wlan_hdd_netif_queue_control(adapter,
 				   WLAN_START_ALL_NETIF_QUEUE_N_CARRIER,
 				   WLAN_CONTROL_PATH);
+
+#ifdef OPLUS_FEATURE_SOFTAP_DCS_SWITCH
+//Add for softap connect fail monitor
+	hostapdConnUeventInit();
+#endif /* OPLUS_FEATURE_SOFTAP_DCS_SWITCH */
+
 	hdd_exit();
 	return 0;
 }
@@ -709,6 +851,11 @@ static void hdd_hostapd_uninit(struct net_device *dev)
 
 	/* after uninit our adapter structure will no longer be valid */
 	adapter->magic = 0;
+
+#ifdef OPLUS_FEATURE_SOFTAP_DCS_SWITCH
+//Add for softap connect fail monitor
+	hostapdConnUeventDeinit();
+#endif /* OPLUS_FEATURE_SOFTAP_DCS_SWITCH */
 
 	hdd_exit();
 }
@@ -2669,6 +2816,10 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_context *sap_ctx,
 	bool alt_pipe;
 	bool is_last_sta_info  = true;
 	uint32_t new_chan_freq;
+#ifdef OPLUS_FEATURE_SOFTAP_DCS_SWITCH
+	//Add for softap connect fail monitor
+	struct hdd_adapter *sta_adapter;
+#endif /* OPLUS_FEATURE_SOFTAP_DCS_SWITCH */
 
 	link_info = (struct wlan_hdd_link_info *)sap_ctx->user_context;
 	if (!link_info) {
@@ -3370,6 +3521,30 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_context *sap_ctx,
 		if (!QDF_IS_STATUS_SUCCESS(qdf_status))
 			hdd_err("Station Deauth event Set failed");
 
+#ifdef OPLUS_FEATURE_SOFTAP_DCS_SWITCH
+//Add for softap connect fail monitor
+		sta_adapter = hdd_get_adapter(hdd_ctx, QDF_STA_MODE);
+		if (sap_event->sapevt.sapStationDisassocCompleteEvent.reason ==
+		    eSAP_USR_INITATED_DISASSOC) {
+			hdd_debug(" User initiated disassociation");
+			hostapd_driver_send_uevent(sta_adapter,
+						disassoc_comp->reason_code,
+						disassoc_comp->staMac.bytes,
+						eSAP_USR_INITATED_DISASSOC);
+		} else {
+			hdd_debug(" MAC initiated disassociation");
+			hostapd_driver_send_uevent(sta_adapter,
+						disassoc_comp->reason_code,
+						disassoc_comp->staMac.bytes,
+						eSAP_MAC_INITATED_DISASSOC);
+		}
+#else
+		if (sap_event->sapevt.sapStationDisassocCompleteEvent.reason ==
+		    eSAP_USR_INITATED_DISASSOC)
+			hdd_debug(" User initiated disassociation");
+		else
+			hdd_debug(" MAC initiated disassociation");
+#endif /* OPLUS_FEATURE_SOFTAP_DCS_SWITCH */
 		we_event = IWEVEXPIRED;
 
 		DPTRACE(qdf_dp_trace_mgmt_pkt(QDF_DP_TRACE_MGMT_PACKET_RECORD,
@@ -10382,6 +10557,124 @@ bool hdd_mlosap_check_support_multi_link(struct hdd_context *hdd_ctx)
 	return status;
 }
 #endif
+
+#ifdef OPLUS_BUG_STABILITY
+// Add for: hotspot management
+#ifndef MAC_ADDRESS_STR
+#define MAC_ADDRESS_STR "%02x:%02x:%02x:%02x:%02x:%02x"
+#endif /* MAC_ADDRESS_STR */
+#ifndef MAC_ADDR_ARRAY
+#define MAC_ADDR_ARRAY(a) (a)[0], (a)[1], (a)[2], (a)[3], (a)[4], (a)[5]
+#endif /* MAC_ADDR_ARRAY */
+
+static int __oplus_softap_modify_acl(struct net_device *dev,
+	struct iw_request_info *info,
+	union iwreq_data *wrqu, char *extra) {
+	struct hdd_adapter *adapter = (netdev_priv(dev));
+	uint8_t *value = (uint8_t *)extra;
+	uint8_t peer_mac[QDF_MAC_ADDR_SIZE];
+	int listType, cmd, i;
+	int ret;
+	QDF_STATUS qdf_status = QDF_STATUS_SUCCESS;
+	struct hdd_context *hdd_ctx;
+
+	hdd_enter_dev(dev);
+
+	hdd_ctx = WLAN_HDD_GET_CTX(adapter);
+	ret = wlan_hdd_validate_context(hdd_ctx);
+	if (ret)
+		return ret;
+	if (adapter->device_mode != QDF_SAP_MODE &&
+	    adapter->device_mode != QDF_P2P_GO_MODE)
+		return -EINVAL;
+
+	for (i = 0; i < QDF_MAC_ADDR_SIZE; i++) peer_mac[i] = *(value + i);
+
+	listType = (int)(*(value + i));
+	i++;
+	cmd = (int)(*(value + i));
+
+	hdd_debug("Modify ACL mac:" MAC_ADDRESS_STR " type: %d cmd: %d",
+		MAC_ADDR_ARRAY(peer_mac), listType, cmd);
+
+	qdf_status = wlansap_modify_acl(
+		WLAN_HDD_GET_SAP_CTX_PTR(adapter->deflink), peer_mac,
+		(eSapACLType)listType, (eSapACLCmdType)cmd);
+	if (!QDF_IS_STATUS_SUCCESS(qdf_status)) {
+		hdd_err("Modify ACL failed");
+		ret = -EIO;
+	}
+	hdd_exit();
+	return ret;
+}
+
+int static __oplus_softap_setparam(struct net_device *dev,
+	struct iw_request_info *info,
+	union iwreq_data *wrqu, char *extra) {
+	struct hdd_adapter *adapter = (netdev_priv(dev));
+	int *value = (int *)extra;
+	int sub_cmd = value[0];
+	int set_value = value[1];
+	QDF_STATUS status;
+	int ret = 0;
+	struct hdd_context *hdd_ctx;
+
+	hdd_enter_dev(dev);
+
+	hdd_ctx = WLAN_HDD_GET_CTX(adapter);
+	ret = wlan_hdd_validate_context(hdd_ctx);
+	if (0 != ret) return -EINVAL;
+
+	switch (sub_cmd) {
+	case QCSAP_PARAM_MAX_ASSOC:
+		if (cfg_min(CFG_ASSOC_STA_LIMIT) > set_value) {
+			hdd_err("Invalid setMaxAssoc value %d",
+				set_value);
+			ret = -EINVAL;
+		} else {
+			if (cfg_max(CFG_ASSOC_STA_LIMIT) < set_value) {
+				hdd_warn(
+					"setMaxAssoc %d > max allowed %d.",
+					set_value,
+					cfg_max(CFG_ASSOC_STA_LIMIT));
+				hdd_warn(
+					"Setting it to max allowed and "
+					"continuing");
+				set_value =
+					cfg_max(CFG_ASSOC_STA_LIMIT);
+			}
+			status = ucfg_mlme_set_assoc_sta_limit(
+				hdd_ctx->psoc, set_value);
+			if (status != QDF_STATUS_SUCCESS) {
+				hdd_err(
+					"setMaxAssoc failure, status: %d",
+					status);
+				ret = -EIO;
+			}
+		}
+		break;
+
+	default:
+		hdd_err("Invalid setparam command %d value %d", sub_cmd,
+			set_value);
+		ret = -EINVAL;
+		break;
+	}
+	hdd_exit();
+	return ret;
+}
+
+// Add for: hotspot manager
+int oplus_wlan_hdd_modify_acl(struct net_device *dev, char *extra)
+{
+	return __oplus_softap_modify_acl(dev, NULL, NULL, extra);
+}
+
+int oplus_wlan_hdd_set_max_assoc(struct net_device *dev, char *extra)
+{
+	return __oplus_softap_setparam(dev, NULL, NULL, extra);
+}
+#endif /* OPLUS_BUG_STABILITY */
 
 #ifdef WLAN_CHIPSET_STATS
 void
