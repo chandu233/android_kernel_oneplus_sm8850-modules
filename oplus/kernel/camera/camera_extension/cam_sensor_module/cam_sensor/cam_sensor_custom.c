@@ -64,13 +64,27 @@ int cam_ext_sensor_write_continuous(struct cam_sensor_ctrl_t *s_ctrl)
 	int current_opreation = CCI_WRITE;
 	int current_addrtype = DataTypeWord;//2
 	int current_datatype = DataTypeByte;//1
+	int current_delay = 0x00;
 	struct cam_sensor_i2c_reg_array *i2c_write_setting_gl = NULL;
 	struct cam_sensor_i2c_reg_setting i2c_write;
 	int opreation_type = CCI_WRITE;
 	int addrtype = DataTypeWord;//2
 	int datatype = DataTypeByte;//1
+	int delay = 0x00;
 	int i = 0;
 	int rc = 0;
+
+	if (!s_ctrl)
+	{
+		CAM_EXT_ERR(CAM_EXT_SENSOR, "s_ctrl is NULL");
+		return -1;
+	}
+
+	if (!s_ctrl->sensor_init_setting.reg_setting)
+	{
+		CAM_EXT_ERR(CAM_EXT_SENSOR, "sensor_init_setting.reg_setting is NULL");
+		return -1;
+	}
 
 	if (i2c_write_setting_gl == NULL)
 	{
@@ -102,24 +116,28 @@ int cam_ext_sensor_write_continuous(struct cam_sensor_ctrl_t *s_ctrl)
 			opreation_type = s_ctrl->sensor_init_setting.reg_setting[i + 1].operation;
 			addrtype = s_ctrl->sensor_init_setting.reg_setting[i + 1].addr_type;
 			datatype = s_ctrl->sensor_init_setting.reg_setting[i + 1].data_type;
+			delay = s_ctrl->sensor_init_setting.reg_setting[i + 1].delay;
 		}
 		else
 		{
 			opreation_type = s_ctrl->sensor_init_setting.reg_setting[i].operation;
 			addrtype = s_ctrl->sensor_init_setting.reg_setting[i].addr_type;
 			datatype = s_ctrl->sensor_init_setting.reg_setting[i].data_type;
+			delay = s_ctrl->sensor_init_setting.reg_setting[i].delay;
 		}
 		if (i == 0)
 		{
 			current_opreation = s_ctrl->sensor_init_setting.reg_setting[i].operation;
 			current_addrtype = s_ctrl->sensor_init_setting.reg_setting[i].addr_type;
 			current_datatype = s_ctrl->sensor_init_setting.reg_setting[i].data_type;
+			current_delay = s_ctrl->sensor_init_setting.reg_setting[i].delay;
 		}
 		CAM_EXT_DBG(CAM_EXT_SENSOR, "current_opreation  %d  opreation_type  %d  current_addrtype %d addrtype %d current_datatype %d datatype %d initSettingsIndex %d i %d"
 		,current_opreation,opreation_type,current_addrtype,addrtype,current_datatype,datatype,initSettingsIndex,i);
 		if ((current_opreation != opreation_type
 				|| current_addrtype != addrtype
 				|| current_datatype != datatype
+				|| current_delay != delay
 				|| initSettingsIndex == BURST_MAX_DATA_NUM
 				|| i == s_ctrl->sensor_init_setting.size - 1)
 			&& (initSettingsIndex > 0))
@@ -129,6 +147,16 @@ int cam_ext_sensor_write_continuous(struct cam_sensor_ctrl_t *s_ctrl)
 			i2c_write.addr_type = current_addrtype;
 			i2c_write.data_type = current_datatype;
 			i2c_write.delay = 0x00;
+			if (!s_ctrl->is_support_advancedpowerup)
+			{
+				CAM_EXT_WARN(CAM_EXT_SENSOR, "is_support_advancedpowerup  Invalid sensor params, i2c_write.delay = 0x%0x", i2c_write.delay);
+			}
+			else
+			{
+				i2c_write.delay = current_delay;
+				CAM_EXT_INFO(CAM_EXT_SENSOR, "is_support_advancedpowerup = %d, i2c_write.delay = 0x%0x",
+					s_ctrl->is_support_advancedpowerup, i2c_write.delay);
+			}
 			if (current_opreation == CCI_WRITE)
 			{
 				CAM_EXT_DBG(CAM_EXT_SENSOR, "camera_io_dev_write  0x%0x=0x%0x  size=%u", i2c_write_setting_gl[0].reg_addr, i2c_write_setting_gl[0].reg_data, i2c_write.size);
@@ -147,6 +175,7 @@ int cam_ext_sensor_write_continuous(struct cam_sensor_ctrl_t *s_ctrl)
 			current_opreation = opreation_type;
 			current_addrtype = addrtype;
 			current_datatype = datatype;
+			current_delay = delay;
 			initSettingsIndex = 0;
 		}
 	}
@@ -1324,30 +1353,44 @@ free_power_settings:
 		case CAM_GET_TEMPERATURE:{
 			if (s_ctrl->sensor_power_state == CAM_SENSOR_POWER_ON)
 			{
-				therm_channel = iio_channel_get(&(s_ctrl->pdev->dev), "pmk8850_gpio05_therm_channel");
-				if (IS_ERR(therm_channel) && PTR_ERR(therm_channel) != -EPROBE_DEFER)
-					therm_channel = iio_channel_get(&(s_ctrl->pdev->dev), "pmk8550_gpio03_therm_channel");
-				if (NULL == therm_channel || IS_ERR(therm_channel))
+				/* Try to read temperature from DTSI register configuration first */
+				rc = cam_get_sensor_temperature(s_ctrl, &therm_val);
+				if (rc < 0)
 				{
-					rc = -EINVAL;
-					CAM_EXT_ERR(CAM_EXT_SENSOR, "%s_therm_channel is ERROR", s_ctrl->sensor_name);
-				}
-				else
-				{
-					rc = iio_read_channel_processed(therm_channel, &therm_val);
-					if (rc < 0)
+					/* Fallback to original iio channel method if DTSI method fails */
+					therm_channel = iio_channel_get(&(s_ctrl->pdev->dev), "pmk8850_gpio05_therm_channel");
+					if (IS_ERR(therm_channel) && PTR_ERR(therm_channel) != -EPROBE_DEFER)
+						therm_channel = iio_channel_get(&(s_ctrl->pdev->dev), "pmk8550_gpio03_therm_channel");
+					if (NULL == therm_channel || IS_ERR(therm_channel))
 					{
-						CAM_EXT_ERR(CAM_EXT_SENSOR, "%s get therm ERROR, res %d", s_ctrl->sensor_name, rc);
+						rc = -EINVAL;
+						CAM_EXT_ERR(CAM_EXT_SENSOR, "%s_therm_channel is ERROR", s_ctrl->sensor_name);
 					}
 					else
 					{
-						CAM_EXT_INFO(CAM_EXT_SENSOR, "%s_therm_val %d", s_ctrl->sensor_name, therm_val);
-						if (copy_to_user((void __user *)cmd->handle,&therm_val, sizeof(int))) {
-							CAM_EXT_ERR(CAM_EXT_SENSOR, "copy camera id to user fail ");
+						rc = iio_read_channel_processed(therm_channel, &therm_val);
+						if (rc < 0)
+						{
+							CAM_EXT_ERR(CAM_EXT_SENSOR, "%s get therm ERROR, res %d", s_ctrl->sensor_name, rc);
 						}
-					}
+						else
+						{
+							CAM_EXT_INFO(CAM_EXT_SENSOR, "%s_therm_val %d", s_ctrl->sensor_name, therm_val);
+							if (copy_to_user((void __user *)cmd->handle,&therm_val, sizeof(int))) {
+								CAM_EXT_ERR(CAM_EXT_SENSOR, "copy camera id to user fail ");
+							}
+						}
 
-					iio_channel_release(therm_channel);
+						iio_channel_release(therm_channel);
+					}
+				}
+				else
+				{
+					/* Successfully read temperature from DTSI, copy to user */
+					if (copy_to_user((void __user *)cmd->handle, &therm_val, sizeof(int))) {
+						CAM_EXT_ERR(CAM_EXT_SENSOR, "copy temperature to user fail ");
+						rc = -EFAULT;
+					}
 				}
 			}
 		}
@@ -1402,6 +1445,19 @@ void cam_ext_sensor_driver_get_dt_data(struct cam_sensor_ctrl_t *s_ctrl)
 	else
 	{
 		CAM_EXT_INFO(CAM_EXT_SENSOR, "rst_gpio = %d",s_ctrl->rst_gpio);
+	}
+
+	rc = of_property_read_u32(of_node, "is_support_advancedpowerup",
+			&s_ctrl->is_support_advancedpowerup);
+	if ( rc < 0)
+	{
+		CAM_EXT_WARN(CAM_EXT_SENSOR, "is_support_advancedpowerup  Invalid sensor params");
+		s_ctrl->is_support_advancedpowerup = 0;
+	}
+	else
+	{
+		CAM_EXT_INFO(CAM_EXT_SENSOR, "is_support_advancedpowerup = %d",
+			s_ctrl->is_support_advancedpowerup);
 	}
 
 	rc = of_property_read_u32(of_node, "enable_qsc_write_in_advance",
@@ -1678,7 +1734,8 @@ void cam_sensor_register(void)
 int cam_ext_write_reg(
 	struct cam_sensor_ctrl_t *s_ctrl,
 	uint32_t addr, enum camera_sensor_i2c_type addr_type,
-	uint32_t data, enum camera_sensor_i2c_type data_type)
+	uint32_t data, enum camera_sensor_i2c_type data_type,
+	uint32_t delayMs)
 {
 	int32_t rc = 0;
 	int retry = 3;
@@ -1694,7 +1751,7 @@ int cam_ext_write_reg(
 		.size = 1,
 		.addr_type = addr_type,
 		.data_type = data_type,
-		.delay = 0x00,
+		.delay = delayMs,
 	};
 
 	for(i = 0; i < retry; i++)
@@ -1754,12 +1811,12 @@ int cam_get_sensor_reg_otp(struct cam_sensor_ctrl_t *s_ctrl)
 	int i = 0, j = 0, compatible_size = 0, reg_size = 0;
 	uint32_t data = 0;
 	uint8_t data_size = 0;
-	const int unit_size = 5;
-	uint32_t  dt_data[10] = {0xFFFF};
+	const int unit_size = 6;
+	uint32_t  dt_data[256] = {0xFFFF};
 	uint8_t temp_arr[CAM_OEM_OTP_DATA_MAX_LENGTH] = {0};
+
 	compatible_size = of_property_count_u32_elems(s_ctrl->of_node, "reg_otp_compatible");
 	if (compatible_size <= 0 ||
-		compatible_size > sizeof(dt_data)/sizeof(dt_data[0]) ||
 		compatible_size % unit_size != 0)
 	{
 		 CAM_EXT_WARN(CAM_EXT_SENSOR,"Check reg_otp_compatible size  %d", compatible_size);
@@ -1802,15 +1859,138 @@ int cam_get_sensor_reg_otp(struct cam_sensor_ctrl_t *s_ctrl)
 		}
 		if (dt_data[i*unit_size] == 'W')
 		{
-			cam_ext_write_reg(s_ctrl,
+			rc = cam_ext_write_reg(s_ctrl,
 				dt_data[i*unit_size+1],
 				dt_data[i*unit_size+2],
 				dt_data[i*unit_size+4],
-				dt_data[i*unit_size+3]);
+				dt_data[i*unit_size+3],
+				dt_data[i*unit_size+5]);
+			if (rc < 0)
+			{
+				CAM_EXT_WARN(CAM_EXT_SENSOR,"i2c read sensor reg fail");
+				return rc;
+			}
 		}
 	}
 	s_ctrl->cam_sensor_reg_otp[0] = data_size;
 	memcpy(s_ctrl->cam_sensor_reg_otp+sizeof(data_size), temp_arr, data_size);
+
+	return rc;
+}
+
+int cam_get_sensor_temperature(struct cam_sensor_ctrl_t *s_ctrl, int *temperature)
+{
+	int rc = -EINVAL;
+	int i = 0, compatible_size = 0, reg_size = 0;
+	uint32_t data = 0;
+	const int unit_size = 6;
+	uint32_t dt_data[256] = {0xFFFF};
+	uint32_t temp_integer = 0;  /* Integer part from 0x13 */
+	uint32_t temp_decimal = 0;  /* Decimal part from 0x14 */
+	bool temp_integer_read = false;
+	bool temp_decimal_read = false;
+
+	if (!s_ctrl || !temperature) {
+		CAM_EXT_ERR(CAM_EXT_SENSOR, "Invalid parameters");
+		return -EINVAL;
+	}
+
+	compatible_size = of_property_count_u32_elems(s_ctrl->of_node, "temperature_reg_config");
+	if (compatible_size <= 0 || compatible_size % unit_size != 0) {
+		CAM_EXT_WARN(CAM_EXT_SENSOR, "Check temperature_reg_config size %d", compatible_size);
+		return -EINVAL;
+	}
+
+	rc = of_property_read_u32_array(s_ctrl->of_node,
+					"temperature_reg_config",
+					dt_data,
+					compatible_size);
+	if (rc < 0) {
+		CAM_EXT_ERR(CAM_EXT_SENSOR, "Failed to read temperature_reg_config, rc %d", rc);
+		return rc;
+	}
+
+	reg_size = compatible_size / unit_size;
+	CAM_EXT_INFO(CAM_EXT_SENSOR, "temperature_reg_config size: %d, reg_size: %d", compatible_size, reg_size);
+
+	if (s_ctrl->sensor_power_state == CAM_SENSOR_POWER_OFF) {
+		CAM_EXT_WARN(CAM_EXT_SENSOR, "sensor power off, can not run i2c");
+		return -EINVAL;
+	}
+
+	/* Execute write/read operations in sequence */
+	for (i = 0; i < reg_size; ++i) {
+		if (dt_data[i * unit_size] == 'W') {
+			/* Write operation: [W, addr, addr_type, data_type, data, delay] */
+			rc = cam_ext_write_reg(s_ctrl,
+						dt_data[i * unit_size + 1],
+						dt_data[i * unit_size + 2],
+						dt_data[i * unit_size + 4],
+						dt_data[i * unit_size + 3],
+						dt_data[i * unit_size + 5]);
+			if (rc < 0) {
+				CAM_EXT_ERR(CAM_EXT_SENSOR, "i2c write sensor reg fail, addr 0x%x", dt_data[i * unit_size + 1]);
+				return rc;
+			}
+		} else if (dt_data[i * unit_size] == 'R') {
+			/* Read operation: [R, addr, addr_type, data_type, data_size, flag]
+			 * flag: 0 = normal read, 1 = temperature integer part, 2 = temperature decimal part
+			 */
+			uint32_t reg_addr = dt_data[i * unit_size + 1];
+			uint32_t temp_flag = dt_data[i * unit_size + 5];  /* Use delay field as flag */
+			rc = cam_ext_read_reg(s_ctrl,
+						reg_addr,
+						&data,
+						dt_data[i * unit_size + 2],
+						dt_data[i * unit_size + 3],
+						true);
+			if (rc < 0) {
+				CAM_EXT_ERR(CAM_EXT_SENSOR, "i2c read sensor reg fail, addr 0x%x", reg_addr);
+				return rc;
+			}
+			/* Store temperature integer part (flag = 1) */
+			if (temp_flag == 1) {
+				temp_integer = data & 0xFF;
+				temp_integer_read = true;
+				CAM_EXT_INFO(CAM_EXT_SENSOR, "Read temperature integer reg 0x%x, value 0x%x", reg_addr, temp_integer);
+			}
+			/* Store temperature decimal part (flag = 2) */
+			else if (temp_flag == 2) {
+				temp_decimal = data & 0xFF;
+				temp_decimal_read = true;
+				CAM_EXT_INFO(CAM_EXT_SENSOR, "Read temperature decimal reg 0x%x, value 0x%x", reg_addr, temp_decimal);
+			}
+		}
+	}
+
+	/* Combine integer and decimal parts */
+	if (temp_integer_read) {
+		int temp_milli = 0;
+		uint32_t th = temp_integer;
+		uint32_t tl = temp_decimal_read ? temp_decimal : 0;
+
+		/* Handle negative temperature: if th >= 0xc0, it's negative temperature */
+		if (th >= 0xc0) {
+			/* Negative temperature: (0xc0 - th) * 1000 - ((tl & 0xff) * 1000) / 256 */
+			temp_milli = (int)(0xc0 - th) * 1000 - ((int)(tl & 0xff) * 1000) / 256;
+		} else {
+			/* Positive temperature: th * 1000 + ((tl & 0xff) * 1000) / 256 */
+			temp_milli = (int)th * 1000 + ((int)(tl & 0xff) * 1000) / 256;
+		}
+
+		/* Return temperature in milli-degrees, HAL will divide by 1000 */
+		*temperature = temp_milli;
+		if (temp_decimal_read) {
+			CAM_EXT_INFO(CAM_EXT_SENSOR, "%s temperature: integer=%d, decimal=%d, final=%d",
+					s_ctrl->sensor_name, temp_integer, temp_decimal, *temperature);
+		} else {
+			CAM_EXT_INFO(CAM_EXT_SENSOR, "%s temperature value: integer=%d, final=%d", s_ctrl->sensor_name, temp_integer, *temperature);
+		}
+		rc = 0;
+	} else {
+		CAM_EXT_ERR(CAM_EXT_SENSOR, "No temperature integer read operation found (flag=1)");
+		rc = -EINVAL;
+	}
 
 	return rc;
 }

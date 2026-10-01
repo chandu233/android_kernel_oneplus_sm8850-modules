@@ -79,7 +79,8 @@ void cam_sensor_register(void);
 
 int cam_ext_write_reg(struct cam_sensor_ctrl_t *s_ctrl,
 	uint32_t addr, enum camera_sensor_i2c_type addr_type,
-	uint32_t data, enum camera_sensor_i2c_type data_type);
+	uint32_t data, enum camera_sensor_i2c_type data_type,
+	uint32_t delayMs);
 
 int cam_ext_read_reg(struct cam_sensor_ctrl_t *s_ctrl,
 	uint32_t addr, uint32_t *data,
@@ -88,6 +89,8 @@ int cam_ext_read_reg(struct cam_sensor_ctrl_t *s_ctrl,
 	bool is_probing);
 
 int cam_get_sensor_reg_otp(struct cam_sensor_ctrl_t *s_ctrl);
+
+int cam_get_sensor_temperature(struct cam_sensor_ctrl_t *s_ctrl, int *temperature);
 
 void cam_get_sensor_gpio_status(struct cam_sensor_ctrl_t *s_ctrl);
 

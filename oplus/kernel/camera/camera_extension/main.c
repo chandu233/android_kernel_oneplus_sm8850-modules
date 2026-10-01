@@ -247,6 +247,10 @@ static int camera_extension_remove(struct platform_device *plat_dev)
 {
 	struct camera_extension_data *plat_priv = platform_get_drvdata(plat_dev);
 
+	if (plat_priv->non_exclusive_rgltr != NULL) {
+		kfree(plat_priv->non_exclusive_rgltr);
+		plat_priv->non_exclusive_rgltr = NULL;
+	}
 	misc_deregister(&plat_priv->dev);
 
 	return 0;
