@@ -168,7 +168,7 @@ static int usb_therm_read_temp(struct thermal_zone_device *tzd, int *val)
 	rc = iio_read_channel_processed(bcdev->iio.usb_con_btb_chan, &temp);
 	if (rc < 0) {
 		chg_err("iio_read_channel_processed get error\n");
-		return temp;
+		return rc;
 	}
 	*val = temp;
 
@@ -179,7 +179,12 @@ static struct thermal_zone_device_ops usb_therm_tz_ops = {
 	.get_temp = usb_therm_read_temp,
 };
 
-static struct thermal_zone_device *register_tz_device(const char *type,
+static void unregister_usb_therm(void *data)
+{
+	thermal_zone_device_unregister(data);
+}
+
+static struct thermal_zone_device *register_tz_device(struct device *dev, const char *type,
 	struct thermal_zone_device_ops *ops)
 {
 	struct thermal_zone_device* tzd = NULL;
@@ -198,14 +203,17 @@ static struct thermal_zone_device *register_tz_device(const char *type,
 	if (ret) {
 		chg_err("%s enable fail", type);
 		thermal_zone_device_unregister(tzd);
+		return NULL;
 	}
 
+	if (devm_add_action_or_reset(dev, unregister_usb_therm, tzd))
+		return NULL;
 	return tzd;
 }
 
-static void register_tz_thermal(void)
+static void register_tz_thermal(struct device *dev)
 {
-	register_tz_device("usb_therm", &usb_therm_tz_ops);
+	register_tz_device(dev, "usb_therm", &usb_therm_tz_ops);
 }
 #endif
 
@@ -9810,7 +9818,7 @@ static int oplus_chg_get_usb_btb_temp_cal(struct battery_chg_dev *bcdev)
 	rc = iio_read_channel_processed(bcdev->iio.usb_con_btb_chan, &temp);
 	if (rc < 0) {
 		chg_err("iio_read_channel_processed get error\n");
-		return temp;
+		return rc;
 	}
 
 	return temp / 1000;
@@ -15915,7 +15923,7 @@ static int battery_chg_probe(struct platform_device *pdev)
 		goto error;
 
 #ifdef CONFIG_THERMAL
-	register_tz_thermal();
+	register_tz_thermal(&pdev->dev);
 #endif
 
 	oplus_mms_wait_topic("plc", oplus_chg_adsp_subscribe_plc_topic, bcdev);
