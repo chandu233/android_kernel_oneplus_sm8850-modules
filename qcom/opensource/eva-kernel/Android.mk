@@ -14,8 +14,8 @@ ifeq ($(call is-board-platform-in-list, $(TARGET_BOARD_PLATFORM)),true)
 DLKM_DIR   := device/qcom/common/dlkm
 
 LOCAL_PATH := $(call my-dir)
-# For DDK 		
-LOCAL_MODULE_DDK_BUILD := true		
+# For DDK
+LOCAL_MODULE_DDK_BUILD := true
 LOCAL_MODULE_KO_DIRS := msm/msm-eva.ko
 
 ifeq ($(CONFIG_CAM_PRESIL), y)
@@ -28,6 +28,7 @@ include $(CLEAR_VARS)
 # For incremental compilation
 LOCAL_SRC_FILES   := $(wildcard $(LOCAL_PATH)/**/*) $(wildcard $(LOCAL_PATH)/*)
 LOCAL_MODULE      := msm-eva.ko
+LOCAL_MULTILIB := first
 LOCAL_MODULE_KBUILD_NAME := msm/msm-eva.ko
 LOCAL_MODULE_PATH := $(KERNEL_MODULES_OUT)
 
