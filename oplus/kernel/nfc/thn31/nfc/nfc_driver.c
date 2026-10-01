@@ -4,6 +4,7 @@
  */
 
 #include "nfc_driver.h"
+#include <soc/oplus/boot/boot_mode.h>
 
 /*********** PART0: Global Variables Area ***********/
 size_t last_count = 0;
@@ -533,6 +534,16 @@ int nfc_device_probe(struct i2c_client *client)
     nfc_hard_reset(nfc);
     device_init_wakeup(nfc->i2c_dev, true);
     i2c_set_clientdata(client, nfc);
+
+#ifdef CONFIG_OPLUS_SYSTEM_KERNEL_QCOM
+    if(get_boot_mode() == MSM_BOOT_MODE__FACTORY) {
+#else
+    if(get_boot_mode() == BOOT_MODE_FACTORY) {
+#endif
+        TMS_INFO("ftm mode, set nfc ven gpio is low");
+        nfc_set_ven_off(nfc);
+    }
+
     TMS_INFO("successfully\n");
     return SUCCESS;
 
