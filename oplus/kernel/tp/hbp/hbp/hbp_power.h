@@ -21,11 +21,11 @@ struct power_sequeue {
 };
 
 static struct power_sequeue power_on_default[] = {
-    {POWER_BUS, true, 10},
-    {POWER_AVDD, true, 10},
-    {POWER_VDDI, true, 10},
-    {POWER_RESET, true, 100},
-    {0, 0, 0}
+	{POWER_BUS, true, 10},
+	{POWER_AVDD, true, 10},
+	{POWER_VDDI, true, 10},
+	{POWER_RESET, true, 100},
+	{0, 0, 0}
 };
 
 #endif
