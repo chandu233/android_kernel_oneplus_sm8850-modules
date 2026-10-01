@@ -34,10 +34,6 @@
 #define SIH688X_F0_AMPLI_COE                        10
 #define SIH688X_F0_DELTA                            28800000
 #define SIH688X_F0_CALI_DELTA                       2880
-#define SIH688X_F0_VAL_MAX                          1800
-#define SIH688X_F0_VAL_MIN                          1600
-#define SIH688X_F0_VAL_MAX_1419                     2150
-#define SIH688X_F0_VAL_MIN_1419                     1950
 #define SIH688X_RL_AMP_COE                          78125
 #define SIH688X_RL_DIV_COE                          336
 #define SIH688X_B0_RL_AMP_COE                       10000
