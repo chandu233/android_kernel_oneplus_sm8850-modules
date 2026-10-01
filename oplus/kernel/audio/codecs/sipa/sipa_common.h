@@ -38,7 +38,7 @@
 #define OPLUS_ARCH_EXTENDS
 #endif /* OPLUS_ARCH_EXTENDS */
 
-#define SIPA_DRIVER_VERSION					("3.1.8-250708")
+#define SIPA_DRIVER_VERSION					("3.1.8-251031")
 #define SIPA_MAX_CHANNEL_SUPPORT			(8)
 
 struct sipa_err {
@@ -180,36 +180,58 @@ enum {
 	CHIP_TYPE_SIA815T,
 	CHIP_TYPE_SIA9187,
 	CHIP_TYPE_SIA8168,
+	CHIP_TYPE_SIA9189 = 21,
 	// add compatible chip type here
 	CHIP_TYPE_UNKNOWN,
 	CHIP_TYPE_INVALID
 };
 
 #define IS_ANALOG_PA_HAVE_RST_AND_CHIP_EN(type) \
-			(type == CHIP_TYPE_SIA815T  || \
+			((type == CHIP_TYPE_SIA815T  || \
 			 type == CHIP_TYPE_SIA8159  || \
 			 type == CHIP_TYPE_SIA8159A || \
 			 type == CHIP_TYPE_SIA8168  )  \
 			 ? true \
-			 : false
+			 : false)
 
 #define IS_DIGITAL_PA_TYPE(type) \
-			(type == CHIP_TYPE_SIA9195 || \
+			((type == CHIP_TYPE_SIA9195 || \
 			 type == CHIP_TYPE_SIA9196 || \
 			 type == CHIP_TYPE_SIA9175 || \
 			 type == CHIP_TYPE_SIA9255 || \
 			 type == CHIP_TYPE_SIA9177 || \
 			 type == CHIP_TYPE_SIA9187 || \
-			 type == CHIP_TYPE_SIA917X )  \
+			 type == CHIP_TYPE_SIA917X || \
+			 type == CHIP_TYPE_SIA9189 )  \
 			 ? true \
-			 : false
+			 : false)
+
+#define IS_NEED_PULL_RST_TYPE(type) \
+			((type == CHIP_TYPE_SIA81X9  || \
+			type == CHIP_TYPE_SIA8109  || \
+			type == CHIP_TYPE_SIA815T  || \
+			type == CHIP_TYPE_SIA8168  || \
+			type == CHIP_TYPE_SIA9189 )   \
+			? true \
+			: false)
+
+#define IS_DIGITAL_PA_PULL_RST_TYPE(type)  \
+			((type == CHIP_TYPE_SIA9189 )   \
+			? true \
+			: false)
+
+#define IS_NEED_SIPA_SRAM_TYPE(type)  \
+			((type == CHIP_TYPE_SIA9255  || \
+			type == CHIP_TYPE_SIA9189  )   \
+			? true \
+			: false)
 
 #define IS_SUPPORT_OWI_TYPE(type) \
-			(type == CHIP_TYPE_SIA8001  || \
+			((type == CHIP_TYPE_SIA8001  || \
 			 type == CHIP_TYPE_SIA8102  || \
 			 type == CHIP_TYPE_SIA8100X )  \
 			 ? true \
-			 : false
+			 : false)
 
 
 #define IS_SIPA_RST_KEEP_HIGH(type) \
@@ -241,5 +263,7 @@ int sipa_multi_channel_power_off(uint8_t pa_idx);
 int sipa_multi_channel_load_fw(char *fwname);
 int sipa_get_channels(void);
 int sipa_multi_channel_reg_dump(void);
+
+int sipa_digital_rst_suspend(struct sipa_dev_s *si_pa);
 
 #endif /* _SIPA_COMMOMN_H */

@@ -137,6 +137,7 @@ int sia91xx_write_reg16_bit_msk(sipa_dev_t *si_pa,
 	uint8_t subaddr, uint16_t msk, bool stat);
 
 int sipa_reg_init(struct sipa_dev_s *si_pa);
+bool sipa_regmap_read_sram(sipa_dev_t *si_pa);
 bool sipa_regmap_write_sram(sipa_dev_t *si_pa);
 
 #endif /* _SIPA_REGMAP_H */

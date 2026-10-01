@@ -1833,6 +1833,10 @@ enum Tfa98xx_Error tfa_dsp_msg_read(struct tfa_device *tfa, int length24, unsign
 enum Tfa98xx_Error tfa_reg_read(struct tfa_device *tfa, unsigned char subaddress, unsigned short *value)
 {
 	enum Tfa98xx_Error error;
+	if (tfa->dev_ops.tfa_reg_read == NULL) {
+		pr_err("%s: not init yet!", __func__);
+		return Tfa98xx_Error_Fail;
+	}
 
 	error = (tfa->dev_ops.tfa_reg_read)(tfa, subaddress, value);
 	if (error != Tfa98xx_Error_Ok)
@@ -1844,6 +1848,10 @@ enum Tfa98xx_Error tfa_reg_read(struct tfa_device *tfa, unsigned char subaddress
 enum Tfa98xx_Error tfa_reg_write(struct tfa_device *tfa, unsigned char subaddress, unsigned short value)
 {
 	enum Tfa98xx_Error error;
+	if (tfa->dev_ops.tfa_reg_write == NULL) {
+		pr_err("%s: not init yet!", __func__);
+		return Tfa98xx_Error_Fail;
+	}
 
 	error = (tfa->dev_ops.tfa_reg_write)(tfa, subaddress, value);
 	if (error != Tfa98xx_Error_Ok)
@@ -4215,6 +4223,11 @@ int tfa_dev_mtp_get(struct tfa_device *tfa, enum tfa_mtp item)
 {
 	int value = 0;
 
+	if (tfa->in_use == 0) {
+		pr_info("%s: tfa is not opened!", __func__);
+		return value;
+	}
+
 	switch (item) {
 	case TFA_MTP_OTC:
 		value = TFA_GET_BF(tfa, MTPOTC);
@@ -4254,6 +4267,11 @@ int tfa_dev_mtp_get(struct tfa_device *tfa, enum tfa_mtp item)
 enum tfa_error tfa_dev_mtp_set(struct tfa_device *tfa, enum tfa_mtp item, int value)
 {
 	int err = tfa_error_ok;
+
+	if (tfa->in_use == 0) {
+		pr_info("%s: tfa is not opened!", __func__);
+		return tfa_error_device;
+	}
 
 	switch (item) {
 	case TFA_MTP_OTC:
