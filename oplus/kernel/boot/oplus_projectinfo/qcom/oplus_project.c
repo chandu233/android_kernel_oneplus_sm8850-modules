@@ -11,6 +11,8 @@
 #include <linux/syscalls.h>
 #include <linux/version.h>
 #include <linux/types.h>
+#include <linux/string.h>
+#include <linux/utsname.h>
 
 #include <soc/oplus/boot/oplus_project.h>
 
@@ -36,6 +38,7 @@
 #define OPLUS_FEATURE            (0xD)
 #define OPERATOR_NAME            (0xE)
 #define PROJECT_TEST            (0x1F)
+#define OPLUS_MIDPLAT_DEBUG
 
 static ProjectInfoOCDT *g_project = NULL;
 
@@ -82,10 +85,34 @@ static struct pcb_match pcb_str[] = {
 };
 
 struct proc_dir_entry *oplus_info = NULL;
+static bool old_midplat_version = false;
 
 extern char build_variant[];
 extern char cdt[];
 extern char serial_no[];
+
+static void midplat_debug(void) {
+#ifdef OPLUS_MIDPLAT_DEBUG
+    int i;
+    char buf[MIDPLAT_INFO_PLATFORM_LEN];
+    char* oplus_ack_version_str[] = {"GKI", "OKI", "OGKI", "UNKNOWN"};
+    for(i = 0; i < OPLUS_FEAUTRE_MAX; i++) {
+        pr_err("kernel debug midplat index=%d, value=%x\n", i, get_midplat_feature_info(i));
+    }
+    pr_info("kernel debug midplat get_midplat_version=%x\n", get_midplat_version());
+    pr_info("kernel debug midplat get_GKI_version=%s\n",  oplus_ack_version_str[get_GKI_version()]);
+    pr_info("kernel debug midplat get_kernel_major_version=%d\n", get_kernel_major_version());
+    pr_info("kernel debug midplat get_kernel_patch_version=%d\n", get_kernel_patch_version());
+    pr_info("kernel debug midplat get_kernel_sub_version=%d\n", get_kernel_sub_version());
+    pr_info("kernel debug midplat get_kernel_version_code=%x\n", get_kernel_version_code());
+    memset(buf, 0, MIDPLAT_INFO_PLATFORM_LEN);
+    get_vnd_platform(buf, sizeof(buf));
+    pr_info("kernel debug midplat get_vnd platform=%s\n", buf);
+    memset(buf, 0, MIDPLAT_INFO_PLATFORM_LEN);
+    get_vnd_chipset_brand(buf, sizeof(buf));
+    pr_info("kernel debug midplat get_vnd chipset brand=%s\n", buf);
+#endif
+}
 
 static void init_project_version(void)
 {
@@ -106,12 +133,18 @@ static void init_project_version(void)
             return;
         }
 
+        pr_info("get smem size=%zu, size of ocdt=%zu\n", smem_size, sizeof(ProjectInfoOCDT));
+        if (smem_size != sizeof(ProjectInfoOCDT)) {
+            old_midplat_version = true;
+            pr_info("get smem size=%zu, size of ocdt=%zu\n", smem_size, sizeof(ProjectInfoOCDT));
+        }
+
         g_project = (ProjectInfoOCDT *)smem_addr;
         if (g_project == ERR_PTR(-EPROBE_DEFER)) {
             g_project = NULL;
             return;
         }
-
+        midplat_debug();
         do {
             if(pcb_str[index].version == g_project->nDataSCDT.PCB){
                 PCB_version_name = pcb_str[index].str;
@@ -325,6 +358,100 @@ unsigned int get_serialID(void)
     return serial_id;
 }
 EXPORT_SYMBOL(get_serialID);
+
+int get_midplat_version(void)
+{
+    init_project_version();
+    if (!old_midplat_version) {
+        return g_project ? g_project->nDataMidPlat.nVersion : MIDPLAT_INFO_UNSUPPORTED;
+    }
+    return MIDPLAT_INFO_UNSUPPORTED;
+}
+EXPORT_SYMBOL(get_midplat_version);
+
+int get_midplat_feature_info(OPLUS_MID_PLAT_FEATURE_T feature)
+{
+    init_project_version();
+    if (!old_midplat_version && (g_project->nDataMidPlat.nVersion != MIDPLAT_INFO_UNSUPPORTED)) {
+        return g_project ? g_project->nDataMidPlat.infoMidPlat[feature] : -EINVAL;
+    }
+    return -1;
+}
+EXPORT_SYMBOL(get_midplat_feature_info);
+
+unsigned int get_GKI_version(void) {
+    if (strstr(init_uts_ns.name.release, "abogki"))
+        return OPLUS_ACK_VERSION_OGKI;
+    else if (strstr(init_uts_ns.name.release, "-ab"))
+        return OPLUS_ACK_VERSION_GKI;
+    else if (strstr(init_uts_ns.name.release, "-o-") && !strstr(init_uts_ns.name.release, "-ab"))
+        return OPLUS_ACK_VERSION_OKI;
+
+    return OPLUS_ACK_VERSION_UNKNOWN;
+}
+EXPORT_SYMBOL(get_GKI_version);
+
+unsigned int get_kernel_major_version(void) {
+#ifdef LINUX_VERSION_MAJOR
+    return LINUX_VERSION_MAJOR;
+#else
+    return 0;
+#endif
+}
+EXPORT_SYMBOL(get_kernel_major_version);
+
+unsigned int get_kernel_patch_version(void) {
+#ifdef LINUX_VERSION_PATCHLEVEL
+    return LINUX_VERSION_PATCHLEVEL;
+#else
+    return 0;
+#endif
+}
+EXPORT_SYMBOL(get_kernel_patch_version);
+
+unsigned int get_kernel_sub_version(void) {
+#ifdef LINUX_VERSION_SUBLEVEL
+    return LINUX_VERSION_SUBLEVEL;
+#else
+    return 0;
+#endif
+}
+EXPORT_SYMBOL(get_kernel_sub_version);
+
+
+unsigned int get_kernel_version_code(void) {
+#ifdef LINUX_VERSION_CODE
+    return LINUX_VERSION_CODE;
+#else
+    return 0;
+#endif
+}
+EXPORT_SYMBOL(get_kernel_version_code);
+
+int get_vnd_platform(char *buf, int len) {
+    init_project_version();
+    int info_len = sizeof(g_project->nDataMidPlat.platform);
+    if (!g_project)
+        return -1;
+
+    memcpy(buf, g_project->nDataMidPlat.platform, len > info_len ? info_len : len);
+
+    return 0;
+}
+EXPORT_SYMBOL(get_vnd_platform);
+
+int get_vnd_chipset_brand(char *buf, int len) {
+#if defined(OPLUS_VND_BUILD_CHIPSET_COMPANY)
+    int info_len = strlen(OPLUS_VND_BUILD_CHIPSET_COMPANY);
+    if (NULL == buf) {
+        return -1;
+    }
+    memcpy(buf, OPLUS_VND_BUILD_CHIPSET_COMPANY, len > info_len ? info_len : len);
+#endif
+
+    return 0;
+}
+EXPORT_SYMBOL(get_vnd_chipset_brand);
 
 static void dump_ocp_info(struct seq_file *s)
 {
