@@ -42,13 +42,26 @@ def define_oplus_local_modules():
             ko_deps = [
                      "//kernel_device_modules-{}/drivers/misc/mediatek/boot_common:mtk_boot_common".format(kernel_version),
             ]
-        else :
+            i2c_copts = []
+        elif bazel_support_platform == "qcom" :
             ko_deps = [
                      modules_label("oplus/kernel/boot:oplus_bsp_bootmode"),
                      soc_label("{}/drivers/pinctrl/qcom/pinctrl-msm").format(tv),
             ]
+            i2c_copts = []
+        elif bazel_support_platform == "unisoc":
+            ko_deps = []
+            i2c_copts = ["-DCONFIG_UNISOC_PLATFORM"]
+        else :
+            ko_deps = []
+            i2c_copts = []
     else :
-       ko_deps = []
+        if bazel_support_platform == "unisoc":
+            ko_deps = []
+            i2c_copts = ["-DCONFIG_UNISOC_PLATFORM"]
+        else :
+            ko_deps = []
+            i2c_copts = []
 
     define_oplus_ddk_module(
         name = "oplus_network_nfc_i2c",
@@ -59,6 +72,7 @@ def define_oplus_local_modules():
             "sn_nci/nfc/i2c_drv.c",
         ]),
         includes = ["."],
+        copts = i2c_copts,
         ko_deps = ko_deps,
     )
 
