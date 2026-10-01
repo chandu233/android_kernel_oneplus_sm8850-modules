@@ -43,7 +43,7 @@ TRACE_EVENT(wls_pen_chg_stat,
 #endif /* _WIRELESS_PEN_TRACE_H */
 
 #undef TRACE_INCLUDE_PATH
-#define TRACE_INCLUDE_PATH ../../../../vendor/oplus/kernel/charger/bazel/wireless_pen
+#define TRACE_INCLUDE_PATH ../../../vendor/oneplus/sm8850-modules/oplus/kernel/charger/bazel/wireless_pen
 #undef TRACE_INCLUDE_FILE
 #define TRACE_INCLUDE_FILE wireless_pen_trace
 
