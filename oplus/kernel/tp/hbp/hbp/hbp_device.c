@@ -88,9 +88,7 @@ static int init_input_device(struct hbp_device *hbp_dev, int id)
 		return -ENODEV;
 	}
 
-	if (id == 0) {
-		hbp_dev->i_dev->name = TOUCH_NAME;
-	} else if (id == 1) {
+	if (id == 1) {
 		hbp_dev->i_dev->name = TOUCH_NAME"1";
 	} else {
 		hbp_dev->i_dev->name = TOUCH_NAME;
@@ -143,14 +141,10 @@ static int init_input_device(struct hbp_device *hbp_dev, int id)
 			return ret;
 		}
 
-		if (id == 0) {
-			hbp_dev->p_dev->name = TOUCH_NAME"_pen";
-			hbp_dev->p_dev->phys = TOUCH_NAME"_pen_phys_main";
-		} else if (id == 1) {
+		if (id == 1) {
 			hbp_dev->p_dev->name = TOUCH_NAME"_pen1";
 			hbp_dev->p_dev->phys =  TOUCH_NAME"_pen_phys_secondary";
 		} else {
-			hbp_err("invaild ID!! %d\n", id);
 			hbp_dev->p_dev->name = TOUCH_NAME"_pen";
 			hbp_dev->p_dev->phys = TOUCH_NAME"_pen_phys_main";
 		}
@@ -223,13 +217,10 @@ static int hbp_device_dt_parse(struct hbp_core *hbp, struct hbp_device *hbp_dev)
 	hbp_dev->fp_grip_support = of_property_read_bool(np, "fp_grip_support");
 	hbp_info("fp_grip_support:%d\n", hbp_dev->fp_grip_support);
 
-	hbp_dev->create_with_power_on_support = of_property_read_bool(np, "create_with_power_on_support");
-	hbp_info("create_with_power_on_support:%d\n", hbp_dev->create_with_power_on_support);
 	memset(hbp_dev->clk_name, 0, 16);
 	ret = of_property_read_string(np, "clock-names", &clock_name);
 	if (ret < 0) {
 		hbp_err("clock-names not defined, use default\n");
-		strncpy(hbp_dev->clk_name, "bb_clk4", 16);
 	} else {
 		hbp_err("got clk name : %s.\n", clock_name);
 		strncpy(hbp_dev->clk_name, clock_name, 16);
@@ -460,16 +451,13 @@ struct hbp_device *hbp_device_create(void *priv,
 	hbp_dev->pre_fpstate = -1;
 	hbp_dev->screenoff_ifp = false;
 
-	if (hbp_dev->create_with_power_on_support) {
-		/*some ic need to power on when created*/
-		hbp_info("power on when hbp device created\n");
-		hbp_power_ctrl(hbp_dev, power_on_default);
-	}
-
 	/*clk*/
-	hbp_dev->pen_ck = devm_clk_get(hbp_dev->dev, hbp_dev->clk_name);
-	if (IS_ERR(hbp_dev->pen_ck)) {
-		hbp_err("failed to get %s.\n", hbp_dev->clk_name);
+	if (hbp_dev->clk_name[0] != 0) {
+		hbp_dev->pen_ck = devm_clk_get(hbp_dev->dev, hbp_dev->clk_name);
+		if (IS_ERR(hbp_dev->pen_ck)) {
+			hbp_err("failed to get %s.\n", hbp_dev->clk_name);
+			hbp_dev->pen_ck = NULL;
+		}
 	}
 
 	return hbp_dev;
@@ -730,6 +718,21 @@ static inline void tp_touch_up(struct hbp_device *hbp_dev)
 	input_report_key(hbp_dev->i_dev, BTN_TOOL_FINGER, 0);
 }
 
+static void tp_all_touch_up(struct hbp_device *hbp_dev, int finger_num)
+{
+	int i = 0;
+
+	for (i = 0; i < MAX_TOUCH_POINTS; i++) {
+		input_mt_slot(hbp_dev->i_dev, i);
+		input_mt_report_slot_state(hbp_dev->i_dev, MT_TOOL_FINGER, 0);
+	}
+
+	tp_touch_up(hbp_dev);
+	hbp_dev->irq_slot = 0;
+	hbp_dev->up_status = true;
+	hbp_info("all touch up, finger_num=%d\n", finger_num);
+}
+
 static void hbp_touch_points_report(struct hbp_device *hbp_dev, struct point_info *points, int obj_attention)
 {
 	int i = 0;
@@ -770,15 +773,7 @@ static void hbp_touch_points_report(struct hbp_device *hbp_dev, struct point_inf
 			return;
 		}
 
-		for (i = 0; i < MAX_TOUCH_POINTS; i++) {
-			input_mt_slot(hbp_dev->i_dev, i);
-			input_mt_report_slot_state(hbp_dev->i_dev, MT_TOOL_FINGER, 0);
-		}
-
-		tp_touch_up(hbp_dev);
-		hbp_dev->irq_slot = 0;
-		hbp_dev->up_status = true;
-		hbp_info("all touch up, finger_num=%d\n", finger_num);
+		tp_all_touch_up(hbp_dev, finger_num);
 	}
 
 	input_sync(hbp_dev->i_dev);

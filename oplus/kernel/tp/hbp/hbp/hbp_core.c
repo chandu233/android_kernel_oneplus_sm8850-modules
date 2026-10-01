@@ -28,6 +28,7 @@
 extern void hbp_power_ctrl(struct hbp_device *hbp_dev, struct power_sequeue sq[]);
 extern void hbp_power_type_ctrl(struct hbp_device *hbp_dev, enum power_type type, bool en);
 extern void touch_call_fp_grip(struct hbp_device *hbp_dev, int state);
+extern void hbp_set_irq_status(struct hbp_device *hbp_dev, bool en);
 
 struct hbp_core *g_hbp;
 struct task_struct *suspend_task = NULL;
@@ -236,6 +237,18 @@ void hbp_dev_power_type_ctrl(void *priv, enum power_type type, bool en)
 	}
 }
 EXPORT_SYMBOL(hbp_dev_power_type_ctrl);
+
+void hbp_dev_set_irq_status(void *priv, bool en)
+{
+	struct hbp_device *hbp_dev = __hbp_find_device(priv);
+
+	if (hbp_dev) {
+		hbp_set_irq_status(hbp_dev, en);
+	} else {
+		hbp_err("%s: hbp_dev is null.\n", __func__);
+	}
+}
+EXPORT_SYMBOL(hbp_dev_set_irq_status);
 
 void hbp_dev_healthinfo_report(void *priv, char *report)
 {
@@ -694,7 +707,7 @@ static int hbp_core_remove(struct platform_device *pdev)
 	unregister_chrdev(hbp->major, HBP_CORE);
 	class_destroy(hbp->cls);
 
-	kfree(hbp);
+	//kfree(hbp);
 
 	hbp_info("exit.\n");
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
