@@ -486,12 +486,14 @@ static void nvt_printk_fw_history(void *chip_data, uint32_t NVT_MMAP_HISTORY_ADD
 	/*print all data */
 	TPD_INFO("fw history 0x%x: \n", NVT_MMAP_HISTORY_ADDR);
 	for (i = 0; i < 4; i++) {
-		snprintf(str, sizeof(str), "%02x %02x %02x %02x %02x %02x %02x %02x   %02x %02x %02x %02x %02x %02x %02x %02x\n",
+		snprintf(str, sizeof(str), "fw history 0x%x %02x %02x %02x %02x %02x %02x %02x %02x   %02x %02x %02x %02x %02x %02x %02x %02x\n",
+		NVT_MMAP_HISTORY_ADDR,
 		buf[1+i*16], buf[2+i*16], buf[3+i*16], buf[4+i*16],
 		buf[5+i*16], buf[6+i*16], buf[7+i*16], buf[8+i*16],
 		buf[9+i*16], buf[10+i*16], buf[11+i*16], buf[12+i*16],
 		buf[13+i*16], buf[14+i*16], buf[15+i*16], buf[16+i*16]);
 		TPD_INFO("%s", str);
+		tp_healthinfo_report(chip_info->monitor_data, HEALTH_REPORT, str);
 	}
 }
 
@@ -674,6 +676,14 @@ static void nvt_ts_read_history_log(void *chip_data)
 	CTP_SPI_READ(chip_info->s_client, buf, 2);
 	TPD_INFO("FW Version:%02X\n", buf[1]);
 	/*TPD_INFO("Read Finlish\n");*/
+
+	if (chip_info->ts != NULL) {
+		if (chip_info->ts->exception_upload_support) {
+			pr_err("[TP]: %s end in %d and upload err log \n", __func__, __LINE__);
+			tp_exception_report(&chip_info->ts->exception_data, EXCEP_TOUCH_IC_RESET, "fw_status_err", sizeof("fw_status_err"));
+		}
+	}
+
 	pr_err("[TP]: %s end in %d \n", __func__, __LINE__);
 }
 
@@ -5855,6 +5865,7 @@ static void nvt_inject_wdt_reset(void *chip_data, int value)
 }
 
 static struct oplus_touchpanel_operations nvt_ops = {
+	.inject_wdt_reset         = nvt_inject_wdt_reset,
 	.ftm_process				= nvt_ftm_process,
 	.reset					  = nvt_reset,
 	.power_control			  = nvt_power_control,
@@ -5880,7 +5891,6 @@ static struct oplus_touchpanel_operations nvt_ops = {
 	.ftm_process_extra		  = NULL,
 	.aiunit_game_info         = nvt_aiunit_game_info,
 	.touch_leave_jitter_set   = nvt_set_leave_jitter,
-	.inject_wdt_reset         = nvt_inject_wdt_reset,
 };
 
 static void nvt_data_read(struct seq_file *s,
@@ -6381,7 +6391,7 @@ static void nvt_read_fw_history(struct seq_file *s, void *chip_data, uint32_t NV
 	CTP_SPI_READ(chip_info->s_client, buf, 65);	/*read 64bytes history*/
 
 	/*print all data*/
-	seq_printf(s, "fw history 0x%X: \n", NVT_MMAP_HISTORY_ADDR);
+	seq_printf(s, "history 0x%X: \n", NVT_MMAP_HISTORY_ADDR);
 	for (i = 0; i < 4; i++) {
 		snprintf(str, sizeof(str), "%02X %02X %02X %02X %02X %02X %02X %02X    %02X %02X %02X %02X %02X %02X %02X %02X\n",
 		buf[1+i*16], buf[2+i*16], buf[3+i*16], buf[4+i*16],

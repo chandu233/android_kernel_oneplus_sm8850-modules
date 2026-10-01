@@ -8,7 +8,7 @@
 #include <linux/firmware.h>
 #include "synaptics_tcm_core.h"
 
-#ifndef REMOVE_OPLUS_FUNCTION
+#if !(defined(REMOVE_OPLUS_FUNCTION) || defined(CONFIG_TOUCHPANEL_UNISOC_PLATFORM))
 #ifdef CONFIG_TOUCHPANEL_MTK_PLATFORM
 #include<mt-plat/mtk_boot_common.h>
 #else
@@ -99,9 +99,56 @@ int zeroflash_parse_fw_image(void)
 	struct area_descriptor *descriptor;
 	const unsigned char *image;
 	const unsigned char *content;
+#ifdef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
+	unsigned int image_size;
+	unsigned int fw_offset = 0;
+	unsigned int i;
+#endif
 
 	image = g_zeroflash_hcd->image;
+#ifdef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
+	image_size = g_zeroflash_hcd->fw_entry ? g_zeroflash_hcd->fw_entry->size : 0;
+#endif
 	image_info = &g_zeroflash_hcd->image_info;
+#ifdef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
+	/* Search for magic value in case firmware has a custom header */
+	if (image_size > 0) {
+		/* First check if magic is at the beginning */
+		magic_value = le4_to_uint(image);
+		if (magic_value == IMAGE_FILE_MAGIC_VALUE) {
+			fw_offset = 0;
+			TPD_INFO("Firmware magic found at offset 0\n");
+		} else {
+			/* Search for magic value in the file */
+			for (i = 4; i < image_size - 4; i++) {
+				magic_value = le4_to_uint(image + i);
+				if (magic_value == IMAGE_FILE_MAGIC_VALUE) {
+					fw_offset = i;
+					TPD_INFO("Found firmware magic at offset %d\n", fw_offset);
+					break;
+				}
+			}
+			if (fw_offset == 0) {
+				TPD_INFO("Invalid image file magic value (0x%08x, expected 0x%08x)\n",
+					magic_value, IMAGE_FILE_MAGIC_VALUE);
+				return -EINVAL;
+			}
+		}
+	} else {
+		magic_value = le4_to_uint(image);
+		if (magic_value != IMAGE_FILE_MAGIC_VALUE) {
+			TPD_INFO("Invalid image file magic value\n");
+			return -EINVAL;
+		}
+	}
+
+	/* Adjust image pointer to actual firmware data */
+	if (fw_offset > 0) {
+		image = image + fw_offset;
+		/* Update global image pointer for subsequent use */
+		g_zeroflash_hcd->image = image;
+	}
+#endif
 	header = (struct zeroflash_image_header *)image;
 
 	magic_value = le4_to_uint(header->magic_value);
@@ -228,7 +275,9 @@ static int zeroflash_get_fw_image(void)
 {
 	int retval = 0;
 	struct syna_tcm_hcd *tcm_hcd = g_zeroflash_hcd->tcm_hcd;
+#ifndef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
 	struct firmware *request_fw_headfile = NULL;
+#endif
 	struct touchpanel_data *ts = spi_get_drvdata(tcm_hcd->s_client);
 	char *fw_name_lpwg = NULL;
 	char *p_node = NULL;
@@ -266,6 +315,21 @@ static int zeroflash_get_fw_image(void)
 		kfree(fw_name_lpwg);
 	} else {
 		if(!g_zeroflash_hcd->fw_entry) {
+#ifdef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
+			snprintf(ts->panel_data.fw_name, MAX_FW_NAME_LENGTH, "tp/25031/FW_NF_TD4160_HUAXING.img");
+			TPD_INFO("Trying to load firmware: %s\n", ts->panel_data.fw_name);
+			retval = request_firmware_select(&g_zeroflash_hcd->fw_entry, ts->panel_data.fw_name, ts->dev);
+			if (retval < 0) {
+				TPD_INFO("request_firmware failed with error: %d\n", retval);
+			}
+
+			if (retval == 0 && g_zeroflash_hcd->fw_entry != NULL) {
+				TPD_INFO("Get firmware from file system: %s, size = %d\n",
+					ts->panel_data.fw_name,
+					(unsigned int)g_zeroflash_hcd->fw_entry->size);
+				tcm_hcd->tp_fw_update_headfile = false;
+			}
+#else
 			TPD_INFO("oplus tp update can't get fw, get fw from headfile\n");
 			request_fw_headfile = kzalloc(sizeof(struct firmware), GFP_KERNEL);
 			if (request_fw_headfile == NULL) {
@@ -277,6 +341,7 @@ static int zeroflash_get_fw_image(void)
 				g_zeroflash_hcd->fw_entry = request_fw_headfile;
 				tcm_hcd->tp_fw_update_headfile = true;
 			}
+#endif
 		}
 
 		if (g_zeroflash_hcd->fw_entry != NULL) {
@@ -299,7 +364,15 @@ static int zeroflash_get_fw_image(void)
 	if (retval < 0) {
 		TPD_INFO("Failed to parse firmware image\n");
 		if (g_zeroflash_hcd->fw_entry != NULL) {
+#ifdef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
+			if (tcm_hcd->tp_fw_update_headfile) {
+				kfree(g_zeroflash_hcd->fw_entry);
+			} else {
+				release_firmware(g_zeroflash_hcd->fw_entry);
+			}
+#else
 			release_firmware(g_zeroflash_hcd->fw_entry);
+#endif
 			g_zeroflash_hcd->fw_entry = NULL;
 			g_zeroflash_hcd->image = NULL;
 		}
@@ -821,15 +894,20 @@ static void zeroflash_do_romboot_firmware_download(void)
 	unsigned int data_size_blocks;
 	unsigned int image_size;
 	struct syna_tcm_hcd *tcm_hcd = g_zeroflash_hcd->tcm_hcd;
+#ifndef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
 	struct touchpanel_data *ts = spi_get_drvdata(tcm_hcd->s_client);
+#endif
 
 #ifdef CONFIG_TOUCHPANEL_MTK_PLATFORM
 	if (ts->boot_mode == RECOVERY_BOOT) {
-#else
-	if (ts->boot_mode == MSM_BOOT_MODE__RECOVERY) {
-#endif
 		tcm_hcd->tp_fw_update_first = false;
 	}
+#elif !defined(CONFIG_TOUCHPANEL_UNISOC_PLATFORM)
+	if (ts->boot_mode == MSM_BOOT_MODE__RECOVERY) {
+		tcm_hcd->tp_fw_update_first = false;
+	}
+#endif
+
 
 	if(tcm_hcd->tp_fw_update_first) {
 		tcm_hcd->tp_fw_update_first = false;

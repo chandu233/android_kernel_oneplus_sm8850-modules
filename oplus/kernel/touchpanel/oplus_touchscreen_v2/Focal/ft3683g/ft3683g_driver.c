@@ -123,6 +123,7 @@ enum GESTURE_ID {
 	GESTURE_M = 0x32,
 	GESTURE_FINGER_PRINT = 0x26,
 	GESTURE_SINGLE_TAP = 0x27,
+	GESTURE_FINGER_PRINT_EARLY = 0x28,
 	GESTURE_HEART_ANTICLOCK = 0x55,
 	GESTURE_HEART_CLOCKWISE = 0x59,
 };
@@ -3216,7 +3217,7 @@ static u32 fts_u32_trigger_reason(void *chip_data, int gesture_enable,
 	if (!is_suspended && ts_data->fp_en) {
 		fts_read_fod_info(ts_data);
 
-		if ((ts_data->fod_info.event_type == FTS_EVENT_FOD)
+		if ((ts_data->fod_info.event_type == FTS_EVENT_FOD || ts_data->fod_info.event_type == FTS_EARLY_EVENT_FOD)
 		    && (ts_data->fod_info.fp_down)) {
 			if (!ts_data->fod_info.fp_down_report) {    /* 38, 1, 0*/
 				ts_data->fod_info.fp_down_report = 1;
@@ -3229,7 +3230,7 @@ static u32 fts_u32_trigger_reason(void *chip_data, int gesture_enable,
 			/*            if (ts_data->fod_info.fp_down_report) {      38, 1, 1*/
 			/*            }*/
 
-		} else if ((ts_data->fod_info.event_type == FTS_EVENT_FOD)
+		} else if ((ts_data->fod_info.event_type == FTS_EVENT_FOD || ts_data->fod_info.event_type == FTS_EARLY_EVENT_FOD)
 		           && (!ts_data->fod_info.fp_down)) {
 			if (ts_data->fod_info.fp_down_report) {     /* 38, 0, 1*/
 				ts_data->fod_info.fp_down_report = 0;
@@ -3884,7 +3885,7 @@ static int fts_get_gesture_info(void *chip_data, struct gesture_info *gesture)
 	case GESTURE_FINGER_PRINT:
 		fts_read_fod_info(ts_data);
 		TPD_INFO("FOD event type:0x%x", ts_data->fod_info.event_type);
-		TPD_DEBUG("%s, fgerprint, touched = %d, fp_down = %d, fp_down_report = %d, \n",
+		TPD_DEBUG("%s, fingerprint down, touched = %d, fp_down = %d, fp_down_report = %d, \n",
 		          __func__, ts_data->ts->view_area_touched, ts_data->fod_info.fp_down,
 		          ts_data->fod_info.fp_down_report);
 
@@ -3919,6 +3920,31 @@ static int fts_get_gesture_info(void *chip_data, struct gesture_info *gesture)
 		}
 		break;
 
+	case GESTURE_FINGER_PRINT_EARLY:
+		fts_read_fod_info(ts_data);
+		TPD_INFO("FOD early down event type:0x%x", ts_data->fod_info.event_type);
+		TPD_DEBUG("%s, fingerprint early down, touched = %d, fp_down = %d, fp_down_report = %d, \n",
+		          __func__, ts_data->ts->view_area_touched, ts_data->fod_info.fp_down,
+		          ts_data->fod_info.fp_down_report);
+
+		if (ts_data->fod_info.event_type == FTS_EARLY_EVENT_FOD) {
+			if (ts_data->fod_info.fp_down && !ts_data->fod_info.fp_down_report) {
+				gesture->gesture_type = FINGERPRINT_EARLY_DOWN;
+				ts_data->fod_info.fp_down_report = 1;
+
+			} else if (!ts_data->fod_info.fp_down && ts_data->fod_info.fp_down_report) {
+				gesture->gesture_type = FRINGER_PRINTUP;
+				ts_data->fod_info.fp_down_report = 0;
+			}
+
+			gesture->Point_start.x = ts_data->fod_info.fp_x;
+			gesture->Point_start.y = ts_data->fod_info.fp_y;
+			gesture->Point_end.x = ts_data->fod_info.fp_area_rate;
+			gesture->Point_end.y = 0;
+		}
+
+		break;
+
 	default:
 		gesture->gesture_type = UNKOWN_GESTURE;
 	}
@@ -3936,6 +3962,7 @@ static int fts_get_gesture_info(void *chip_data, struct gesture_info *gesture)
 
 	if ((gesture->gesture_type != FINGER_PRINTDOWN)
 	    && (gesture->gesture_type != FRINGER_PRINTUP)
+	    && (gesture->gesture_type != FINGERPRINT_EARLY_DOWN)
 	    && (gesture->gesture_type != UNKOWN_GESTURE)) {
 		gesture->Point_start.x = (u16)((buf[4] << 8) + buf[5]);
 		gesture->Point_start.y = (u16)((buf[6] << 8) + buf[7]);
@@ -3992,6 +4019,7 @@ static void fts_enable_fingerprint_underscreen(void *chip_data, uint32_t enable)
 
 		if ((!ts_data->ts->view_area_touched)
 		    && (ts_data->fod_info.event_type != FTS_EVENT_FOD)
+			&& (ts_data->fod_info.event_type != FTS_EARLY_EVENT_FOD)
 		    && (!ts_data->fod_info.fp_down)
 		    && (ts_data->fod_info.fp_down_report)) {   /* notouch, !38, 0, 1*/
 			ts_data->fod_info.fp_down_report = 0;

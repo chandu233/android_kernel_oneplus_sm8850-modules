@@ -238,16 +238,47 @@ out:
 	return ret;
 }
 
+/*******************************************************
+Description:
+    Novatek touchscreen /proc/NVTSPI close function.
+
+return:
+    Executive outcomes. 0---succeed.
+*******************************************************/
+static int32_t nvt_noflash_open(struct inode *inode, struct file *file)
+{
+	struct touchpanel_data *ts = PDE_DATA(file_inode(file));
+
+	if (ts != NULL) {
+		ts->supplier_tool_in_use = true;
+	}
+
+	return 0;
+}
+
+static int32_t nvt_noflash_close(struct inode *inode, struct file *file)
+{
+	struct touchpanel_data *ts = PDE_DATA(file_inode(file));
+
+	if (ts != NULL) {
+		ts->supplier_tool_in_use = false;
+	}
+
+	return 0;
+}
+
 #if LINUX_VERSION_CODE>= KERNEL_VERSION(5, 10, 0)
 static const struct proc_ops nvt_noflash_fops = {
-	.proc_open = simple_open,
-    .proc_read = nvt_noflash_read,
+	.proc_open = nvt_noflash_open,
+	.proc_release = nvt_noflash_close,
+	.proc_read = nvt_noflash_read,
 };
 #else
 static const struct file_operations nvt_noflash_fops = {
 	.owner = THIS_MODULE,
-    .open = simple_open,
-    .read = nvt_noflash_read,
+	.open = nvt_noflash_open,
+	.release = nvt_noflash_close,
+	.read = nvt_noflash_read,
 };
 #endif
 
@@ -619,6 +650,7 @@ static int nvt_before_autotest(struct seq_file *s, struct touchpanel_data *ts,
 	p_nvt_testdata->pos = &ts->com_test_data.result_cur_len;
 	p_nvt_testdata->fw = fw;
 	p_nvt_testdata->test_item = test_head->test_item;
+	p_nvt_testdata->raw_cap_restriction = ts->com_test_data.raw_cap_restriction;
 	return 0;
 }
 
@@ -856,6 +888,7 @@ static int nvt_before_black_screen_autotest(struct seq_file *s,
 	p_nvt_testdata->pos = &ts->com_test_data.bs_result_cur_len;
 	p_nvt_testdata->fw = fw;
 	p_nvt_testdata->test_item = test_head->test_item;
+	p_nvt_testdata->raw_cap_restriction = ts->com_test_data.raw_cap_restriction;
 	TPD_INFO("%s - \n", __func__);
 	return 0;
 }
