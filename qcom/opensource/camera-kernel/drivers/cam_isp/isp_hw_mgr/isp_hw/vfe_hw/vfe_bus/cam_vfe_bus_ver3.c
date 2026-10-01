@@ -4089,6 +4089,9 @@ static int cam_vfe_bus_ver3_update_wm(void *priv, void *cmd_args, uint32_t arg_s
 	uint32_t frame_inc = 0, val, skip_stride_align = 0;
 	uint32_t iova_addr, iova_offset, image_buf_offset = 0, stride, slice_h;
 	dma_addr_t iova;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	bool ubwc_enabled = false;
+#endif
 
 	update_buf = (struct cam_isp_hw_get_cmd_update *) cmd_args;
 	bus_priv = (struct cam_vfe_bus_ver3_priv  *) priv;
@@ -4151,6 +4154,18 @@ static int cam_vfe_bus_ver3_update_wm(void *priv, void *cmd_args, uint32_t arg_s
 			cfg = &wm_data->mc_data[hw_cntxt_id].cfg;
 		else
 			cfg = &wm_data->cfg;
+
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+		ubwc_enabled = false;
+		if (wm_data->hw_regs->ubwc_regs && (bus_priv->bus_hw_info->ubwc_clients_mask &
+			BIT_ULL(wm_data->index))) {
+			if (wm_data->out_rsrc_data->mc_based ||
+				wm_data->out_rsrc_data->cntxt_cfg_except)
+				ubwc_enabled = wm_data->mc_data[hw_cntxt_id].ubwc_cfg_data.ubwc_mode_cfg;
+			else
+				ubwc_enabled = wm_data->ubwc_cfg_data.ubwc_mode_cfg;
+		}
+#endif
 
 		/* Disable frame header in case it was previously enabled */
 		if ((cfg->en_cfg) & (1 << wm_data->common_data->common_reg->frmheader_en_shift))
@@ -4307,8 +4322,12 @@ static int cam_vfe_bus_ver3_update_wm(void *priv, void *cmd_args, uint32_t arg_s
 		}
 
 		frame_inc = stride * slice_h;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+		if (ubwc_enabled) {
+#else
 		if (wm_data->hw_regs->ubwc_regs && (bus_priv->bus_hw_info->ubwc_clients_mask &
 			BIT_ULL(wm_data->index))) {
+#endif
 			frame_inc = ALIGNUP(stride * slice_h, 4096);
 
 			if (!update_buf->use_scratch_cfg) {
@@ -4329,9 +4348,12 @@ static int cam_vfe_bus_ver3_update_wm(void *priv, void *cmd_args, uint32_t arg_s
 				bus_priv->common_data.core_index, wm_data->index,
 				reg_val_pair[j-1]);
 		}
-
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+		if (ubwc_enabled && !update_buf->use_scratch_cfg)
+#else
 		if ((wm_data->hw_regs->ubwc_regs && (bus_priv->bus_hw_info->ubwc_clients_mask &
 			BIT_ULL(wm_data->index))) && (!update_buf->use_scratch_cfg))
+#endif
 			image_buf_offset = io_cfg->planes[i].meta_size;
 		else if ((wm_data->wm_mode == CAM_VFE_WM_FRAME_BASED_MODE) ||
 			(wm_data->wm_mode == CAM_VFE_WM_INDEX_BASED_MODE))
