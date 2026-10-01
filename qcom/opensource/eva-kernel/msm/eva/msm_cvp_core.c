@@ -184,7 +184,7 @@ struct msm_cvp_inst *msm_cvp_open(int session_type, struct task_struct *task)
 		return NULL;
 	}
 
-	inst = kzalloc(sizeof(*inst), GFP_KERNEL);
+	inst = kvzalloc(sizeof(*inst), GFP_KERNEL);
 	if (!inst) {
 		rc = -ENOMEM;
 		dprintk(CVP_ERR, "Failed to allocate memory %d\n", rc);
@@ -429,7 +429,7 @@ int msm_cvp_destroy(struct msm_cvp_inst *inst)
 			atomic_read(&inst->smem_count));
 		core->smem_leak_count += atomic_read(&inst->smem_count);
 	}
-	kfree(inst);
+	kvfree(inst);
 	inst = NULL;
 	dprintk(CVP_SESS,
 		"sys-stat: nr_insts %d msgs %d, frames %d, bufs %d, smems %d\n",
