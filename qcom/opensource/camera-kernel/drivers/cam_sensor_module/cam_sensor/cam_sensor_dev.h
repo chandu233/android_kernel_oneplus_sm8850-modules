@@ -187,6 +187,7 @@ struct cam_sensor_ctrl_t {
 	enum cam_sensor_setting_state  sensor_initsetting_state;
 	struct task_struct             *sensor_open_thread;
 	struct cam_sensor_i2c_reg_setting sensor_init_setting;
+	int                            is_support_advancedpowerup;
 	struct cam_sensor_qsc_setting  sensor_qsc_setting;
 	bool                           is_surpport_wr_continuous;
 	uint32_t                       sensor_setting_id;

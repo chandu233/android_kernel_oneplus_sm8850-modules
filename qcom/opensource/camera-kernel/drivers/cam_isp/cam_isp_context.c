@@ -3695,6 +3695,18 @@ static int __cam_isp_ctx_reg_upd_in_epoch_bubble_state(
 		if (!atomic_read(&ctx_isp->last_applied_default) ||
 			atomic_read(&ctx_isp->apply_in_progress))
 			atomic_set(&ctx_isp->unserved_rup, 1);
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+		CAM_WARN_RATE_LIMIT(CAM_ISP,
+			"ctx:%u Unexpected regupdate in activated Substate[%s] for frame_id:%lld",
+			"last_applied_default:%d, apply_in_progress: %d, unserved_rup:%d",
+			ctx_isp->base->ctx_id,
+			__cam_isp_ctx_substate_val_to_type(
+			ctx_isp->substate_activated),
+			ctx_isp->frame_id,
+			atomic_read(&ctx_isp->last_applied_default),
+			atomic_read(&ctx_isp->apply_in_progress),
+			atomic_read(&ctx_isp->unserved_rup));
+#else
 		CAM_WARN_RATE_LIMIT(CAM_ISP,
 			"ctx:%u Unexpected regupdate in activated Substate[%s] for frame_id:%lld "
 			"last_applied_default:%d, apply_in_progress: %d, unserved_rup:%d",
@@ -3705,6 +3717,7 @@ static int __cam_isp_ctx_reg_upd_in_epoch_bubble_state(
 			atomic_read(&ctx_isp->last_applied_default),
 			atomic_read(&ctx_isp->apply_in_progress),
 			atomic_read(&ctx_isp->unserved_rup));
+#endif
 
 		/* Force to zero only when the last applied settings aren't default */
 		if (!atomic_read(&ctx_isp->apply_in_progress))
@@ -9382,6 +9395,41 @@ static int __cam_isp_ctx_issue_resume_util(struct cam_context *ctx)
 
 	CAM_DBG(CAM_ISP, "next state %d sub_state:%d ctx_id %u link: 0x%x", ctx->state,
 		ctx_isp->substate_activated, ctx->ctx_id, ctx->link_hdl);
+	/*
+	 * When resuming CSID, there may be some EOF triggered requests pending at CRM,
+	 * which needs to be applied at EOF IRQ. When dynamic EOF feature is enabled,
+	 * needs to explicitly check and register EOF IRQ accordingly.
+	 */
+	 if ((!rc) && (ctx->ctx_crm_intf && ctx->ctx_crm_intf->notify_msg)) {
+		struct cam_req_mgr_notify_msg msg = {0};
+
+		msg.link_hdl = ctx->link_hdl;
+		msg.dev_hdl = ctx->dev_hdl;
+		msg.msg_type = CAM_REQ_MGR_MSG_CHECK_DYN_EOF_UNDER_RESUME;
+		rc = ctx->ctx_crm_intf->notify_msg(&msg);
+		if (rc) {
+			CAM_ERR(CAM_ISP,
+				"Failed at notifying for checking dyn EOF during resume on ctx: %u link: 0x%x",
+				ctx->ctx_id, ctx->link_hdl);
+			return rc;
+		}
+
+		if (msg.u.pending_eof_event) {
+			hw_cmd_args.ctxt_to_hw_map = ctx_isp->hw_ctx;
+			hw_cmd_args.cmd_type = CAM_HW_MGR_CMD_INTERNAL;
+			isp_hw_cmd_args.cmd_type = CAM_ISP_HW_MGR_REGISTER_EOF_IRQ;
+			isp_hw_cmd_args.u.eof_irq_enable = true;
+			hw_cmd_args.u.internal_args = (void *)&isp_hw_cmd_args;
+			rc = ctx->hw_mgr_intf->hw_cmd(ctx->hw_mgr_intf->hw_mgr_priv,
+				&hw_cmd_args);
+			if (rc) {
+				CAM_ERR(CAM_ISP,
+					"Failed to register EOF IRQ during resume, rc: %d, ctx_id %u link: 0x%x",
+					rc, ctx->ctx_id, ctx->link_hdl);
+				return rc;
+			}
+		}
+	}
 
 	/*
 	 * When resuming CSID, there may be some EOF triggered requests pending at CRM,

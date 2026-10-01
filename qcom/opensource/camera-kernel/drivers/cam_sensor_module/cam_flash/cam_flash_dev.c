@@ -13,6 +13,7 @@
 #include "camera_main.h"
 #include "cam_mem_mgr_api.h"
 #include "cam_worker_wrapper_api.h"
+#include "oplus_cam_flash_dev.h"
 
 static void cam_flash_populate_query_current(struct cam_flash_ctrl *fctrl,
 	struct cam_flash_query_cap_info *flash_cap,
@@ -690,6 +691,11 @@ static int cam_flash_component_bind(struct device *dev,
 	mutex_init(&(fctrl->flash_mutex));
 
 	fctrl->flash_state = CAM_FLASH_STATE_INIT;
+
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	oplus_cam_flash_proc_init(fctrl, pdev);
+#endif
+
 	CAM_DBG(CAM_FLASH, "Component bound successfully");
 	CAM_GET_TIMESTAMP(ts_end);
 	CAM_GET_TIMESTAMP_DIFF_IN_MICRO(ts_start, ts_end, microsec);

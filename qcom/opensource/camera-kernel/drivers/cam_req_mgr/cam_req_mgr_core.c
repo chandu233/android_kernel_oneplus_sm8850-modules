@@ -3569,7 +3569,7 @@ int cam_req_mgr_process_add_req(void *priv, void *data)
 	struct crm_task_payload             *task_data = NULL;
 	struct cam_req_mgr_slot             *link_slot = NULL, *next_slot = NULL;
 	struct cam_req_mgr_state_monitor     state;
-	struct cam_req_mgr_link_evt_data     evt_data = {0};
+	struct cam_req_mgr_link_evt_data     evt_data;
 #ifdef OPLUS_FEATURE_CAMERA_COMMON
 	char trace[64] = {0};
 #endif

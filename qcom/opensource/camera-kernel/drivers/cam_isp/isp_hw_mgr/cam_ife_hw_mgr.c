@@ -555,6 +555,9 @@ static int cam_isp_blob_path_exp_order_update(struct cam_ife_hw_mgr_ctx         
 	if (csid_update_valid) {
 		exp_info_update_args.num_process_exp = exp_order_update->num_process_exp;
 		exp_info_update_args.num_sensor_out_exp = exp_order_update->num_sensor_out_exp;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+		exp_info_update_args.is_ipp_eof_enabled = ctx->flags.is_ipp_eof_enabled;
+#endif
 		for (i = 0; i < ctx->num_base; i++) {
 			if (ctx->base[i].hw_type != CAM_ISP_HW_TYPE_CSID)
 				continue;
@@ -6570,6 +6573,9 @@ static int cam_ife_mgr_acquire_hw(void *hw_mgr_priv, void *acquire_hw_args)
 	ife_ctx->scratch_buf_info.ife_scratch_config = NULL;
 	ife_ctx->is_init_drv_cfg_received = false;
 	ife_ctx->flags.skip_reg_dump_buf_put = false;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	ife_ctx->flags.is_ipp_eof_enabled = false;
+#endif
 	ife_ctx->wr_per_req_index = 0;
 	memset(ife_ctx->per_req_info, 0, sizeof(ife_ctx->per_req_info));
 
@@ -8773,6 +8779,9 @@ end:
 			cam_mem_put_cpu_buf(ctx->reg_dump_buf_desc[i].mem_handle);
 		ctx->num_reg_dump_buf = 0;
 	}
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	ctx->flags.is_ipp_eof_enabled = false;
+#endif
 	ctx->flags.skip_reg_dump_buf_put = false;
 	ctx->flags.dump_on_error = false;
 	ctx->flags.dump_on_flush = false;
@@ -15927,6 +15936,13 @@ static inline int cam_ife_mgr_eof_irq_enable(
 				CAM_DBG(CAM_ISP,
 					"Failed to %s CSID[%u] EOF IRQ rc: %d",
 					(eof_irq_enable) ? "enable" : "disable", hw_idx, rc);
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+			else {
+				ctx->flags.is_ipp_eof_enabled = eof_irq_enable;
+				CAM_INFO(CAM_ISP, "upgrade eof result[%d]", ctx->flags.is_ipp_eof_enabled);
+			}
+#endif
+
 			break;
 		}
 	}

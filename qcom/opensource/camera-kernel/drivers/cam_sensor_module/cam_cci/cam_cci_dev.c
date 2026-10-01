@@ -12,7 +12,9 @@
 #include "uapi/linux/sched/types.h"
 #include "linux/sched/types.h"
 #include "linux/sched.h"
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
 #include <linux/pm_runtime.h>
+#endif
 
 #define CCI_MAX_DELAY 1000000
 #define QUEUE_SIZE 100
@@ -840,6 +842,10 @@ static int cam_cci_platform_probe(struct platform_device *pdev)
 
 	cam_soc_util_initialize_power_domain(&pdev->dev);
 	pm_suspend_ignore_children(&pdev->dev, true);
+
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+    pm_suspend_ignore_children(&pdev->dev, true);
+#endif
 
 	rc = component_add(&pdev->dev, &cam_cci_component_ops);
 	if (rc)

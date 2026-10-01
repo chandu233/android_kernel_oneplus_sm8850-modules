@@ -301,6 +301,7 @@ def _define_module(target, variant):
                     "drivers/oplus/cam_sensor_module/cam_link/oplus_cam_sensor.c",
                     "drivers/oplus/cam_sensor_module/cam_link/oplus_cam_ois.c",
                     "drivers/oplus/cam_sensor_module/cam_link/oplus_cam_actuator.c",
+                    "drivers/oplus/cam_sensor_module/cam_link/oplus_cam_flash_dev.c",
                 ],
             },
         },

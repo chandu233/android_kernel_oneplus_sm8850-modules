@@ -741,6 +741,7 @@ struct cam_mem_cpu_access_op {
 #define CAM_REQ_MGR_ISP_ERR_SETTING_MISMATCHED           BIT(21)
 #define CAM_REQ_MGR_ISP_ERR_ILLEGAL_DT_SWITCH            BIT(22)
 #define CAM_REQ_MGR_ISP_ERR_NON_FAULTING_STREAM          BIT(23)
+#define CAM_REQ_MGR_IIC_ERR_ACTUATOR_FAIL                3859
 
 #define CAM_REQ_MGR_IIC_ERR_ACTUATOR_FAIL                3859
 

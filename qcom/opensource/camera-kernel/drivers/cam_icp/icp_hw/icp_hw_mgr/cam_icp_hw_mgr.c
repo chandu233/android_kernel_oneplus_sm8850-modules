@@ -7587,6 +7587,12 @@ static int cam_icp_mgr_prepare_hw_update(void *hw_mgr_priv,
 		rc = -EINVAL;
 		goto end;
 	}
+#else
+	if (cam_packet_util_validate_packet(packet, prepare_args->remain_len)) {
+		CAM_ERR(CAM_ICP, "Invalid packet, CPU buf length: %zu", prepare_args->remain_len);
+		rc = -EINVAL;
+		goto end;
+	}
 #endif
 
 	rc = cam_icp_mgr_pkt_validation(ctx_data, packet);
@@ -7646,6 +7652,19 @@ static int cam_icp_mgr_prepare_hw_update(void *hw_mgr_priv,
 		goto end;
 	}
 
+
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	if (rc) {
+		if (ctx_data->hfi_frame_process.in_resource[idx] > 0)
+			cam_sync_destroy(
+				ctx_data->hfi_frame_process.in_resource[idx]);
+		clear_bit(idx, ctx_data->hfi_frame_process.bitmap);
+		ctx_data->hfi_frame_process.request_id[idx] = -1;
+		CAM_ERR(CAM_ICP, "%s: prepare hw update failed on req id %lld",
+			ctx_data->ctx_id_string, packet->header.request_id);
+		goto end;
+	}
+#endif
 
 	prepare_args->num_hw_update_entries = 1;
 	prepare_args->hw_update_entries[0].addr = (uintptr_t)hfi_cmd;

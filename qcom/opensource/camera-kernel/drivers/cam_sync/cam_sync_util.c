@@ -660,7 +660,9 @@ int cam_sync_util_cb_dispatch(void *priv, void *data)
 	struct sync_callback_info *cb_info = (struct sync_callback_info *)priv;
 	sync_callback sync_data = cb_info->callback_func;
 	void *cb = cb_info->callback_func;
-
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	sched_set_fifo_low(current);
+#endif
 	cam_common_util_thread_switch_delay_detect(
 		"cam_sync_worker", "schedule", cb,
 		cb_info->worker_scheduled_ts,

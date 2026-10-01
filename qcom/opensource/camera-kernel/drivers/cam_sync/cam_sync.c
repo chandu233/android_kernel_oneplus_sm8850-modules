@@ -2785,6 +2785,11 @@ static void cam_sync_configure_synx_obj(struct synx_register_params *object)
 }
 #endif
 
+void cam_sync_workq_handler(struct work_struct *w)
+{
+	cam_req_mgr_process_workq(w);
+}
+
 static int cam_sync_component_bind(struct device *dev,
 	struct device *master_dev, void *data)
 {
