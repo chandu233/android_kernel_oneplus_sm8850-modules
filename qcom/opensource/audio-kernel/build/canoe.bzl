@@ -90,6 +90,7 @@ def define_canoe():
             "OPLUS_FEATURE_SPEAKER_MUTE",
             "OPLUS_FEATURE_RINGTONE_HAPTIC",
             "CONFIG_OPLUS_FEATURE_MM_FEEDBACK",
+            "OPLUS_TFA98XX_DRV_NEED_COMPAT",
 #endif /* OPLUS_ARCH_EXTENDS */
         ]
     )

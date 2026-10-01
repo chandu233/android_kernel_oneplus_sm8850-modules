@@ -46,6 +46,23 @@
 #define ERR_CNT 10
 #endif /* CONFIG_OPLUS_FEATURE_MM_FEEDBACK */
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_FEEDBACK)
+#include "feedback/oplus_audio_kernel_fb.h"
+#ifdef dev_err
+#undef dev_err
+#define dev_err dev_err_fb_delay
+#endif
+#ifdef dev_err_ratelimited
+#undef dev_err_ratelimited
+#define dev_err_ratelimited dev_err_ratelimited_fb_delay
+#endif
+#ifdef pr_err
+#undef pr_err
+#define pr_err pr_err_fb_delay
+#endif
+#define ERR_CNT 10
+#endif /* CONFIG_OPLUS_FEATURE_MM_FEEDBACK */
+
 #define NUM_SWRS_DT_PARAMS 5
 
 #define WCD9378_MOBILE_MODE 0x01
@@ -3059,7 +3076,7 @@ static int wcd9378_hph_get_gain(struct snd_kcontrol *kcontrol,
 	offset /= 0x180;
 	ucontrol->value.enumerated.item[0] = offset;
 
-	dev_dbg(component->dev, "%s： offset is 0x%0x\n", __func__, offset);
+	dev_dbg(component->dev, "%s: offset is 0x%0x\n", __func__, offset);
 	return 0;
 }
 

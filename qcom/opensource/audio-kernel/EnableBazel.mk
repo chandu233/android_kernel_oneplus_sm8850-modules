@@ -93,6 +93,7 @@ endif
 #add for oplus audio extends driver
 LOCAL_MODULE_KO_DIRS += oplus/qcom/oplus_audio_extend.ko
 LOCAL_MODULE_KO_DIRS += oplus/codecs/tfa98xx-v6/oplus_audio_tfa98xx_v6.ko
+LOCAL_MODULE_KO_DIRS += oplus/codecs/tfa98xx_v6.14.2/oplus_audio_tfa98xx.ko
 LOCAL_MODULE_KO_DIRS += oplus/codecs/aw882xx/oplus_audio_aw882xx.ko
 # add for oplus audio daemon kernel
 LOCAL_MODULE_KO_DIRS += oplus/oplus_audio_daemon/oplus_audio_daemon.ko
