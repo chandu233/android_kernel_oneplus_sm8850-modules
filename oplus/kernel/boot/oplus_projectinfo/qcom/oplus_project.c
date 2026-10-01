@@ -11,6 +11,8 @@
 #include <linux/syscalls.h>
 #include <linux/version.h>
 #include <linux/types.h>
+#include <linux/string.h>
+#include <linux/utsname.h>
 
 #include <soc/oplus/boot/oplus_project.h>
 
@@ -82,10 +84,12 @@ static struct pcb_match pcb_str[] = {
 };
 
 struct proc_dir_entry *oplus_info = NULL;
+static size_t g_project_size;
 
 extern char build_variant[];
 extern char cdt[];
 extern char serial_no[];
+
 
 static void init_project_version(void)
 {
@@ -95,7 +99,7 @@ static void init_project_version(void)
     char *PCB_version_name = NULL;
     uint16_t index = 0;
 
-    if (g_project) {
+    if (smp_load_acquire(&g_project)) {
         return;
     } else {
         smem_addr = qcom_smem_get(QCOM_SMEM_HOST_ANY,
@@ -106,12 +110,13 @@ static void init_project_version(void)
             return;
         }
 
-        g_project = (ProjectInfoOCDT *)smem_addr;
-        if (g_project == ERR_PTR(-EPROBE_DEFER)) {
-            g_project = NULL;
+        /* Older phone firmware ends before the optional mid-platform tail. */
+        if (smem_size < offsetof(ProjectInfoOCDT, nDataMidPlat)) {
+            pr_err("short SMEM_PROJECT entry: %zu\n", smem_size);
             return;
         }
-
+        g_project_size = smem_size;
+        smp_store_release(&g_project, (ProjectInfoOCDT *)smem_addr);
         do {
             if(pcb_str[index].version == g_project->nDataSCDT.PCB){
                 PCB_version_name = pcb_str[index].str;
@@ -325,6 +330,118 @@ unsigned int get_serialID(void)
     return serial_id;
 }
 EXPORT_SYMBOL(get_serialID);
+
+static bool project_has_midplat_field(size_t offset, size_t size)
+{
+    init_project_version();
+    return g_project && offset <= g_project_size && size <= g_project_size - offset;
+}
+
+#define PROJECT_HAS_MIDPLAT_FIELD(field) \
+    project_has_midplat_field(offsetof(ProjectInfoOCDT, nDataMidPlat.field), \
+                              sizeof(g_project->nDataMidPlat.field))
+
+int get_midplat_version(void)
+{
+    if (!PROJECT_HAS_MIDPLAT_FIELD(nVersion))
+        return MIDPLAT_INFO_UNSUPPORTED;
+    return g_project->nDataMidPlat.nVersion;
+}
+EXPORT_SYMBOL(get_midplat_version);
+
+int get_midplat_feature_info(OPLUS_MID_PLAT_FEATURE_T feature)
+{
+    unsigned int version = get_midplat_version();
+
+    if ((unsigned int)feature >= OPLUS_FEAUTRE_MAX)
+        return -EINVAL;
+    if (version == MIDPLAT_INFO_UNSUPPORTED || version == MIDPLAT_INFO_CRC_ERR ||
+        !PROJECT_HAS_MIDPLAT_FIELD(infoMidPlat))
+        return -ENODATA;
+    return g_project->nDataMidPlat.infoMidPlat[feature];
+}
+EXPORT_SYMBOL(get_midplat_feature_info);
+
+unsigned int get_GKI_version(void) {
+    if (strstr(init_uts_ns.name.release, "abogki"))
+        return OPLUS_ACK_VERSION_OGKI;
+    else if (strstr(init_uts_ns.name.release, "-ab"))
+        return OPLUS_ACK_VERSION_GKI;
+    else if (strstr(init_uts_ns.name.release, "-o-") && !strstr(init_uts_ns.name.release, "-ab"))
+        return OPLUS_ACK_VERSION_OKI;
+
+    return OPLUS_ACK_VERSION_UNKNOWN;
+}
+EXPORT_SYMBOL(get_GKI_version);
+
+unsigned int get_kernel_major_version(void) {
+#ifdef LINUX_VERSION_MAJOR
+    return LINUX_VERSION_MAJOR;
+#else
+    return 0;
+#endif
+}
+EXPORT_SYMBOL(get_kernel_major_version);
+
+unsigned int get_kernel_patch_version(void) {
+#ifdef LINUX_VERSION_PATCHLEVEL
+    return LINUX_VERSION_PATCHLEVEL;
+#else
+    return 0;
+#endif
+}
+EXPORT_SYMBOL(get_kernel_patch_version);
+
+unsigned int get_kernel_sub_version(void) {
+#ifdef LINUX_VERSION_SUBLEVEL
+    return LINUX_VERSION_SUBLEVEL;
+#else
+    return 0;
+#endif
+}
+EXPORT_SYMBOL(get_kernel_sub_version);
+
+
+unsigned int get_kernel_version_code(void) {
+#ifdef LINUX_VERSION_CODE
+    return LINUX_VERSION_CODE;
+#else
+    return 0;
+#endif
+}
+EXPORT_SYMBOL(get_kernel_version_code);
+
+int get_vnd_platform(char *buf, int len)
+{
+    size_t copy_len;
+
+    if (!buf || len <= 0)
+        return -EINVAL;
+    buf[0] = '\0';
+    if (!PROJECT_HAS_MIDPLAT_FIELD(platform))
+        return -ENODATA;
+    copy_len = strnlen((const char *)g_project->nDataMidPlat.platform,
+                       sizeof(g_project->nDataMidPlat.platform));
+    copy_len = min_t(size_t, copy_len, len - 1);
+    memcpy(buf, g_project->nDataMidPlat.platform, copy_len);
+    buf[copy_len] = '\0';
+    return 0;
+}
+EXPORT_SYMBOL(get_vnd_platform);
+
+int get_vnd_chipset_brand(char *buf, int len)
+{
+    if (!buf || len <= 0)
+        return -EINVAL;
+    buf[0] = '\0';
+#ifdef OPLUS_VND_BUILD_CHIPSET_COMPANY
+    strscpy(buf, OPLUS_VND_BUILD_CHIPSET_COMPANY, len);
+    return 0;
+#else
+    return -ENODATA;
+#endif
+}
+EXPORT_SYMBOL(get_vnd_chipset_brand);
 
 static void dump_ocp_info(struct seq_file *s)
 {
