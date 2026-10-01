@@ -578,6 +578,7 @@ enum {
 	CHIP_ID_SC8547,
 	CHIP_ID_HL7138,
 	CHIP_ID_NU2112A,
+	CHIP_ID_SC6607A,
 };
 
 enum oplus_voocphy_ovp_ctrl {

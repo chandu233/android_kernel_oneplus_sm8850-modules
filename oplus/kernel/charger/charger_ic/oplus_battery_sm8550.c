@@ -12236,8 +12236,7 @@ err:
 	return -EINVAL;
 }
 
-static void fg_bq27541_get_device_name(char *name, int len)
-{
+static void fg_bq27541_get_device_name(char *name, int len) {
 	struct oplus_chg_chip *chip = g_oplus_chip;
 	int retry_count = 1;
 

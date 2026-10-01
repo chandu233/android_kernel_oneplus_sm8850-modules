@@ -72,6 +72,7 @@ struct oplus_gki_device {
 #if IS_ENABLED(CONFIG_OPLUS_CHG_STATE_KEEP)
 	struct work_struct keep_wired_online_update_work;
 #endif
+	struct work_struct get_current_from_hw_work;
 	struct votable *chg_disable_votable;
 	struct votable *wired_icl_votable;
 	struct votable *wired_fcc_votable;
@@ -86,6 +87,10 @@ struct oplus_gki_device {
 	struct delayed_work retention_checkout_work;
 	struct delayed_work usb_phy_suspend_recovery_work;
 	struct wakeup_source *status_wake_lock;
+
+	struct completion current_now_ack;
+	atomic_t updating_current;
+
 	bool status_wake_lock_on;
 	bool is_ui_keep;
 
@@ -109,6 +114,7 @@ struct oplus_gki_device {
 	int ui_soc;
 	int batt_capacity_mah;
 	int time_to_full;
+	int current_now;
 
 	bool wired_online;
 	int pre_wired_type;
@@ -217,6 +223,23 @@ static bool is_main_gauge_topic_available(struct oplus_gki_device *chip)
 }
 
 #define KEEP_CLEAN_INTERVAL	2000
+#define KEEP_CLEAN_INTERVAL_LONG	3000
+static void oplus_chg_wls_schedule_keep_clean_work(struct oplus_gki_device *chip)
+{
+	union mms_msg_data data = { 0 };
+	bool incar_status = false;
+	int rc;
+
+	if (chip->wls_topic) {
+		rc = oplus_mms_get_item_data(chip->wls_topic, WLS_ITEM_INCAR_STATUS, &data, true);
+		if (rc >= 0)
+			incar_status = !!data.intval;
+	}
+
+	schedule_delayed_work(&chip->status_keep_clean_work,
+		msecs_to_jiffies(incar_status ? KEEP_CLEAN_INTERVAL_LONG : KEEP_CLEAN_INTERVAL));
+}
+
 static int wls_psy_get_prop(struct power_supply *psy,
 		enum power_supply_property prop,
 		union power_supply_propval *pval)
@@ -261,7 +284,7 @@ static int wls_psy_get_prop(struct power_supply *psy,
 				pre_wls_online = pval->intval;
 				oplus_chg_wls_set_status_keep(chip->wls_topic, WLS_SK_BY_KERNEL);
 				pval->intval = 1;
-				schedule_delayed_work(&chip->status_keep_clean_work, msecs_to_jiffies(KEEP_CLEAN_INTERVAL));
+				oplus_chg_wls_schedule_keep_clean_work(chip);
 				chip->is_ui_keep = true;
 			} else {
 				pre_wls_online = pval->intval;
@@ -684,6 +707,66 @@ static int oplus_gki_get_batt_status(struct oplus_gki_device *chip)
 	return oplus_batt_status;
 }
 
+static int oplus_gki_get_batt_current_from_hw(struct oplus_gki_device *chip)
+{
+	struct oplus_mms *topic = chip->gauge_topic;
+	union mms_msg_data data = { 0 };
+
+	if (chip == NULL)
+		return 0;
+
+	if (is_support_parallel_battery(chip->gauge_topic) && is_main_gauge_topic_available(chip))
+		topic = chip->main_gauge_topic;
+
+	oplus_mms_get_item_data(topic, GAUGE_ITEM_CURR, &data, true);
+	return data.intval;
+}
+
+static void oplus_gki_get_batt_current_from_hw_work(struct work_struct *work)
+{
+	struct oplus_gki_device *chip = container_of(work, struct oplus_gki_device,
+		get_current_from_hw_work);
+
+	chip->current_now = oplus_gki_get_batt_current_from_hw(chip);
+	complete_all(&chip->current_now_ack);
+	atomic_set(&chip->updating_current, false);
+}
+
+#define CURRENT_NOW_UPDATE_INTERVAL_MS 1000
+#define CURRENT_NOW_TIMEOUT_MS 800
+static int oplus_gki_get_batt_current(struct oplus_gki_device *chip, bool is_charging)
+{
+	static unsigned long last_update_time = 0;
+	int rc;
+	union mms_msg_data data = { 0 };
+
+	if (chip == NULL) {
+		chg_err("chip is NULL");
+		return 0;
+	}
+
+	oplus_mms_get_item_data(chip->gauge_topic, GAUGE_ITEM_CURR, &data, false);
+	chip->current_now = data.intval;
+
+	if (!is_charging &&
+	    time_before(jiffies, last_update_time + msecs_to_jiffies(CURRENT_NOW_UPDATE_INTERVAL_MS)))
+		return chip->current_now;
+
+	if (atomic_read(&chip->updating_current)) {
+		chg_info("updating current already");
+		return chip->current_now;
+	}
+
+	atomic_set(&chip->updating_current, true);
+	reinit_completion(&chip->current_now_ack);
+	schedule_work(&chip->get_current_from_hw_work);
+	rc = wait_for_completion_interruptible_timeout(&chip->current_now_ack, msecs_to_jiffies(CURRENT_NOW_TIMEOUT_MS));
+	if (rc > 0)
+		last_update_time = jiffies;
+
+	return chip->current_now;
+}
+
 #define KPOC_FORCE_VBUS_MV 5000
 #define FORCE_VBUS_5V_TIME 10000
 static int battery_psy_get_prop(struct power_supply *psy,
@@ -791,14 +874,7 @@ static int battery_psy_get_prop(struct power_supply *psy,
 #endif
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
-		if (is_support_parallel_battery(chip->gauge_topic) &&
-		    is_main_gauge_topic_available(chip))
-			rc = oplus_mms_get_item_data(chip->main_gauge_topic, GAUGE_ITEM_CURR,
-						     &data, (chip->wired_online || chip->wls_online));
-		else
-			rc = oplus_mms_get_item_data(chip->gauge_topic, GAUGE_ITEM_CURR,
-						     &data, (chip->wired_online || chip->wls_online));
-		pval->intval = data.intval;
+		pval->intval = oplus_gki_get_batt_current(chip, chip->wired_online || chip->wls_online);
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT:
 		pval->intval = 6500000;
@@ -2150,6 +2226,9 @@ static __init int oplus_chg_gki_init(void)
 #if IS_ENABLED(CONFIG_OPLUS_CHG_STATE_KEEP)
 	INIT_WORK(&gki_dev->keep_wired_online_update_work, oplus_gki_keep_wired_online_update_work);
 #endif
+	INIT_WORK(&gki_dev->get_current_from_hw_work, oplus_gki_get_batt_current_from_hw_work);
+	atomic_set(&gki_dev->updating_current, false);
+	init_completion(&gki_dev->current_now_ack);
 	INIT_DELAYED_WORK(&gki_dev->retention_checkout_work, oplus_gki_retention_checkout_work);
 	INIT_DELAYED_WORK(&gki_dev->usb_phy_suspend_recovery_work,
 		oplus_usb_phy_suspend_recovery_work);

@@ -1830,7 +1830,7 @@ static int oplus_chg_vc_adc_enable(struct oplus_chg_ic_dev *ic_dev, bool en)
 	return err;
 }
 
-static int oplus_chg_vc_get_adc_enable(struct oplus_chg_ic_dev *ic_dev, bool *en)
+static int oplus_chg_vc_get_adc_enable(struct oplus_chg_ic_dev *ic_dev, bool *status)
 {
 	struct oplus_virtual_cp_ic *vc;
 	int i;
@@ -1845,7 +1845,7 @@ static int oplus_chg_vc_get_adc_enable(struct oplus_chg_ic_dev *ic_dev, bool *en
 	vc = oplus_chg_ic_get_drvdata(ic_dev);
 	for (i = 0; i < vc->child_num; i++) {
 		rc = oplus_chg_ic_func(vc->child_list[i].ic_dev,
-			OPLUS_IC_FUNC_CP_GET_ADC_ENABLE, en);
+			OPLUS_IC_FUNC_CP_GET_ADC_ENABLE, status);
 		if (rc < 0) {
 			if (rc != -ENOTSUPP)
 				chg_err("child ic[%d] error, rc=%d\n", i, rc);
@@ -2653,7 +2653,7 @@ static const struct proc_ops oplus_vc_connect_type_ops =
 };
 #endif
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)) || IS_ENABLED(CONFIG_OPLUS_CHARGER_UNISOC)
 static struct proc_dir_entry *charger_dir = NULL;
 #endif
 static int oplus_virtual_cp_proc_init(struct oplus_virtual_cp_ic *chip)
@@ -2662,7 +2662,7 @@ static int oplus_virtual_cp_proc_init(struct oplus_virtual_cp_ic *chip)
 	struct proc_dir_entry *pr_entry_tmp;
 	char name_buf[CP_NAME_BUF_MAX] = { 0 };
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)) || IS_ENABLED(CONFIG_OPLUS_CHARGER_UNISOC)
 	charger_dir = proc_mkdir("charger_cp", NULL);
 	if (!charger_dir) {
 		chg_err("Couldn't create charger proc entry\n");
@@ -2774,7 +2774,7 @@ static int oplus_virtual_cp_probe(struct platform_device *pdev)
 	return 0;
 
 child_init_err:
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)) || IS_ENABLED(CONFIG_OPLUS_CHARGER_UNISOC)
 	if (chip->reg_proc_node && charger_dir != NULL) {
 		snprintf(name_buf, CP_NAME_BUF_MAX - 1, "cp_%d", chip->ic_dev->index);
 		chg_err("remove virtual_cp index cp_%d\n", chip->ic_dev->index);
@@ -2820,7 +2820,7 @@ static int oplus_virtual_cp_remove(struct platform_device *pdev)
 	if (chip->ic_dev->online)
 		oplus_chg_vc_exit(chip->ic_dev);
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)) || IS_ENABLED(CONFIG_OPLUS_CHARGER_UNISOC)
 	if (chip->reg_proc_node && charger_dir != NULL) {
 		snprintf(name_buf, CP_NAME_BUF_MAX - 1, "cp_%d", chip->ic_dev->index);
 		chg_err("oplus_virtual_cp_remove index cp_%d\n", chip->ic_dev->index);

@@ -1821,6 +1821,8 @@ static int sc8547d_read_flags(struct sc8547d_device *chip)
 		err_flag |= BIT(UFCS_RECV_ERR_ACK_TIMEOUT);
 	if (flag_buf[0] & SC8547D_FLAG_MSG_TRANS_FAIL)
 		err_flag |= BIT(UFCS_RECV_ERR_TRANS_FAIL);
+	if (flag_buf[0] & SC8547D_RX_BUFFER_BUSY_FLAG)
+		err_flag |= BIT(UFCS_RECV_ERR_BUFF_BUSY);
 	if (flag_buf[0] & SC8547D_FLAG_RX_OVERFLOW)
 		err_flag |= BIT(UFCS_COMM_ERR_RX_OVERFLOW);
 	if (flag_buf[0] & SC8547D_FLAG_DATA_READY)
@@ -1962,7 +1964,15 @@ retry:
 
 static int sc8547d_ufcs_cable_hard_reset(struct ufcs_dev *ufcs)
 {
-	return 0;
+	struct sc8547d_device *chip = ufcs->drv_data;
+	int rc;
+
+	rc = sc8547d_write_bit_mask(chip, SC8547D_ADDR_UFCS_CTRL1, SEND_CABLE_HARDRESET,
+		SEND_CABLE_HARDRESET);
+	if (rc < 0)
+		chg_err("set cable reset error, rc=%d\n", rc);
+
+	return rc;
 }
 
 static int sc8547d_ufcs_set_baud_rate(struct ufcs_dev *ufcs, enum ufcs_baud_rate baud)
@@ -2128,6 +2138,23 @@ static u8 sc8547d_voocphy_get_vbus_status(struct oplus_voocphy_manager *chip)
 	}
 
 	return sc8547d_get_vbus_status(dev);
+}
+
+static int sc8547d_ufcs_hiz_enable(struct ufcs_dev *ufcs, bool en)
+{
+	struct sc8547d_device *chip = ufcs->drv_data;
+	int rc = 0;
+	u8 data = 0;
+
+	if (en)
+		data = SC8547D_SEND_ENABLE_HIZ;
+	else
+		data = 0;
+	rc = sc8547d_write_bit_mask(chip, SC8547D_ADDR_UFCS_CTRL2, SC8547D_SEND_ENABLE_HIZ, data);
+	if (rc < 0)
+		chg_err("set ufcs hiz %d error, rc=%d\n", en, rc);
+
+	return rc;
 }
 
 static void sc8547_create_device_node(struct device *dev)
@@ -2576,6 +2603,17 @@ reset_dpdm_err:
 	return rc;
 }
 
+static int sc8547d_ufcs_clr_rx_buf(struct ufcs_dev *ufcs)
+{
+	struct sc8547d_device *chip = ufcs->drv_data;
+	int rc;
+
+	rc = sc8547d_write_bit_mask(chip, SC8547D_ADDR_UFCS_CTRL2, SC8547D_SEND_CLR_RX_BUF, SC8547D_SEND_CLR_RX_BUF);
+	if (rc < 0)
+		chg_err("clear rx buf error, rc=%d\n", rc);
+	return rc;
+}
+
 static struct ufcs_dev_ops ufcs_ops = {
 	.init = sc8547d_ufcs_init,
 	.write_msg = sc8547d_ufcs_write_msg,
@@ -2589,6 +2627,8 @@ static struct ufcs_dev_ops ufcs_ops = {
 	.watchdog_config = sc8547d_ufcs_cp_watchdog_config,
 	.retrieve_flags = sc8547d_retrieve_flags,
 	.reset_dpdm = sc8547d_cp_reset_dpdm,
+	.hiz_enable = sc8547d_ufcs_hiz_enable,
+	.clr_rx_buf = sc8547d_ufcs_clr_rx_buf,
 };
 
 static int sc8547_charger_choose(struct sc8547d_device *chip)

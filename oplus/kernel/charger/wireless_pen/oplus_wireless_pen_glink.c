@@ -12,7 +12,6 @@
 #include <linux/of_gpio.h>
 #include <linux/mutex.h>
 #include <linux/iio/consumer.h>
-
 #ifndef CONFIG_DISABLE_OPLUS_FUNCTION
 #include <soc/oplus/system/boot_mode.h>
 #include <soc/oplus/system/oplus_project.h>
@@ -22,6 +21,7 @@
 #include <linux/rtc.h>
 #include <linux/device.h>
 #include <linux/of_platform.h>
+#include <linux/platform_device.h>
 #include "oplus_wireless_pen_glink.h"
 
 #ifndef CONFIG_OPLUS_CHARGER_MTK
@@ -187,15 +187,27 @@ static int wireless_pen_glink_probe(struct platform_device *pdev)
 	return 0;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+static void wireless_pen_glink_remove(struct platform_device *pdev)
+#else
 static int wireless_pen_glink_remove(struct platform_device *pdev)
+#endif
 {
 	if (!g_wpgdev)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+		return;
+#else
 		return 0;
+#endif
 
 	pmic_glink_unregister_client(g_wpgdev->client);
 	devm_kfree(g_wpgdev->dev, g_wpgdev);
 	g_wpgdev = NULL;
-	return 0;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+		return;
+#else
+		return 0;
+#endif
 }
 
 static const struct of_device_id wireless_pen_match_table[] = {

@@ -70,7 +70,7 @@ re_recv:
 		fallthrough;
 	case UFCS_EVENT_TIMEOUT:
 		ufcs_free_event(class, &event);
-		class->state.curr = PE_STATE_IDEL;
+		class->state.curr = PE_STATE_IDLE;
 		return -EPROTO;
 	case UFCS_EVENT_OPLUS_RECV_EMARK_INFO_MSG:
 		msg = event->msg;
@@ -153,7 +153,7 @@ re_recv:
 		fallthrough;
 	case UFCS_EVENT_TIMEOUT:
 		ufcs_free_event(class, &event);
-		class->state.curr = PE_STATE_IDEL;
+		class->state.curr = PE_STATE_IDLE;
 		return -EPROTO;
 	case UFCS_EVENT_OPLUS_RECV_POWER_INFO_MSG:
 		msg = event->msg;

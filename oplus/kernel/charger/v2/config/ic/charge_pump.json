@@ -5,7 +5,7 @@
     "enum_list": [
         {
             "name": "oplus_cp_work_mode",
-            "desc":{
+            "desc": {
                 "zh": "虚拟IC框架CP工作模式类型"
             },
             "list": [
@@ -76,7 +76,7 @@
         },
         {
             "name": "oplus_cp_strategy_type",
-            "desc":{
+            "desc": {
                 "zh": "CP开关控制策略类型"
             },
             "list": [
@@ -98,7 +98,7 @@
         },
         {
             "name": "oplus_chg_cp_error",
-            "desc":{
+            "desc": {
                 "zh": "电荷泵故障类型"
             },
             "list": [
@@ -196,7 +196,9 @@
                 "zh": "电荷泵使能（并不会开启充电）"
             },
             "auto_debug_code": true,
-            "parameter_list": ["bool"],
+            "parameter_list": [
+                "bool"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-1",
@@ -247,7 +249,9 @@
                 "zh": "设置电荷泵工作模式"
             },
             "auto_debug_code": true,
-            "parameter_list": ["enum oplus_cp_work_mode"],
+            "parameter_list": [
+                "enum oplus_cp_work_mode"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -279,7 +283,9 @@
                 "zh": "获取电荷泵工作模式"
             },
             "auto_debug_code": true,
-            "parameter_list": ["enum oplus_cp_work_mode *"],
+            "parameter_list": [
+                "enum oplus_cp_work_mode *"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -290,7 +296,7 @@
                 }
             ],
             "vict": {
-               "read": {
+                "read": {
                     "cmd": "vict -f {id} -G vic-*",
                     "desc": {
                         "zh": "返回电荷泵的工作模式"
@@ -311,7 +317,9 @@
                 "zh": "检查电荷泵是否支持某个工作模式"
             },
             "auto_debug_code": true,
-            "parameter_list": ["enum oplus_cp_work_mode"],
+            "parameter_list": [
+                "enum oplus_cp_work_mode"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -343,7 +351,9 @@
                 "zh": "设置电荷泵输入电流（主要用来控制从CP的开启和关闭）"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int"],
+            "parameter_list": [
+                "int"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -375,7 +385,9 @@
                 "zh": "获取电荷泵输入电压"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *"],
+            "parameter_list": [
+                "int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -386,7 +398,7 @@
                 }
             ],
             "vict": {
-               "read": {
+                "read": {
                     "cmd": "vict -f {id} -G vic-*",
                     "desc": {
                         "zh": "返回获取到的电压"
@@ -407,7 +419,9 @@
                 "zh": "获取电荷泵输入电流"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *"],
+            "parameter_list": [
+                "int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -418,7 +432,7 @@
                 }
             ],
             "vict": {
-               "read": {
+                "read": {
                     "cmd": "vict -f {id} -G vic-*",
                     "desc": {
                         "zh": "返回获取到的电流"
@@ -439,7 +453,9 @@
                 "zh": "获取电荷泵输出电压"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *"],
+            "parameter_list": [
+                "int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -450,7 +466,7 @@
                 }
             ],
             "vict": {
-               "read": {
+                "read": {
                     "cmd": "vict -f {id} -G vic-*",
                     "desc": {
                         "zh": "返回获取到的电压"
@@ -471,7 +487,9 @@
                 "zh": "获取电荷泵输出电流"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *"],
+            "parameter_list": [
+                "int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -482,14 +500,14 @@
                 }
             ],
             "vict": {
-               "read": {
+                "read": {
                     "cmd": "vict -f {id} -G vic-*",
                     "desc": {
                         "zh": "返回获取到的电流"
                     }
                 },
                 "write": false,
-                 "overwrite": {
+                "overwrite": {
                     "cmd": "vict -f {id} -O {val} vic-*",
                     "desc": {
                         "zh": "使用val覆盖传出的电流"
@@ -503,7 +521,9 @@
                 "zh": "获取USB口输入电压"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *"],
+            "parameter_list": [
+                "int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -514,14 +534,14 @@
                 }
             ],
             "vict": {
-               "read": {
+                "read": {
                     "cmd": "vict -f {id} -G vic-*",
                     "desc": {
                         "zh": "返回获取到的电压"
                     }
                 },
                 "write": false,
-                 "overwrite": {
+                "overwrite": {
                     "cmd": "vict -f {id} -O {val} vic-*",
                     "desc": {
                         "zh": "使用val覆盖USB口输入电压"
@@ -535,7 +555,9 @@
                 "zh": "开启电荷泵"
             },
             "auto_debug_code": true,
-            "parameter_list": ["bool"],
+            "parameter_list": [
+                "bool"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-1",
@@ -553,7 +575,7 @@
                         "zh": "设置电荷泵是否开启，是否开启由val决定"
                     }
                 },
-                 "overwrite": {
+                "overwrite": {
                     "cmd": "vict -f {id} -O {val} vic-*",
                     "desc": {
                         "zh": "使用val覆盖传入的开启状态"
@@ -567,7 +589,9 @@
                 "zh": "获取电荷泵工作（开启）状态"
             },
             "auto_debug_code": true,
-            "parameter_list": ["bool *"],
+            "parameter_list": [
+                "bool *"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-1",
@@ -578,14 +602,14 @@
                 }
             ],
             "vict": {
-               "read": {
+                "read": {
                     "cmd": "vict -f {id} -G vic-*",
                     "desc": {
                         "zh": "返回电荷泵的开启状态"
                     }
                 },
                 "write": false,
-                 "overwrite": {
+                "overwrite": {
                     "cmd": "vict -f {id} -O {val} vic-*",
                     "desc": {
                         "zh": "使用val覆盖传出的开启状态"
@@ -599,7 +623,9 @@
                 "zh": "开启电荷泵的ADC功能"
             },
             "auto_debug_code": true,
-            "parameter_list": ["bool"],
+            "parameter_list": [
+                "bool"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-1",
@@ -617,7 +643,7 @@
                         "zh": "设置电荷泵ADC是否开启，是否开启由val决定"
                     }
                 },
-                 "overwrite": {
+                "overwrite": {
                     "cmd": "vict -f {id} -O {val} vic-*",
                     "desc": {
                         "zh": "使用val覆盖传入的开启状态"
@@ -631,7 +657,9 @@
                 "zh": "设置电荷泵watchdog开关及timeout时长"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int"],
+            "parameter_list": [
+                "int"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -649,7 +677,7 @@
                         "zh": "设置电荷泵watchdog timeout时长，由val决定，单位毫秒"
                     }
                 },
-                 "overwrite": {
+                "overwrite": {
                     "cmd": "vict -f {id} -O {val} vic-*",
                     "desc": {
                         "zh": "使用val覆盖传出的watchdog timeout时长，单位毫秒"
@@ -663,7 +691,9 @@
                 "zh": "获取CP温度"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *"],
+            "parameter_list": [
+                "int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -695,7 +725,9 @@
                 "zh": "关闭ucp"
             },
             "auto_debug_code": true,
-            "parameter_list": ["bool"],
+            "parameter_list": [
+                "bool"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-1",
@@ -713,7 +745,7 @@
                         "zh": "开关UCP"
                     }
                 },
-                 "overwrite": {
+                "overwrite": {
                     "cmd": "vict -f {id} -O {val} vic-*",
                     "desc": {
                         "zh": "使用val覆盖传入的开启状态"
@@ -727,7 +759,10 @@
                 "zh": "获取CP在某个工作模式下最大支持的输入电流"
             },
             "auto_debug_code": true,
-            "parameter_list": ["enum oplus_cp_work_mode", "int *"],
+            "parameter_list": [
+                "enum oplus_cp_work_mode",
+                "int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -775,7 +810,9 @@
                 "zh": "SS timeout和ucp开关"
             },
             "auto_debug_code": true,
-            "parameter_list": ["bool"],
+            "parameter_list": [
+                "bool"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-1",
@@ -793,7 +830,7 @@
                         "zh": "SS timeout和ucp开关"
                     }
                 },
-                 "overwrite": {
+                "overwrite": {
                     "cmd": "vict -f {id} -O {val} vic-*",
                     "desc": {
                         "zh": "使用val覆盖传入的开启状态"
@@ -807,7 +844,9 @@
                 "zh": "读取电荷泵的ADC的开启状态"
             },
             "auto_debug_code": true,
-            "parameter_list": ["bool *"],
+            "parameter_list": [
+                "bool *"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-1",
@@ -839,7 +878,9 @@
                 "zh": "设置开启PMID2VOUT的过压保护"
             },
             "auto_debug_code": true,
-            "parameter_list": ["bool"],
+            "parameter_list": [
+                "bool"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-1",
@@ -871,7 +912,9 @@
                 "zh": "获取电荷泵反向输出电压"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *"],
+            "parameter_list": [
+                "int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -882,7 +925,7 @@
                 }
             ],
             "vict": {
-               "read": {
+                "read": {
                     "cmd": "vict -f {id} -G vic-*",
                     "desc": {
                         "zh": "返回获取到的电压"
@@ -898,6 +941,5 @@
             }
         }
     ],
-
     "version": "V2.6:23:d5086394b1f02a1a8a6f4c94bf38ebbe5bdcf48749e8842a63d691333f7ec47c"
 }

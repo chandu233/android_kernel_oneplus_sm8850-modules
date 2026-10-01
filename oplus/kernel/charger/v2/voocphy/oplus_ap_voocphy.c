@@ -3179,6 +3179,12 @@ static int oplus_voocphy_handle_is_vbus_ok_cmd(struct oplus_voocphy_manager *chi
 		voocphy_info("Notify mtk typec to ignore pd vbus irq");
 	}
 
+	if (chip->cancel_primary_switch == true && (chip->adapter_type == ADAPTER_VOOC20 ||
+							chip->adapter_type == ADAPTER_VOOC30)) {
+		oplus_chglib_set_vooc_startup(chip->dev, 1);
+		voocphy_info("Notify mtk typec to ignore pd vbus irq");
+	}
+
 	if (chip->vooc_vbus_status == VOOC_VBUS_NORMAL) {
 		switch (chip->adapter_type) {
 		case ADAPTER_VOOC20 :
@@ -5867,6 +5873,16 @@ static int oplus_voocphy_curr_event_handle(struct device *dev, unsigned long dat
 				else
 					oplus_voocphy_set_slave_chg_pmid2out(chip, true, SETTING_REASON_VOOC);
 			}
+		} else if (chip->chip_id == CHIP_ID_SC6607A) {
+			pmid2out_status = oplus_voocphy_get_chg_pmid2out(chip);
+			voocphy_err("sc6607a pmid2out 600mv = %d, chip->master_cp_ichg = %d\n", pmid2out_status, chip->master_cp_ichg);
+			if (pmid2out_status == false && chip->master_cp_ichg > 500) {
+				voocphy_err("IBUS > 500mA set pmid2vout 600mv !\n");
+				if (chip->adapter_type == ADAPTER_SVOOC)
+					oplus_voocphy_set_chg_pmid2out(chip, true, SETTING_REASON_SVOOC);
+				else
+					oplus_voocphy_set_chg_pmid2out(chip, true, SETTING_REASON_VOOC);
+			}
 		}
 	}
 
@@ -6107,6 +6123,7 @@ void oplus_voocphy_request_fastchg_curv(struct oplus_voocphy_manager *chip)
 {
 	static int cc_cnt = 0;
 	int idx = 0;
+	int cycle_degraded_current = 0;
 	int convert_ibus = 0;
 	static int switch_ocp_cnt = 0;
 	struct batt_sys_curves *batt_sys_curv_by_tmprange = NULL;
@@ -7644,6 +7661,9 @@ static int oplus_voocphy_parse_batt_curves(struct oplus_voocphy_manager *chip)
 	}
 
 	oplus_voocphy_parse_full_voltage(chip, node);
+
+	chip->cancel_primary_switch = of_property_read_bool(node, "oplus_spec,cancel_primary_switch");
+	voocphy_info("cancel_primary_switch = %d\n", chip->cancel_primary_switch);
 
 	chip->cancel_primary_switch = of_property_read_bool(node, "oplus_spec,cancel_primary_switch");
 	voocphy_info("cancel_primary_switch = %d\n", chip->cancel_primary_switch);

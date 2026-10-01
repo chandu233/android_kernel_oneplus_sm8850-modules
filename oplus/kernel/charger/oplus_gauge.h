@@ -156,6 +156,7 @@ struct oplus_gauge_operations {
 	int (*get_sili_ic_deep_term_volt)(void);
 	void (*get_device_name)(char *name, int len);
 	int (*get_battery_dod)(int index);
+	int (*get_gauge_c_soc)(int *c_soc);
 };
 
 /****************************************

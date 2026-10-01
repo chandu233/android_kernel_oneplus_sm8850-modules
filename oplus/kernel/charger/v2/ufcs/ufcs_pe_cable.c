@@ -20,6 +20,26 @@
 extern int ufcs_check_refuse_msg(struct ufcs_class *class, struct ufcs_msg *msg,
 	enum ufcs_msg_type type, u8 cmd);
 
+static int ufcs_enable_hiz(struct ufcs_class *class, bool en)
+{
+	struct ufcs_dev *ufcs = class->ufcs;
+	int rc = 0;
+
+	if (ufcs->ops->hiz_enable)
+		rc = ufcs->ops->hiz_enable(ufcs, en);
+
+	return rc;
+}
+
+int ufcs_pe_send_accept(struct ufcs_class *class)
+{
+	int rc = 0;
+
+	rc = ufcs_send_ctrl_msg_accept_retry(class);
+
+	return rc;
+}
+
 int ufcs_pe_start_cable_detect(struct ufcs_class *class)
 {
 	struct ufcs_msg *msg;
@@ -68,13 +88,15 @@ re_recv:
 			ufcs_free_event(class, &event);
 			goto retry;
 		}
-		fallthrough;
+		rc = -EPROTO;
+		goto out;
 	case UFCS_EVENT_TIMEOUT:
 		stop_sender_response_timer(class);
 		ufcs_free_event(class, &event);
-		class->state.curr = PE_STATE_IDEL;
+		class->state.curr = PE_STATE_IDLE;
 		return -EPROTO;
 	case UFCS_EVENT_RECV_ACCEPT:
+		class->cable_accpet = true;
 		stop_sender_response_timer(class);
 		rc = 0;
 		break;
@@ -145,11 +167,12 @@ re_recv:
 			ufcs_free_event(class, &event);
 			goto retry;
 		}
-		fallthrough;
+		rc = -EPROTO;
+		goto out;
 	case UFCS_EVENT_TIMEOUT:
 		stop_sender_response_timer(class);
 		ufcs_free_event(class, &event);
-		class->state.curr = PE_STATE_IDEL;
+		class->state.curr = PE_STATE_IDLE;
 		return -EPROTO;
 	case UFCS_EVENT_RECV_CABLE_INFO:
 		msg = event->msg;
@@ -160,7 +183,9 @@ re_recv:
 		}
 		stop_sender_response_timer(class);
 		rc = 0;
-		class->cable_info = msg->data_msg.cable_info.info;
+		memmove(class->cable_info, msg->data_msg.cable_info.info, UFCS_CABLE_INFO_SIZE);
+		class->cable_info_legacy = msg->data_msg.cable_info.legacy;
+		class->cable_info_legacy_rc = msg->data_msg.cable_info.legacy_rc;
 		break;
 	case UFCS_EVENT_RECV_SOFT_RESET:
 		stop_sender_response_timer(class);
@@ -187,6 +212,7 @@ int ufcs_pe_end_cable_detect(struct ufcs_class *class)
 {
 	int rc;
 
+	class->cable_accpet = false;
 	rc = ufcs_send_ctrl_msg_end_cable_detect_retry(class);
 	if (rc < 0) {
 		ufcs_err("send end cable detect msg error, rc=%d\n", rc);
@@ -202,13 +228,11 @@ int ufcs_pe_detect_cable_info(struct ufcs_class *class)
 {
 	struct ufcs_msg *msg;
 	struct ufcs_event *event = NULL;
-	bool soft_reset = false;
 	bool wait_start = false;
 	bool wait_end = false;
 	bool wait_cable_info = false;
 	int rc;
 
-retry:
 	rc = ufcs_send_ctrl_msg_detect_cable_info_retry(class);
 	if (rc < 0) {
 		ufcs_err("send detect cable info msg error, rc=%d\n", rc);
@@ -235,39 +259,32 @@ re_recv:
 			goto re_recv;
 		}
 		rc = ufcs_check_refuse_msg(class, msg, UFCS_CTRL_MSG, CTRL_MSG_DETECT_CABLE_INFO);
-		if (rc >= 0) {
-			ufcs_free_event(class, &event);
-			goto re_recv;
-		}
-		stop_sender_response_timer(class);
-		if (rc == -EAGAIN) {
-			if (soft_reset)
-				goto out;
-			ufcs_send_ctrl_msg_soft_reset(class);
-			soft_reset = true;
-			ufcs_free_event(class, &event);
-			goto retry;
-		}
-		fallthrough;
+		rc = -EPROTO;
+		goto out;
 	case UFCS_EVENT_TIMEOUT:
 		if (wait_start) {
 			stop_cable_info_timer(class);
 			ufcs_err("wait start cable detect timeout\n");
+			class->state.curr = PE_STATE_IDLE;
+			return -EPROTO;
 		}
 		if (wait_end) {
-			stop_cable_info_timer(class);
 			stop_restart_trans_timer(class);
-			/* TODO: resume communication */
 			ufcs_err("wait end cable detect timeout\n");
+			ufcs_free_event(class, &event);
+			ufcs_enable_hiz(class, false);
+			wait_end = false;
+			goto re_recv;
 		}
 		if (wait_cable_info) {
 			stop_cable_info_timer(class);
 			stop_restart_trans_timer(class);
-			/* TODO: resume communication */
 			ufcs_err("wait cable info timeout\n");
+			class->state.curr = PE_STATE_IDLE;
+			return -EPROTO;
 		}
 		ufcs_free_event(class, &event);
-		class->state.curr = PE_STATE_IDEL;
+		class->state.curr = PE_STATE_IDLE;
 		return -EPROTO;
 	case UFCS_EVENT_RECV_ACCEPT:
 		stop_sender_response_timer(class);
@@ -278,15 +295,25 @@ re_recv:
 	case UFCS_EVENT_RECV_START_CABLE_DETECT:
 		wait_start = false;
 		wait_end = true;
+
+		rc = ufcs_pe_send_accept(class);
+		if (rc < 0) {
+			ufcs_err("send accpet msg error, rc=%d\n", rc);
+			goto out;
+		}
 		start_restart_trans_timer(class);
-		/* TODO: stop communication */
+		rc = ufcs_enable_hiz(class, true);
+		if (rc < 0) {
+			ufcs_err("enable hiz error, rc=%d\n", rc);
+			goto out;
+		}
 		ufcs_free_event(class, &event);
 		goto re_recv;
 	case UFCS_EVENT_RECV_END_CABLE_DETECT:
 		wait_end = false;
 		wait_cable_info = true;
 		stop_restart_trans_timer(class);
-		/* TODO: resume communication */
+		ufcs_enable_hiz(class, false);
 		ufcs_free_event(class, &event);
 		goto re_recv;
 	case UFCS_EVENT_RECV_CABLE_INFO:
@@ -298,7 +325,9 @@ re_recv:
 		}
 		stop_cable_info_timer(class);
 		rc = 0;
-		class->cable_info = msg->data_msg.cable_info.info;
+		memmove(class->cable_info, msg->data_msg.cable_info.info, UFCS_CABLE_INFO_SIZE);
+		class->cable_info_legacy = msg->data_msg.cable_info.legacy;
+		class->cable_info_legacy_rc = msg->data_msg.cable_info.legacy_rc;
 		break;
 	case UFCS_EVENT_RECV_SOFT_RESET:
 		stop_sender_response_timer(class);
@@ -317,6 +346,7 @@ re_recv:
 	}
 
 out:
+	ufcs_enable_hiz(class, false);
 	stop_sender_response_timer(class);
 	stop_cable_info_timer(class);
 	stop_restart_trans_timer(class);

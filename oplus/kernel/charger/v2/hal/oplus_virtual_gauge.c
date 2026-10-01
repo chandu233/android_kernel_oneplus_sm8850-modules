@@ -3436,7 +3436,6 @@ static int oplus_chg_vg_get_batt_sn(struct oplus_chg_ic_dev *ic_dev, char *buf, 
 				i, rc);
 		break;
 	}
-	chg_err("oplus_chg_vg_get_batt_sn %s", buf);
 
 	return rc;
 }
@@ -3903,6 +3902,35 @@ static int oplus_chg_vg_get_sn_match(struct oplus_chg_ic_dev *ic_dev, bool *matc
 		rc = oplus_chg_ic_func(chip->child_list[i].ic_dev, OPLUS_IC_FUNC_GAUGE_GET_SN_MATCH, match);
 		if (rc < 0)
 			chg_err("child ic[%d] get sn match error, rc=%d\n", i, rc);
+		break;
+	}
+
+	return rc;
+}
+
+static int oplus_chg_vg_get_gauge_c_soc(struct oplus_chg_ic_dev *ic_dev, int *c_soc)
+{
+	struct oplus_virtual_gauge_ic *chip;
+	int i;
+	int rc = 0;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+
+	chip = oplus_chg_ic_get_drvdata(ic_dev);
+	for (i = 0; i < chip->child_num; i++) {
+		if (!func_is_support(&chip->child_list[i],
+				     OPLUS_IC_FUNC_GAUGE_GET_C_SOC)) {
+			rc = (rc == 0) ? -ENOTSUPP : rc;
+			continue;
+		}
+
+		rc = oplus_chg_ic_func(chip->child_list[i].ic_dev,
+				       OPLUS_IC_FUNC_GAUGE_GET_C_SOC, c_soc);
+		if (rc < 0)
+			chg_err("child ic[%d] gauge get c_soc error, rc=%d\n", i, rc);
 		break;
 	}
 
@@ -4905,6 +4933,10 @@ static void *oplus_chg_vg_get_func(struct oplus_chg_ic_dev *ic_dev,
 	case OPLUS_IC_FUNC_GAUGE_FFC_RA0_CHECK:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_GAUGE_FFC_RA0_CHECK,
 			oplus_chg_vg_ra0_check);
+		break;
+	case OPLUS_IC_FUNC_GAUGE_GET_C_SOC:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_GAUGE_GET_C_SOC,
+			oplus_chg_vg_get_gauge_c_soc);
 		break;
 	default:
 		chg_err("this func(=%d) is not supported\n", func_id);

@@ -31,6 +31,7 @@ enum dischg_boost_topic_item {
 	DISCHG_BOOST_ITEM_DEV_ID,
 };
 
+void oplus_boost_set_fam_en(struct oplus_mms *topic, bool en);
 void oplus_boost_cv_mv_store(struct oplus_mms *topic, int val);
 int oplus_boost_cv_mv_show(struct oplus_mms *topic);
 void oplus_boost_disable_auto_mode_store(struct oplus_mms *topic, int val);

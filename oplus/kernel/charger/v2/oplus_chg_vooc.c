@@ -1182,6 +1182,7 @@ static bool oplus_vooc_batt_volt_is_good(struct oplus_chg_vooc *chip)
 		index = TEMP_REGION_PRE_NORMAL - VOOC_BAD_VOLT_INDEX;
 		break;
 	case TEMP_REGION_NORMAL:
+	case TEMP_REGION_NORMAL_MID:
 	case TEMP_REGION_NORMAL_HIGH:
 	case TEMP_REGION_WARM:
 	case TEMP_REGION_HOT:
@@ -1552,6 +1553,7 @@ enable_check:
 			vote(chip->vooc_disable_votable, WARM_FULL_VOTER, false,
 			     0, false);
 		}
+
 	}
 
 	if (is_client_vote_enabled(chip->vooc_disable_votable,
@@ -2701,19 +2703,6 @@ FASTCHG_TEMP_RANGE_MAX, 			9		-3	FASTCHG_TEMP_RANGE_MAX, 		6
 	return ret;
 }
 
-__maybe_unused static int oplus_get_cur_bat_soc(struct oplus_chg_vooc *chip)
-{
-	int soc = 0;
-	union mms_msg_data data = { 0 };
-	if (chip->gauge_topic != NULL) {
-		oplus_mms_get_item_data(chip->gauge_topic, GAUGE_ITEM_SOC,
-					&data, true);
-		soc = data.intval;
-	} else {
-		soc = 50; /* default soc is 50% */
-	}
-	return soc;
-}
 
 static int oplus_get_cur_ui_soc(struct oplus_chg_vooc *chip)
 {

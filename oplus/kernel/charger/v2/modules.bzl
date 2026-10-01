@@ -37,6 +37,46 @@ conditional_ko_deps = {
             soc_label("{target_variant}/arch/arm64/gunyah/gh_arm_drv"),
         ],
     },
+    "CONFIG_OPLUS_CHARGER_MTK": {
+        True: [
+                "//kernel_device_modules-{}/drivers/misc/mediatek/typec/tcpc:tcpc_class".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/misc/mediatek/typec/tcpc:tcpc_mt6375".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/misc/mediatek/usb/usb20:musb_hdrc".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/gpu/drm/mediatek/mediatek_v2:mediatek-drm".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:charger_class".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:adapter_class".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:mtk_charger_algorithm_class".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:mt6357_battery".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:mt6358_battery".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:mt6375-battery".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:mt6375-charger".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:mt6379-battery".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:mt6379-chg".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:mtk_2p_charger".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:mtk_battery_manager".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:mtk_chg_type_det".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:mtk_hvbpc".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:mtk_pd_adapter".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:mtk_pd_charging".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:mtk_pep".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:mtk_pep20".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:mtk_pep40".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:mtk_pep45".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:mtk_pep50".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:mtk_pep50p".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:rt9490-charger".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:rt9758-charger".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/power/supply:rt9759".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/usb/mtu3:mtu3".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/regulator:mt6368-regulator".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/gpu/drm/mediatek/mediatek_v2:mtk_disp_notify".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/base/magtransfer:oplus_magcvr_notify".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/soc/oplus/device_info:device_info".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/soc/oplus/boot:oplus_bsp_boot_projectinfo".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/misc/mediatek/boot_common:mtk_boot_common".format(oplus_ddk_get_kernel_version()),
+                "//kernel_device_modules-{}/drivers/base/kernelFwUpdate:oplus_bsp_fw_update".format(oplus_ddk_get_kernel_version()),
+        ],
+    },
     "CONFIG_OPLUS_CHG_TEST_KIT": {
         True: [
             "{target_variant}_test-kit"
@@ -75,6 +115,11 @@ conditional_ko_deps = {
              modules_label("oplus/kernel/dft/bazel:oplus_bsp_dft_olc"),
         ],
     },
+    "CONFIG_TCPC_CLASS": {
+        True: [
+            "{target_variant}_tcpc_class",
+        ],
+    },
 }
 
 conditional_hdr_deps = {
@@ -86,6 +131,11 @@ conditional_hdr_deps = {
     "CONFIG_OPLUS_DYNAMIC_CONFIG": {
         True: [
             ":oplus_cfg_headers"
+        ],
+    },
+    "CONFIG_OPLUS_PD_EXT_SUPPORT": {
+        True: [
+            ":pd_ext_headers"
         ],
     },
     "CONFIG_OPLUS_UFCS_CLASS": {
@@ -186,7 +236,6 @@ def define_oplus_chg_v2_module():
         "v2/oplus_batt_bal.c",
         "v2/oplus_chg_mutual.c",
         "v2/oplus_reverse_chg.c",
-        "v2/oplus_chg_dual_cells_protection.c",
         "v2/gauge_ic/oplus_hal_bq27541.c",
         "v2/hal/oplus_chg_ic.c",
         "v2/hal/oplus_virtual_buck.c",
@@ -210,6 +259,7 @@ def define_oplus_chg_v2_module():
         "v2/mms/oplus_mms_gauge.c",
         "v2/mms/oplus_mms_wired.c",
         "v2/mms/gauge/oplus_sili.c",
+        "v2/mms/gauge/oplus_chg_dual_cells_protection.c",
         "v2/mms/sec/oplus_sec.c",
         "v2/strategy/oplus_strategy.c",
         "v2/strategy/oplus_strategy_cgcl.c",
@@ -246,6 +296,11 @@ def define_oplus_chg_v2_module():
         "CONFIG_OPLUS_GAUGE_MPC7022": {
             True: [
                 "v2/gauge_ic/oplus_hal_mpc7022.c"
+            ],
+        },
+        "CONFIG_OPLUS_GAUGE_SH366002": {
+            True: [
+                "v2/gauge_ic/oplus_hal_sh366002.c"
             ],
         },
         "CONFIG_OPLUS_GAUGE_BQ27Z561": {
@@ -394,6 +449,11 @@ def define_oplus_chg_v2_module():
                 "v2/ufcs_ic/oplus_hal_nu2112a_slave.c"
             ],
         },
+        "CONFIG_OPLUS_UFCS_MASTER_NU2118A": {
+            True: [
+                "v2/ufcs_ic/oplus_hal_nu2118a.c"
+            ],
+        },
         "CONFIG_OPLUS_CHG_MOS_CTRL": {
             True: [
                 "v2/switching_ic/oplus_mos_ctrl.c"
@@ -441,7 +501,8 @@ def define_oplus_chg_v2_module():
         },
         "CONFIG_OPLUS_BOOST_SC83107": {
             True: [
-                "v2/boost_ic/oplus_sc83107.c"
+                "v2/boost_ic/oplus_sc83107.c",
+                "v2/boost_ic/oplus_sc83107_bcl.c"
             ],
         },
         "CONFIG_OPLUS_SEC_IC_SC5891": {
@@ -483,6 +544,21 @@ def define_oplus_chg_v2_module():
                 "v2/charger_ic/oplus_hal_sgm41515.c"
             ],
         },
+        "CONFIG_OPLUS_SC6607_CHARGER": {
+            True: [
+                "v2/charger_ic/oplus_hal_sc6607.c"
+            ],
+        },
+        "CONFIG_OPLUS_SC6607_CP": {
+            True: [
+                "v2/voocphy/phy/oplus_sc6607_cp.c"
+            ],
+        },
+        "CONFIG_OPLUS_SC6607_UFCS": {
+            True: [
+                "v2/ufcs_ic/oplus_hal_sc6607_ufcs.c"
+            ],
+        },
         "CONFIG_OPLUS_CHG_RECOVERY": {
             True: [
                 "v2/recovery/oplus_chg_recovery.c",
@@ -494,6 +570,11 @@ def define_oplus_chg_v2_module():
                 "v2/recovery/state_keep/detection/wired_disconnect_detection.c",
                 "v2/recovery/state_keep/detection/vooc_disconnect_detection.c",
                 "v2/monitor/track/oplus_track_state_keep.c",
+            ],
+        },
+        "CONFIG_OPLUS_CHG_STATE_KEEP_DCP": {
+            True: [
+                "v2/recovery/state_keep/detection/dcp_disconnect_detection.c",
             ],
         },
         "CONFIG_OPLUS_DEBUG_AUTH": {

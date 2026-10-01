@@ -16,6 +16,8 @@
 #include <uapi/linux/sched/types.h>
 #include <linux/sched.h>
 #include <linux/power_supply.h>
+#include <linux/completion.h>
+#include <linux/jiffies.h>
 
 #include "ufcs_policy_engine.h"
 #include "ufcs_core.h"
@@ -30,9 +32,10 @@ struct ufcs_state_handler {
 	const char *name;
 	void (*handle_state)(struct ufcs_class *class, struct ufcs_event *event);
 };
+struct ufcs_state_handler g_pe_handler[];
 
 static const char * const ufcs_pe_state_name[] = {
-	[PE_STATE_IDEL]			= "idel",
+	[PE_STATE_IDLE]			= "idle",
 	[PE_STATE_SOFT_RESET]		= "software_reset",
 	[PE_STATE_HW_RESET]		= "hardware_reset",
 	[PE_STATE_SEND_EXIT]		= "send_exit",
@@ -67,7 +70,8 @@ void ufcs_exit_sm_work(struct ufcs_class *class)
 	ufcs_free_all_event(class);
 	class->handshake_success = false;
 	class->start_cable_detect = false;
-	class->state.curr = PE_STATE_IDEL;
+	class->cable_accpet = false;
+	class->state.curr = PE_STATE_IDLE;
 	class->sender.msg_number_counter = 0;
 	class->state.err = -EIO;
 	complete_all(&class->request_ack);
@@ -78,7 +82,7 @@ void ufcs_exit_sm_work(struct ufcs_class *class)
 void ufcs_reset_sm_work(struct ufcs_class *class)
 {
 	ufcs_free_all_event(class);
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	class->sender.msg_number_counter = 0;
 	class->state.err = -EAGAIN;
 	complete_all(&class->request_ack);
@@ -122,10 +126,9 @@ int ufcs_check_refuse_msg(struct ufcs_class *class, struct ufcs_msg *msg,
 	return -EIO;
 }
 
-static void ufcs_state_idel_handle(struct ufcs_class *class, struct ufcs_event *event)
+static void ufcs_state_idle_handle(struct ufcs_class *class, struct ufcs_event *event)
 {
 	int rc;
-
 	mutex_lock(&class->pe_lock);
 	class->state.err = 0;
 
@@ -197,7 +200,10 @@ static void ufcs_state_idel_handle(struct ufcs_class *class, struct ufcs_event *
 	default:
 		ufcs_err("not support %s event\n", ufcs_get_event_name(event));
 		if (event->msg) {
-			rc = ufcs_send_data_msg_refuse(class, event->msg, REFUSE_UNKNOWN_CMD);
+			if (event->type == UFCS_EVENT_RECV_CABLE_INFO)
+				rc = ufcs_send_data_msg_refuse(class, event->msg, REFUSE_NOT_SUPPORT_CMD);
+			else
+				rc = ufcs_send_data_msg_refuse(class, event->msg, REFUSE_UNKNOWN_CMD);
 			/*
 			 * -EAGAIN indicates that the soft rest is sent successfully
 			 * and no hard reset is required at this time.
@@ -326,7 +332,7 @@ re_recv:
 		goto re_recv;
 	}
 
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	ufcs_free_event(class, &event);
 	return;
 
@@ -415,7 +421,7 @@ re_recv:
 		goto re_recv;
 	}
 
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	ufcs_free_event(class, &event);
 	return;
 err:
@@ -426,7 +432,7 @@ err:
 exit:
 	stop_sender_response_timer(class);
 	ufcs_free_event(class, &event);
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	class->state.err = -EAGAIN;
 	complete(&class->request_ack);
 }
@@ -447,7 +453,7 @@ static void ufcs_state_request_handle(struct ufcs_class *class, struct ufcs_even
 		class->state.err = -EINVAL;
 		complete(&class->request_ack);
 		ufcs_free_event(class, &event);
-		class->state.curr = PE_STATE_IDEL;
+		class->state.curr = PE_STATE_IDLE;
 		return;
 	}
 	pdo_index = UFCS_REQUEST_OUTPUT_MODE_INDEX(request->request);
@@ -518,6 +524,9 @@ re_recv:
 		stop_power_supply_timer(class);
 		class->state.curr = PE_STATE_SOFT_RESET;
 		return;
+	case UFCS_EVENT_RECV_POWER_CHANGE:
+		g_pe_handler[PE_STATE_POWER_CHANGE].handle_state(class, event);
+		goto re_recv;
 	default:
 		ufcs_err("unsupported event type, type=%s\n", ufcs_get_event_name(event));
 		if (event->msg)
@@ -526,7 +535,7 @@ re_recv:
 		goto re_recv;
 	}
 
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	ufcs_free_event(class, &event);
 	return;
 err:
@@ -539,7 +548,7 @@ exit:
 	stop_sender_response_timer(class);
 	stop_power_supply_timer(class);
 	ufcs_free_event(class, &event);
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	class->state.err = -EAGAIN;
 	complete(&class->request_ack);
 }
@@ -608,6 +617,9 @@ re_recv:
 		stop_sender_response_timer(class);
 		class->state.curr = PE_STATE_SOFT_RESET;
 		return;
+	case UFCS_EVENT_RECV_POWER_CHANGE:
+		g_pe_handler[PE_STATE_POWER_CHANGE].handle_state(class, event);
+		goto re_recv;
 	default:
 		ufcs_err("unsupported event type, type=%s\n", ufcs_get_event_name(event));
 		if (event->msg)
@@ -616,7 +628,7 @@ re_recv:
 		goto re_recv;
 	}
 
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	ufcs_free_event(class, &event);
 	return;
 err:
@@ -627,7 +639,7 @@ err:
 exit:
 	stop_sender_response_timer(class);
 	ufcs_free_event(class, &event);
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	class->state.err = -EAGAIN;
 	complete(&class->request_ack);
 }
@@ -678,13 +690,15 @@ static void ufcs_state_send_sink_info_handle(struct ufcs_class *class, struct uf
 	if (rc < 0)
 		ufcs_err("send sink info msg error, rc=%d\n", rc);
 
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	ufcs_free_event(class, &event);
 }
 
 static void ufcs_state_get_cable_info_handle(struct ufcs_class *class, struct ufcs_event *event)
 {
 	int rc;
+	struct completion end_cb_detect;
+#define CABLE_END_DETECT_TIMEOUT 1000
 
 	ufcs_free_event(class, &event);
 
@@ -695,33 +709,43 @@ static void ufcs_state_get_cable_info_handle(struct ufcs_class *class, struct uf
 		return;
 	} else if (rc < 0) {
 		class->start_cable_detect = false;
-		if (rc == -EPROTO) {
-			class->state.err = rc;
-			complete(&class->request_ack);
-			return;
-		}
-		goto err;
+		class->state.curr = PE_STATE_IDLE;
+		class->state.err = rc;
+		class->cable_accpet = false;
+		complete(&class->request_ack);
+		return;
 	}
 
 	rc = ufcs_pe_get_cable_info(class);
 	if (rc > 0) {
 		class->start_cable_detect = false;
+		class->ufcs->ops->cable_hard_reset(class->ufcs);
 		ufcs_exit_sm_work(class);
 		return;
 	} else if (rc == 0) {
 		complete(&class->request_ack);
 		ufcs_pe_end_cable_detect(class);
 		class->start_cable_detect = false;
-		class->state.curr = PE_STATE_IDEL;
+		class->state.curr = PE_STATE_IDLE;
 		return;
-	} else if (rc == -EPROTO) {
-		class->state.err = rc;
+	} else {
 		class->start_cable_detect = false;
-		complete(&class->request_ack);
-		return;
+		class->ufcs->ops->cable_hard_reset(class->ufcs);
+		if (rc == -EPROTO) {
+			class->state.err = rc;
+			class->start_cable_detect = false;
+			class->cable_accpet = false;
+			complete(&class->request_ack);
+			return;
+		}
 	}
-	ufcs_pe_end_cable_detect(class);
+	rc = ufcs_pe_end_cable_detect(class);
 	class->start_cable_detect = false;
+	if (rc < 0) {
+		ufcs_err("send end cable detect msg error, rc=%d\n", rc);
+		init_completion(&end_cb_detect);
+		wait_for_completion_timeout(&end_cb_detect, msecs_to_jiffies(CABLE_END_DETECT_TIMEOUT));
+	}
 
 	rc = ufcs_pe_detect_cable_info(class);
 	if (rc > 0) {
@@ -730,13 +754,14 @@ static void ufcs_state_get_cable_info_handle(struct ufcs_class *class, struct uf
 	} else if (rc < 0) {
 		if (rc == -EPROTO) {
 			class->state.err = rc;
+			class->state.curr = PE_STATE_IDLE;
 			complete(&class->request_ack);
 			return;
 		}
 		goto err;
 	}
 
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	complete(&class->request_ack);
 	return;
 
@@ -837,7 +862,7 @@ re_recv:
 		goto re_recv;
 	}
 
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	ufcs_free_event(class, &event);
 	return;
 err:
@@ -848,7 +873,7 @@ err:
 exit:
 	stop_sender_response_timer(class);
 	ufcs_free_event(class, &event);
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	class->state.err = -EAGAIN;
 	complete(&class->request_ack);
 }
@@ -925,7 +950,7 @@ re_recv:
 		goto re_recv;
 	}
 
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	ufcs_free_event(class, &event);
 	return;
 err:
@@ -936,7 +961,7 @@ err:
 exit:
 	stop_sender_response_timer(class);
 	ufcs_free_event(class, &event);
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	class->state.err = -EAGAIN;
 	complete(&class->request_ack);
 }
@@ -958,7 +983,7 @@ static void ufcs_state_send_dev_info_handle(struct ufcs_class *class, struct ufc
 	if (rc < 0)
 		ufcs_err("send device info msg error, rc=%d\n", rc);
 
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	ufcs_free_event(class, &event);
 }
 
@@ -972,7 +997,7 @@ static void ufcs_state_send_error_info_handle(struct ufcs_class *class, struct u
 	if (rc < 0)
 		ufcs_err("send error info msg error, rc=%d\n", rc);
 
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	ufcs_free_event(class, &event);
 }
 
@@ -988,7 +1013,7 @@ static void ufcs_state_config_wd_handle(struct ufcs_class *class, struct ufcs_ev
 		class->state.err = -EINVAL;
 		complete(&class->request_ack);
 		ufcs_free_event(class, &event);
-		class->state.curr = PE_STATE_IDEL;
+		class->state.curr = PE_STATE_IDLE;
 		return;
 	}
 	memcpy(&config_wd, event->data, sizeof(struct ufcs_data_msg_config_watchdog));
@@ -1054,7 +1079,7 @@ re_recv:
 		goto re_recv;
 	}
 
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	ufcs_free_event(class, &event);
 	return;
 err:
@@ -1065,9 +1090,42 @@ err:
 exit:
 	stop_sender_response_timer(class);
 	ufcs_free_event(class, &event);
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	class->state.err = -EAGAIN;
 	complete(&class->request_ack);
+}
+
+static int ufcs_get_user_encrypt_data(struct ufcs_class *class, u8 random_a[UFCS_VERIFY_RANDOM_DATA_SIZE],
+	u8 random_b[UFCS_VERIFY_RANDOM_DATA_SIZE], u8 encrypt_data[UFCS_VERIFY_ENCRYPTED_DATA_SIZE])
+{
+	int rc;
+	int i;
+
+	for (i = 0; i < UFCS_VERIFY_RANDOM_DATA_SIZE; i++)
+		class->verify_info.user_encrypt_random_data[i] = random_a[i];
+
+	for (i = 0; i < UFCS_VERIFY_RANDOM_DATA_SIZE; i++)
+		class->verify_info.user_encrypt_random_data[UFCS_VERIFY_RANDOM_DATA_SIZE + i] = random_b[i];
+
+	reinit_completion(&class->user_encrypt_data_ack);
+	ufcs_send_state(UFCS_NOTIFY_USER_ENCRYPT, class->verify_info.user_encrypt_random_data);
+	rc = wait_for_completion_timeout(&class->user_encrypt_data_ack, msecs_to_jiffies(500)); /* max 500ms wait*/
+	if (!rc) {
+		ufcs_err("error, timed out get non oplus encrypt data\n");
+		return -EIO;
+	}
+	memmove(encrypt_data, class->verify_info.user_encrypt_auth_data, UFCS_USER_ENCRYPT_AUTH_DATA_SIZE);
+
+	return 0;
+}
+
+static bool ufcs_user_encrypt_support(struct ufcs_class *class)
+{
+	if (memcmp(class->verify_info.auth_data,
+	   (char[UFCS_VERIFY_AUTH_DATA_SIZE]){0}, UFCS_VERIFY_AUTH_DATA_SIZE) == 0)
+		return true;
+
+	return false;
 }
 
 static void ufcs_check_verify_response_msg(struct ufcs_class *class, struct ufcs_msg *msg)
@@ -1076,9 +1134,14 @@ static void ufcs_check_verify_response_msg(struct ufcs_class *class, struct ufcs
 	u8 encrypt_data[UFCS_VERIFY_ENCRYPTED_DATA_SIZE] = { 0 };
 	bool pass = false;
 
-	rc = ufcs_get_encrypt_data(msg->data_msg.verify_response.random_data,
-		class->verify_info.random_data, class->verify_info.auth_data,
-		encrypt_data);
+	if (ufcs_user_encrypt_support(class))
+		rc = ufcs_get_user_encrypt_data(class, class->verify_info.random_data,
+			msg->data_msg.verify_response.random_data, encrypt_data);
+	else
+		rc = ufcs_get_encrypt_data(msg->data_msg.verify_response.random_data,
+			class->verify_info.random_data, class->verify_info.auth_data,
+			encrypt_data);
+
 	if (rc == 0) {
 		rc = memcmp(msg->data_msg.verify_response.encrypted_data,
 			encrypt_data, UFCS_VERIFY_ENCRYPTED_DATA_SIZE);
@@ -1115,7 +1178,7 @@ static void ufcs_state_verify_request_handle(struct ufcs_class *class, struct uf
 		class->state.err = -EINVAL;
 		complete(&class->request_ack);
 		ufcs_free_event(class, &event);
-		class->state.curr = PE_STATE_IDEL;
+		class->state.curr = PE_STATE_IDLE;
 		return;
 	}
 	memcpy(&verify_request, event->data, sizeof(struct ufcs_data_msg_verify_request));
@@ -1211,7 +1274,7 @@ re_recv:
 		goto re_recv;
 	}
 
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	ufcs_free_event(class, &event);
 	return;
 err:
@@ -1224,28 +1287,58 @@ exit:
 	stop_sender_response_timer(class);
 	stop_wait_msg_timer(class);
 	ufcs_free_event(class, &event);
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	class->state.err = -EAGAIN;
 	complete(&class->request_ack);
 }
 
 static void ufcs_state_power_change_handle(struct ufcs_class *class, struct ufcs_event *event)
 {
-	struct ufcs_msg *msg;
+	struct ufcs_msg *msg = event->msg;
 	int i;
+	int rc;
+	int length = 0;
+	u8 pwr_data[UFCS_OUTPUT_MODE_MAX][UFCS_OUTPUT_MODE_LEN] = { 0 };
 
-	msg = event->msg;
 	if (msg == NULL) {
 		ufcs_err("msg is NULL\n");
 		goto out;
 	}
+	length = msg->data_msg.power_change.length;
+	if (length % UFCS_OUTPUT_MODE_LEN != 0 || length > UFCS_OUTPUT_MODE_MAX * UFCS_OUTPUT_MODE_LEN || length == 0) {
+		rc = ufcs_send_data_msg_refuse(class, event->msg, REFUSE_UNKNOWN_CMD);
+		goto pwr_chg_err;
+	}
+	for (i = 0; i < UFCS_OUTPUT_MODE_MAX; i++) {
+		memmove(pwr_data[i], msg->data_msg.power_change.data[i], UFCS_OUTPUT_MODE_LEN);
+		if (UFCS_POWER_CHANGE_INDEX(UFCS_PWR_CHANGE_DATA(pwr_data[i])) !=
+			UFCS_OUTPUT_MODE_INDEX(class->pdo.data[i])) {
+			rc = ufcs_send_data_msg_refuse(class, event->msg, REFUSE_NOT_SUPPORT_CMD);
+			goto pwr_chg_err;
+		}
+	}
 
-	for (i = 0; i < UFCS_OUTPUT_MODE_MAX; i++)
-		class->pwr_change_info[i] = msg->data_msg.power_change.data[i];
+	class->pwr_change_info.length = length;
+	for (i = 0; i < UFCS_OUTPUT_MODE_MAX; i++) {
+		memmove(pwr_data[i], msg->data_msg.power_change.data[i], UFCS_OUTPUT_MODE_LEN);
+		memmove(class->pwr_change_info.data[i], msg->data_msg.power_change.data[i], UFCS_OUTPUT_MODE_LEN);
+	}
 	class->power_changed = true;
 	ufcs_send_state(UFCS_NOTIFY_POWER_CHANGE, NULL);
+	goto out;
+
+pwr_chg_err:
+	if (rc < 0 && rc != -EAGAIN) {
+		ufcs_free_event(class, &event);
+		ufcs_err("send refuse msg error, rc=%d\n", rc);
+		goto out;
+	}
+	if (rc == -EAGAIN)
+		ufcs_err("send refuse msg error, buf soft reset send success\n");
+	goto out;
+
 out:
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	ufcs_free_event(class, &event);
 }
 
@@ -1267,7 +1360,7 @@ static void ufcs_state_get_emark_info_handle(struct ufcs_class *class, struct uf
 		goto err;
 	}
 
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	complete(&class->request_ack);
 	return;
 
@@ -1293,7 +1386,7 @@ static void ufcs_state_get_power_info_handle(struct ufcs_class *class, struct uf
 		goto err;
 	}
 
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 	complete(&class->request_ack);
 	return;
 
@@ -1309,7 +1402,7 @@ static void ufcs_state_test_request_handle(struct ufcs_class *class, struct ufcs
 	ufcs_free_event(class, &event);
 
 	ufcs_pe_test_request_handle(class, request);
-	class->state.curr = PE_STATE_IDEL;
+	class->state.curr = PE_STATE_IDLE;
 
 	return;
 }
@@ -1324,7 +1417,7 @@ void ufcs_pe_disable_wd_work(struct work_struct *work)
 #endif /* CONFIG_OPLUS_UFCS_CLASS_DEBUG */
 
 struct ufcs_state_handler g_pe_handler[] = {
-	PE_HANDLER(PE_STATE_IDEL, ufcs_state_idel),
+	PE_HANDLER(PE_STATE_IDLE, ufcs_state_idle),
 	PE_HANDLER(PE_STATE_SOFT_RESET, ufcs_state_soft_reset),
 	PE_HANDLER(PE_STATE_HW_RESET, ufcs_state_hw_reset),
 	PE_HANDLER(PE_STATE_SEND_EXIT, ufcs_state_send_exit),
@@ -1388,7 +1481,7 @@ retry:
 			  ufcs_get_event_name(event));
 		g_pe_handler[class->state.curr].handle_state(class, event);
 
-		if ((class->state.curr == PE_STATE_IDEL) &&
+		if ((class->state.curr == PE_STATE_IDLE) &&
 		    mutex_is_locked(&class->pe_lock))
 			mutex_unlock(&class->pe_lock);
 

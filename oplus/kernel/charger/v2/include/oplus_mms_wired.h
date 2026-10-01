@@ -34,6 +34,7 @@ enum wired_topic_item {
 	WIRED_ITEM_BUCK_EIS_CURRENT_RATE,
 	WIRED_ITEM_POWER_ROLE,
 	WIRED_ITEM_SOURCE_PDO_VOLT,
+	WIRED_ITEM_CC_STATE,
 };
 
 enum oplus_wired_cc_detect_status {
@@ -122,6 +123,8 @@ int oplus_wired_shipmode_enable(bool enable);
 bool oplus_wired_shipmode_is_enabled(void);
 int oplus_wired_set_qc_config(enum oplus_chg_qc_version version, int vol_mv);
 int oplus_wired_set_pd_config(u32 pdo);
+int oplus_wired_set_burst_mode(bool enable);
+int oplus_wired_set_low_vsys_thr(bool enable);
 int oplus_wired_get_usb_temp_volt(int *vol_l, int *vol_r);
 int oplus_wired_get_usb_temp(int *temp_l, int *temp_r);
 bool oplus_wired_usb_temp_check_is_support(void);
