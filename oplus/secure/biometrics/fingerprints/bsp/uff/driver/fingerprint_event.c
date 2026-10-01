@@ -114,6 +114,14 @@ int get_fp_driver_evt_type(void)
     return g_fp_driver_event_type;
 }
 
+void copy_msg_buffer(struct fingerprint_message_t* msg, void *data, unsigned int size)
+{
+    if (msg != NULL && data != NULL && size > 0) {
+        msg->out_size = size <= MAX_MESSAGE_SIZE ? size : MAX_MESSAGE_SIZE;
+        memmove(msg->out_buf, data, msg->out_size);
+    }
+}
+
 int send_fingerprint_msg(int module, int event, void *data,
                              unsigned int size) {
     int ret = 0;
@@ -127,8 +135,7 @@ int send_fingerprint_msg(int module, int event, void *data,
     case E_FP_TP:
         g_fingerprint_msg.module = E_FP_TP;
         g_fingerprint_msg.event = event == 1 ? E_FP_EVENT_TP_TOUCHDOWN : E_FP_EVENT_TP_TOUCHUP;
-        g_fingerprint_msg.out_size = size <= MAX_MESSAGE_SIZE ? size : MAX_MESSAGE_SIZE;
-        memcpy(g_fingerprint_msg.out_buf, data, g_fingerprint_msg.out_size);
+        copy_msg_buffer(&g_fingerprint_msg, data, size);
         need_report = 1;
         break;
     case E_FP_LCD:
@@ -147,15 +154,13 @@ int send_fingerprint_msg(int module, int event, void *data,
     case E_TP_AIFILM:
         g_fingerprint_msg.module = E_TP_AIFILM;
         g_fingerprint_msg.event = event;
-        g_fingerprint_msg.out_size = size <= MAX_MESSAGE_SIZE ? size : MAX_MESSAGE_SIZE;
-        memcpy(g_fingerprint_msg.out_buf, data, g_fingerprint_msg.out_size);
+        copy_msg_buffer(&g_fingerprint_msg, data, size);
         need_report = 1;
         break;
     case E_FP_TP_GRIP:
         g_fingerprint_msg.module = E_FP_TP_GRIP;
         g_fingerprint_msg.event = event == 1 ? E_FP_EVENT_MISTOUCH_CLASP : E_FP_EVENT_MISTOUCH_UNCLASP;
-        g_fingerprint_msg.out_size = size <= MAX_MESSAGE_SIZE ? size : MAX_MESSAGE_SIZE;
-        memcpy(g_fingerprint_msg.out_buf, data, g_fingerprint_msg.out_size);
+        copy_msg_buffer(&g_fingerprint_msg, data, size);
         need_report = 1;
         break;
     default:

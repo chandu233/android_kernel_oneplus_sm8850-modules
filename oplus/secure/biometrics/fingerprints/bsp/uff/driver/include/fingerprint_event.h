@@ -69,4 +69,5 @@ int send_fingerprint_msg(int module, int event, void *data,
 int wait_fp_event(void *data, unsigned int size,
                            struct fingerprint_message_t **msg);
 void reset_fingerprint_msg(void);
+void copy_msg_buffer(struct fingerprint_message_t* msg, void *data, unsigned int size);
 #endif //FINGERPRINT_EVENT_H
