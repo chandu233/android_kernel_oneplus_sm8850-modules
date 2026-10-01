@@ -39,6 +39,7 @@ enum fingerprint_event {
     E_FP_EVENT_MISTOUCH_UNCLASP   = 11,
     E_FP_EVENT_MISTOUCH_CLASP     = 12,
     E_FP_EVENT_UNDERWATER_INFO    = 13,
+    E_FP_EVENT_LCD_READ_LIGHT_REG_VERIFY = 14,
     E_FP_EVENT_MAX,
 };
 
@@ -48,7 +49,8 @@ enum fingerprint_event_module {
     E_FP_HAL    = 2,
     E_FP_SENSOR = 3,
     E_TP_AIFILM = 4,
-    E_FP_TP_GRIP = 5
+    E_FP_TP_GRIP = 5,
+    E_FP_MAX,
 };
 
 struct fingerprint_message_t {
@@ -69,4 +71,5 @@ int send_fingerprint_msg(int module, int event, void *data,
 int wait_fp_event(void *data, unsigned int size,
                            struct fingerprint_message_t **msg);
 void reset_fingerprint_msg(void);
+void copy_msg_buffer(struct fingerprint_message_t* msg, void *data, unsigned int size);
 #endif //FINGERPRINT_EVENT_H
