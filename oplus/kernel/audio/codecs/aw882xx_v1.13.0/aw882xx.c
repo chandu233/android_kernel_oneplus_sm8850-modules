@@ -2960,14 +2960,6 @@ static void oplus_aw882xx_parse_feature_dt(struct aw882xx *aw882xx)
 		aw882xx->need_add_bus_id = false;
 	}
 
-	ret = of_property_read_u32(np, "default-chip-id", &aw882xx->default_chip_id);
-	if (ret < 0) {
-		aw_dev_info(aw882xx->dev, "default-chip-id is not set!");
-		aw882xx->default_chip_id = 0;
-	} else {
-		aw_dev_info(aw882xx->dev, "default-chip-id = 0x%x", aw882xx->default_chip_id);
-	}
-
 	aw_dev_info(aw882xx->dev, "parse dt spin_flag: %d, need_f0_cali:%d, que_dela_work:%d, need_add_bus_id:%d", aw882xx->spin_flag, aw882xx->need_f0_cali, aw882xx->que_dela_work, aw882xx->need_add_bus_id);
 
 	return;
@@ -4252,19 +4244,13 @@ static int aw882xx_i2c_probe(struct i2c_client *i2c,
 	ret = aw882xx_read_chipid(aw882xx);
 	if (ret < 0) {
 		aw_dev_err(&i2c->dev, "aw882xx_read_chipid failed ret=%d", ret);
-		if (aw882xx->default_chip_id != 0) {
-			aw_dev_err(&i2c->dev, "set default chip_id:0x%x", aw882xx->default_chip_id);
-			aw882xx->aw_pa->chip_id = aw882xx->default_chip_id;
-		} else {
-			return ret;
-		}
+		return ret;
 	}
 
 	/*aw pa init*/
 	ret = aw882xx_init(aw882xx);
-	if (ret) {
+	if (ret)
 		return ret;
-	}
 
 	/*aw882xx irq*/
 	aw882xx_interrupt_init(aw882xx);

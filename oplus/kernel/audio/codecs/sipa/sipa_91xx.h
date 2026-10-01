@@ -18,8 +18,8 @@
 #include "sipa_common.h"
 #include <linux/version.h>
 
-#define SIA91XX_ENABLE_LEVEL				(0)
-#define SIA91XX_DISABLE_LEVEL				(1)
+#define SIA91XX_LOW_LEVEL				(0)
+#define SIA91XX_HIGH_LEVEL				(1)
 
 #define SIPA_ERROR_OK  						(0)
 #define SIPA_ERROR_I2C						(1)

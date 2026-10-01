@@ -283,10 +283,15 @@ void sia91xx_interrupt(struct work_struct *work)
 int sia91xx_ext_reset(sipa_dev_t *si_pa)
 {
 	if (si_pa && gpio_is_valid(si_pa->rst_pin)) {
-		gpio_set_value_cansleep(si_pa->rst_pin, 1);
-		mdelay(5);
-		gpio_set_value_cansleep(si_pa->rst_pin, 0);
-		mdelay(5);
+		if (IS_DIGITAL_PA_PULL_RST_TYPE(si_pa->chip_type)) {
+			gpio_set_value_cansleep(si_pa->rst_pin, SIA91XX_HIGH_LEVEL);
+			mdelay(10);
+		} else {
+			gpio_set_value_cansleep(si_pa->rst_pin, SIA91XX_HIGH_LEVEL);
+			mdelay(5);
+			gpio_set_value_cansleep(si_pa->rst_pin, SIA91XX_LOW_LEVEL);
+			mdelay(5);
+		}
 	}
 
 	return 0;
@@ -349,6 +354,16 @@ int sia91xx_append_i2c_address(
 	return 0;
 }
 
+static void sia91xx_get_rst_value(sipa_dev_t *si_pa)
+{
+	unsigned int gpio_value = 0xff;
+	if (0 == si_pa->disable_pin) {
+		gpio_value = gpio_get_value(si_pa->rst_pin);
+		pr_debug("[debug][%s] %s: reset pin num:%u, value:%u \r\n",
+			LOG_FLAG, __func__, si_pa->rst_pin, gpio_value);
+	}
+}
+
 int sia91xx_detect_chip(
 	sipa_dev_t *si_pa)
 {
@@ -357,12 +372,17 @@ int sia91xx_detect_chip(
 	/* Power up! */
 	sia91xx_ext_reset(si_pa);
 
+	sia91xx_get_rst_value(si_pa);
 	ret = sipa_regmap_check_chip_id(si_pa->regmap,
 		si_pa->channel_num, si_pa->chip_type);
 	if (ret < 0) {
 		pr_err("[  err][%s] %s: Failed to read Revision register: %d \r\n",
 			LOG_FLAG, __func__, ret);
 		return -EIO;
+	}
+
+	if (IS_DIGITAL_PA_PULL_RST_TYPE(si_pa->chip_type)) {
+		gpio_set_value(si_pa->rst_pin, SIA91XX_LOW_LEVEL);
 	}
 
 	return 0;
@@ -426,9 +446,14 @@ int sia91xx_startup(
 	pr_debug("[debug][%s] %s: dai:%s, substream:%s, startup, stream = %d \r\n",
 			LOG_FLAG, __func__, dai->name, substream->name, substream->stream);
 
-	if (SIA91XX_DISABLE_LEVEL == gpio_get_value(si_pa->rst_pin)) {
-		gpio_set_value(si_pa->rst_pin, 0);
+	if (IS_DIGITAL_PA_PULL_RST_TYPE(si_pa->chip_type)) {
+		gpio_set_value(si_pa->rst_pin, SIA91XX_HIGH_LEVEL);
 		mdelay(5);
+	} else {
+		if (SIA91XX_HIGH_LEVEL == gpio_get_value(si_pa->rst_pin)) {
+			gpio_set_value(si_pa->rst_pin, SIA91XX_LOW_LEVEL);
+			mdelay(5);
+		}
 	}
 
 	return 0;
@@ -538,9 +563,18 @@ int sia91xx_mute(
 
 			si_pa->sipa_on = false;
 			if (sia91xx_soft_mute(si_pa)) {
-				gpio_set_value(si_pa->rst_pin, 1);
+				if (IS_DIGITAL_PA_PULL_RST_TYPE(si_pa->chip_type)) {
+					gpio_set_value(si_pa->rst_pin, SIA91XX_LOW_LEVEL);
+				} else {
+					gpio_set_value(si_pa->rst_pin, SIA91XX_HIGH_LEVEL);
+				}
 				mdelay(5);
+				pr_err("[  err][%s] %s: Failed mute smartpa \n", LOG_FLAG, __func__);
 				return -SIPA_ERROR_SOFT_MUTE;
+			}
+
+			if (IS_DIGITAL_PA_PULL_RST_TYPE(si_pa->chip_type)) {
+				sipa_digital_rst_suspend(si_pa);
 			}
 		} else {
 			si_pa->sipa_on = true;

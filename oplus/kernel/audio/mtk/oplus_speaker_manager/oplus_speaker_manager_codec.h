@@ -24,7 +24,8 @@ enum oplus_pa_chipset_def {
 	MFR_GOODIX = 0x00,
 	MFR_AWINIC = 0x01,
 	MFR_SI = 0x02,
-	MFR_COUNT = 0x04,
+	MFR_FSM = 0x03,
+	MFR_COUNT = 0x05,
 };
 
 /* for 4PA L:LEFT TOP R:RIGHT TOP LB:LEFT BOTTOM RB:RIGHT BOTTOM*/

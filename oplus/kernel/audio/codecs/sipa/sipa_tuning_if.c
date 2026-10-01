@@ -104,9 +104,6 @@ static long sipa_tuning_cmd_unlocked_ioctl(struct file *fp,
 	unsigned int cmd, unsigned long arg)
 {
 	sipa_turning_t *priv = g_sipa_turning;
-	scene_data_t scene_data;
-	box_name_t fwname;
-	char *pstr = NULL;
 	int ret = 0;
 
 	pr_info("[ info] %s: enter cmd:0x%x\n", __func__, cmd);
@@ -116,51 +113,6 @@ static long sipa_tuning_cmd_unlocked_ioctl(struct file *fp,
 		case SIPA_TUNING_CTRL_WR_DOWN:
 		case SIPA_TUNING_CTRL_RD_DOWN: {
 			ret = sipa_tuning_comm_ioctl(cmd, arg, &(priv->cmdup), &(priv->cmddown));
-			break;
-		}
-		case SIPA_IOCTL_LOAD_FIRMWARE: {
-			if (copy_from_user(&fwname.len, (void __user *)arg, sizeof(uint8_t))) {
-				pr_err("%s: power_mode copy from user failed\n", __func__);
-				return -EFAULT;
-			}
-			if (fwname.len > sizeof(fwname.boxname)) {
-				pr_err("%s: input too long, len:%d, maxlen:%lu\n", __func__, fwname.len, sizeof(fwname.boxname));
-				return -EFAULT;
-			}
-			pstr = (char*)arg + 1;
-			if (copy_from_user(&fwname.boxname, (void __user *)pstr, sizeof(fwname.boxname))) {
-				pr_err("%s: power_mode copy from user failed\n", __func__);
-				return -EFAULT;
-			}
-			sipa_multi_channel_load_fw(fwname.boxname);
-			break;
-		}
-		case SIPA_IOCTL_POWER_ON: {
-			if (copy_from_user(&scene_data, (void __user *)arg, sizeof(scene_data_t))) {
-				pr_err("%s: power_mode copy from user failed\n", __func__);
-				return -EFAULT;
-			}
-			sipa_multi_channel_power_on_and_set_scene(scene_data.scene, scene_data.pa_idx);
-			break;
-		}
-		case SIPA_IOCTL_POWER_OFF: {
-			if (copy_from_user(&scene_data, (void __user *)arg, sizeof(scene_data_t))) {
-				pr_err("%s: power_off copy from user failed\n", __func__);
-				return -EFAULT;
-			}
-			sipa_multi_channel_power_off(scene_data.pa_idx);
-			break;
-		}
-		case SIPA_IOCTL_GET_CHANNEL: {
-			int channel_num = sipa_get_channels();
-			if (copy_to_user((void __user *)arg, &channel_num, sizeof(int))) {
-				pr_err("%s: copy channel_num to user failed\n", __func__);
-				return -EFAULT;
-			}
-			break;
-		}
-		case SIPA_IOCTL_REG_DUMP: {
-			sipa_multi_channel_reg_dump();
 			break;
 		}
 		default: {
