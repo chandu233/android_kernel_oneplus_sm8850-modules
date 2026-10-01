@@ -109,6 +109,9 @@ enum ack_gen_mode {
 	ACK_GEN_DISABLED = 0,
 	ACK_GEN_ENABLED,
 };
+#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+extern bool idle_shutdown;
+#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
 
 enum cx_modes {
 	CX_LEGACY = 0,
@@ -788,9 +791,18 @@ struct cnss_plat_data {
 	uint32_t num_shadow_regs_v3;
 	bool sec_peri_feature_disable;
 	struct device_node *dev_node;
- 	#ifdef OPLUS_FEATURE_WIFI_BDF
+	#ifdef OPLUS_FEATURE_WIFI_BDF
 	const char *bdf_name, *region_name;
 	#endif /* OPLUS_FEATURE_WIFI_BDF */
+	#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+	//Add for wifi switch monitor
+	unsigned long loadBdfState;
+	unsigned long loadRegdbState;
+	unsigned long pcieBusState;
+	unsigned long pcieEnumState;
+	unsigned long pcieLinkDown;
+	unsigned long pcieL1Fail;
+	#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
 	char device_name[CNSS_DEVICE_NAME_SIZE];
 	u32 plat_idx;
 	bool enumerate_done;
@@ -840,6 +852,31 @@ struct cnss_plat_data {
 	enum cnss_power_ctrl_mode pwr_ctrl_mode;
 	u32 bdf_dnld_fail_count;
 };
+
+#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+//Add for wifi switch monitor
+enum cnss_load_state {
+	CNSS_LOAD_BDF_FAIL = 1,
+	CNSS_LOAD_BDF_SUCCESS,
+	CNSS_LOAD_REGDB_FAIL,
+	CNSS_LOAD_REGDB_SUCCESS,
+	CNSS_PROBE_FAIL,
+	CNSS_PROBE_SUCCESS,
+	CNSS_PCIEBUS_FAIL,
+	CNSS_PCIE_ENUM_FAIL,
+	CNSS_PCIE_LINK_DOWN,
+	CNSS_PCIE_L1_FAIL,
+};
+#define CNSS_ERROR_SIZE 64
+#define MAX_CNSS_ERROE_LIST_LENGTH 10
+#define CNSS_STRUCT_ITEM_LENGTH 80
+#define MAX_BUFFER_SIZE (CNSS_STRUCT_ITEM_LENGTH)*(MAX_CNSS_ERROE_LIST_LENGTH)
+struct cel_list {
+    u64 time_s;
+    char message[CNSS_ERROR_SIZE];
+    struct cel_list *next;
+};
+#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0))
 #define from_timer timer_container_of

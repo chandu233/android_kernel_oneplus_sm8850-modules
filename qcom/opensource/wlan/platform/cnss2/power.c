@@ -1590,6 +1590,13 @@ static int cnss_aop_update_mode(struct cnss_plat_data *plat_priv)
 
 	cnss_pr_dbg("Reading PDC Mode Vote table\n");
 
+	#ifdef OPLUS_FEATURE_WIFI_FTM
+	bool drop_l3k = of_property_read_bool(dev->of_node, "drop-l3k");
+	if (drop_l3k) {
+		cnss_pr_err("drop l3k, dont update pdc mode votes\n");
+		return 0;
+	}
+	#endif /* OPLUS_FEATURE_WIFI_FTM */
 	/* common DT Entries */
 	plat_priv->pdc_mode_vote_table_len =
 				of_property_count_strings(dev->of_node,

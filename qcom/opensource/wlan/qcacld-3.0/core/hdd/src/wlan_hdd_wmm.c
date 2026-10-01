@@ -2031,6 +2031,10 @@ void hdd_wmm_get_user_priority_from_ip_tos(struct hdd_adapter *adapter,
 #endif /* HDD_WMM_DEBUG */
 }
 
+#ifdef CONFIG_ANDROID_KABI_RESERVE
+#define TX_STREAM_ACCELERATE_FLAG (0x3)
+#endif
+
 /**
  * hdd_wmm_classify_pkt() - Function to classify skb into WMM AC based on DSCP
  *
@@ -2069,6 +2073,17 @@ void hdd_wmm_classify_pkt(struct hdd_adapter *adapter,
 			hdd_check_and_upgrade_udp_qos(adapter, skb, user_pri);
 		}
 	}
+#ifdef CONFIG_ANDROID_KABI_RESERVE
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0))
+	if ((skb->android_kabi_reserved2 & TX_STREAM_ACCELERATE_FLAG) == TX_STREAM_ACCELERATE_FLAG) {
+		*user_pri = SME_QOS_WMM_UP_VO;
+	}
+#else
+	if ((skb->__kabi_reserved2 & TX_STREAM_ACCELERATE_FLAG) == TX_STREAM_ACCELERATE_FLAG) {
+		*user_pri = SME_QOS_WMM_UP_VO;
+	}
+#endif
+#endif
 }
 
 #ifdef QCA_SUPPORT_TX_MIN_RATES_FOR_SPECIAL_FRAMES

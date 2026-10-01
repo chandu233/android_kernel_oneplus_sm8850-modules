@@ -194,11 +194,16 @@ def _define_modules_for_target_variant(target, variant):
             defconfig = defconfig,
             #ifdef OPLUS_FEATURE_WIFI_FTM
             local_defines = [
-                "OPLUS_FEATURE_WIFI_MAC",
-                "OPLUS_FEATURE_WIFI_BDF",
-            ],
+	        "OPLUS_FEATURE_WIFI_MAC",
+	        "OPLUS_FEATURE_WIFI_DCS_SWITCH",
+		"OPLUS_FEATURE_WIFI_FTM",
+		"OPLUS_FEATURE_WIFI_BDF",
+		"OPLUS_BUG_STABILITY",
+		"OPLUS_FEATURE_SOFTAP_DCS_SWITCH",
+		"OPLUS_FEATURE_WIFI_VENDOR_FT",
+	    ],
             #endif /* OPLUS_FEATURE_WIFI_FTM */
-            conditional_srcs = {
+            conditional_srcs =  {
                 "CONFIG_CNSS2_QMI": {
                     True: [
                         "cnss2/qmi.c",
@@ -241,6 +246,10 @@ def _define_modules_for_target_variant(target, variant):
                     soc_label("{}/drivers/iommu/qcom_iommu_util".format(tv)),
                 ]
 
+        deps += [
+            modules_label("oplus/kernel/boot:oplus_bsp_boot_projectinfo"),
+            modules_label("oplus/kernel/boot:oplus_bsp_bootmode"),
+        ]
         ddk_module(
             name = "{}_icnss2".format(tv),
             srcs = native.glob([
@@ -255,6 +264,18 @@ def _define_modules_for_target_variant(target, variant):
             kconfig = "icnss2/Kconfig",
             copts = [],
             defconfig = defconfig,
+            #ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+            #add oplus feature with bazel compile config
+            local_defines = [
+                            "OPLUS_FEATURE_WIFI_MAC",
+                            "OPLUS_FEATURE_WIFI_DCS_SWITCH",
+                            "OPLUS_FEATURE_WIFI_FTM",
+                            "OPLUS_FEATURE_WIFI_BDF",
+                            "OPLUS_BUG_STABILITY",
+                            "OPLUS_FEATURE_SOFTAP_DCS_SWITCH",
+                            "OPLUS_FEATURE_WIFI_VENDOR_FT",
+            ],
+            #endif
             conditional_srcs = {
                 "CONFIG_ICNSS2_QMI": {
                     True: [

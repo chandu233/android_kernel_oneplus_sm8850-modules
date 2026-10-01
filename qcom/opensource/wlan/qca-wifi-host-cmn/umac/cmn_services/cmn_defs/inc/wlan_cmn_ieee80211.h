@@ -252,6 +252,11 @@ enum qcn_attribute_id {
 #define ADAPTIVE_11R_OUI      0x964000
 #define ADAPTIVE_11R_OUI_TYPE 0x2C
 
+#ifdef OPLUS_FEATURE_WIFI_VENDOR_FT
+#define VENDOR_FT_OUI 0x000fe2c8
+#define VENDOR_FT_OUI_SUBTYPE 0x04
+#endif /* OPLUS_FEATURE_WIFI_VENDOR_FT */
+
 #define OUI_LENGTH              4
 #define OUI_TYPE_BITS           24
 #define MAX_ADAPTIVE_11R_IE_LEN 8
@@ -4178,6 +4183,15 @@ is_vendor_wifi7_rsno_oui(uint8_t *frm)
 	return (frm[1] > 4) && (LE_READ_4(frm + 2) ==
 		((RSNO_SUBTYPE_WIFI7_RSN << OUI_TYPE_BITS) | RSN_OVERRIDE_OUI));
 }
+
+#ifdef OPLUS_FEATURE_WIFI_VENDOR_FT
+static inline bool
+is_vendor_ft_oui(uint8_t *frm)
+{
+	return (frm[1] > 4) && (BE_READ_4(frm + 2) == VENDOR_FT_OUI) &&
+		(*(frm + 6) == VENDOR_FT_OUI_SUBTYPE);
+}
+#endif /* OPLUS_FEATURE_WIFI_VENDOR_FT */
 
 #define WLAN_VENDOR_WME_IE_LEN 24
 /**

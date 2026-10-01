@@ -1455,6 +1455,10 @@ wlan_cm_roam_cfg_set_value(struct wlan_objmgr_psoc *psoc, uint8_t vdev_id,
 	struct rso_cfg_params *dst_cfg;
 	struct wlan_mlme_psoc_ext_obj *mlme_obj;
 	struct wlan_roam_scan_channel_list chan_info = {0};
+#ifdef OPLUS_BUG_STABILITY
+	// OPLUS command to config roaming params
+	struct wlan_roam_btm_config *req;
+#endif /* OPLUS_BUG_STABILITY */
 
 	mlme_obj = mlme_get_psoc_ext_obj(psoc);
 	if (!mlme_obj)
@@ -1488,6 +1492,27 @@ wlan_cm_roam_cfg_set_value(struct wlan_objmgr_psoc *psoc, uint8_t vdev_id,
 		break;
 	case IS_DISABLE_BTM:
 		rso_cfg->is_disable_btm  = src_config->bool_value;
+#ifdef OPLUS_BUG_STABILITY
+// OPLUS command to config roaming params
+		req = qdf_mem_malloc(sizeof(*req));
+		if (!req)
+			return QDF_STATUS_E_NOMEM;
+
+		status = cm_roam_acquire_lock(vdev);
+		if (QDF_IS_STATUS_ERROR(status)) {
+			qdf_mem_free(req);
+			break;
+		}
+		cm_roam_fill_scan_btm_offload(psoc, vdev, req, rso_cfg);
+
+		status = wlan_cm_tgt_send_roam_btm_config(psoc, vdev_id, req);
+		if (QDF_IS_STATUS_ERROR(status)) {
+			mlme_debug("fail to send btm config");
+		}
+
+		qdf_mem_free(req);
+		cm_roam_release_lock(vdev);
+#endif /* OPLUS_BUG_STABILITY */
 		break;
 	case BEACON_RSSI_WEIGHT:
 		rso_cfg->beacon_rssi_weight = src_config->uint_value;
@@ -5620,6 +5645,85 @@ wlan_cm_get_roam_scan_high_rssi_offset(struct wlan_objmgr_psoc *psoc)
 
 	return mlme_obj->cfg.lfr.roam_high_rssi_delta;
 }
+
+#ifdef OPLUS_BUG_STABILITY
+// OPLUS command to config roaming params
+void
+wlan_cm_set_roam_bad_rssi_offset_2G(struct wlan_objmgr_psoc *psoc,
+				       uint32_t roam_bad_rssi_offset_2g)
+{
+	struct wlan_mlme_psoc_ext_obj *mlme_obj;
+
+	mlme_obj = mlme_get_psoc_ext_obj(psoc);
+	if (!mlme_obj)
+		return;
+
+	mlme_obj->cfg.lfr.roam_bg_scan_bad_rssi_offset_2g = roam_bad_rssi_offset_2g;
+}
+
+uint32_t
+wlan_cm_get_roam_bad_rssi_offset_2G(struct wlan_objmgr_psoc *psoc)
+{
+	struct wlan_mlme_psoc_ext_obj *mlme_obj;
+
+	mlme_obj = mlme_get_psoc_ext_obj(psoc);
+	if (!mlme_obj)
+		return 0;
+
+	return mlme_obj->cfg.lfr.roam_bg_scan_bad_rssi_offset_2g;
+}
+
+void
+wlan_cm_set_roam_scan_hi_rssi_delta(struct wlan_objmgr_psoc *psoc,
+				       uint32_t roam_scan_hi_rssi_delta)
+{
+	struct wlan_mlme_psoc_ext_obj *mlme_obj;
+
+	mlme_obj = mlme_get_psoc_ext_obj(psoc);
+	if (!mlme_obj)
+		return;
+
+	mlme_obj->cfg.lfr.roam_scan_hi_rssi_delta = roam_scan_hi_rssi_delta;
+}
+
+uint32_t
+wlan_cm_get_roam_scan_hi_rssi_delta(struct wlan_objmgr_psoc *psoc)
+{
+	struct wlan_mlme_psoc_ext_obj *mlme_obj;
+
+	mlme_obj = mlme_get_psoc_ext_obj(psoc);
+	if (!mlme_obj)
+		return 0;
+
+	return mlme_obj->cfg.lfr.roam_scan_hi_rssi_delta;
+}
+
+void
+wlan_cm_set_roam_per_enable(struct wlan_objmgr_psoc *psoc,
+				       uint32_t roam_per_enable)
+{
+	struct wlan_mlme_psoc_ext_obj *mlme_obj;
+
+	mlme_obj = mlme_get_psoc_ext_obj(psoc);
+	if (!mlme_obj)
+		return;
+
+	mlme_obj->cfg.lfr.per_roam_enable = roam_per_enable;
+}
+
+uint32_t
+wlan_cm_get_roam_per_enable(struct wlan_objmgr_psoc *psoc)
+{
+	struct wlan_mlme_psoc_ext_obj *mlme_obj;
+
+	mlme_obj = mlme_get_psoc_ext_obj(psoc);
+	if (!mlme_obj)
+		return 0;
+
+	return mlme_obj->cfg.lfr.per_roam_enable;
+}
+
+#endif /* OPLUS_BUG_STABILITY */
 
 bool wlan_cm_is_mbo_ap_without_pmf(struct wlan_objmgr_psoc *psoc,
 				   uint8_t vdev_id)

@@ -5189,6 +5189,8 @@ void lim_set_amsdu_for_2g_oui(struct mac_context *mac_ctx,
 			      struct bss_description *bss_desc)
 {
 	struct action_oui_search_attr attr = {0};
+	if (!mac_ctx)
+		return;
 
 	if (!LIM_IS_STA_ROLE(session) ||
 	    !WLAN_REG_IS_24GHZ_CH_FREQ(session->curr_op_freq) ||

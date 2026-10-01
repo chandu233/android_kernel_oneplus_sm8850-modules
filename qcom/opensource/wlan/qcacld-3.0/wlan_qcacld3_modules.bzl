@@ -2839,7 +2839,9 @@ def _define_module_for_target_variant_chipset(target, variant, chipset):
         includes = ipaths + ["."],
         kconfig = kconfig,
         defconfig = defconfig,
-        local_defines = ["OPLUS_BUG_STABILITY"],
+        #ifdef OPLUS_FEATURE_WIFI_FTM
+        local_defines = ["OPLUS_FEATURE_WIFI_BDF", "OPLUS_FEATURE_WIFI_MAC", "OPLUS_FEATURE_WIFI_FTM", "OPLUS_FEATURE_WIFI_DCS_SWITCH","OPLUS_BUG_STABILITY","OPLUS_FEATURE_CONN_POWER_MONITOR", "OPLUS_FEATURE_WIFI_VENDOR_FT"],
+        #endif /*OPLUS_FEATURE_WIFI_FTM*/
         conditional_srcs = combined_conditional_srcs,
         copts = copts,
         out = out,

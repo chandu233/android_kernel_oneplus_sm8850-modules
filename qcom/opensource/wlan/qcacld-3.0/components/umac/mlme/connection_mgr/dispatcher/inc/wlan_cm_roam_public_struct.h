@@ -2889,6 +2889,12 @@ struct wlan_cm_roam_tx_ops {
 	QDF_STATUS (*send_roam_per_config)(
 				struct wlan_objmgr_vdev *vdev,
 				struct wlan_per_roam_config_req *req);
+#ifdef OPLUS_BUG_STABILITY
+	// OPLUS command to config roaming params
+	QDF_STATUS (*send_roam_btm_config)(
+				wmi_unified_t wmi_handle,
+				struct wlan_roam_btm_config *req);
+#endif /* OPLUS_BUG_STABILITY */
 	QDF_STATUS (*send_roam_triggers)(struct wlan_objmgr_vdev *vdev,
 					 struct wlan_roam_triggers *req);
 	QDF_STATUS (*send_roam_disable_config)(struct wlan_objmgr_vdev *vdev,

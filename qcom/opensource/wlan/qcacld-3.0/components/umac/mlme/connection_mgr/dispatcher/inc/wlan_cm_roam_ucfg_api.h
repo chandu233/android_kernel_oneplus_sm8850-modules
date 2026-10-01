@@ -511,6 +511,24 @@ ucfg_cm_set_roam_scan_high_rssi_offset(struct wlan_objmgr_psoc *psoc,
 {
 	return cm_set_roam_scan_high_rssi_offset(psoc, vdev_id, param_value);
 }
+
+#ifdef OPLUS_BUG_STABILITY
+// OPLUS command to config roaming params
+static inline QDF_STATUS
+ucfg_cm_set_roam_bad_rssi_offset_2G(struct wlan_objmgr_psoc *psoc,
+				       uint8_t vdev_id, uint32_t param_value)
+{
+	return cm_set_roam_bad_rssi_offset_2G(psoc, vdev_id, param_value);
+}
+
+static inline QDF_STATUS
+ucfg_cm_set_roam_per_enable(struct wlan_objmgr_psoc *psoc,
+				       uint8_t vdev_id, uint32_t param_value)
+{
+	return cm_set_roam_per_enable(psoc, vdev_id, param_value);
+}
+
+#endif /* OPLUS_BUG_STABILITY */
 #else
 static inline void
 ucfg_cm_reset_key(struct wlan_objmgr_pdev *pdev, uint8_t vdev_id) {}
@@ -549,6 +567,23 @@ ucfg_cm_set_roam_scan_high_rssi_offset(struct wlan_objmgr_psoc *psoc,
 {
 	return QDF_STATUS_SUCCESS;
 }
+
+#ifdef OPLUS_BUG_STABILITY
+// OPLUS command to config roaming params
+static inline QDF_STATUS
+ucfg_cm_set_roam_bad_rssi_offset_2G(struct wlan_objmgr_psoc *psoc,
+				       uint8_t vdev_id, uint32_t param_value)
+{
+	return QDF_STATUS_SUCCESS;
+}
+
+static inline QDF_STATUS
+ucfg_cm_set_roam_per_enable(struct wlan_objmgr_psoc *psoc,
+				       uint8_t vdev_id, uint32_t param_value)
+{
+	return QDF_STATUS_SUCCESS;
+}
+#endif /* OPLUS_BUG_STABILITY */
 #endif /* WLAN_FEATURE_ROAM_OFFLOAD */
 
 #ifdef WLAN_VENDOR_HANDOFF_CONTROL

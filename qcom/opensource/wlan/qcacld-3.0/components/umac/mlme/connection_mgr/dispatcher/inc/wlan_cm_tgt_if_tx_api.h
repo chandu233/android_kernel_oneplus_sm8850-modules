@@ -290,6 +290,13 @@ QDF_STATUS wlan_cm_tgt_send_roam_per_config(struct wlan_objmgr_psoc *psoc,
 					  uint8_t vdev_id,
 					  struct wlan_per_roam_config_req *req);
 
+#ifdef OPLUS_BUG_STABILITY
+// OPLUS command to config roaming params
+QDF_STATUS wlan_cm_tgt_send_roam_btm_config(struct wlan_objmgr_psoc *psoc,
+					   uint8_t vdev_id,
+					   struct wlan_roam_btm_config *req);
+#endif /* OPLUS_BUG_STABILITY */
+
 /**
  * wlan_cm_tgt_send_roam_triggers()  - Send roam trigger command to FW
  * @psoc: psoc pointer

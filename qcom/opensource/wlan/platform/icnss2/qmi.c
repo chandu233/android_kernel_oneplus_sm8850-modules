@@ -34,6 +34,11 @@
 #include "debug.h"
 #include "genl.h"
 
+#ifdef OPLUS_FEATURE_WIFI_BDF
+//Modify for: multi projects using different bdf
+#include <soc/oplus/system/oplus_project.h>
+#endif /* OPLUS_FEATURE_WIFI_BDF */
+
 #define WLFW_SERVICE_WCN_INS_ID_V01	3
 #define WLFW_SERVICE_INS_ID_V01		0
 #define WLFW_CLIENT_ID			0x4b4e454c
@@ -70,6 +75,41 @@
 #define MAX_NUM_SHADOW_REG_V3		(QMI_WLFW_MAX_NUM_SHADOW_REG_V3_USAGE_V01 - \
 					MAX_SHADOW_REG_RESERVED)
 #define IMSPRIVATE_SERVICE_MAX_MSG_LEN  SZ_8K
+
+#ifdef OPLUS_FEATURE_WIFI_BDF
+//Modify for: multi projects using different bdf
+#define BDF_FILE_CN		"bdwlan.b0c"
+#define BDF_FILE_IN		"bdwlan.b0i"
+#define BDF_FILE_EU		"bdwlan.b0e"
+#define BDF_FILE_US		"bdwlan.b0a"
+
+#define BDF_FILE_IN_GF		"bdwlang.b0i"
+#define BDF_FILE_EU_GF		"bdwlang.b0e"
+#define BDF_FILE_US_GF		"bdwlang.b0a"
+
+#define REG_ID_CN		1
+#define REG_ID_IN		2
+#define REG_ID_EU		3
+#define REG_ID_US		4
+
+#define REG_NAME_IN		"IN"
+#define REG_NAME_EU		"EU"
+#define REG_NAME_CN		"CN"
+#define REG_NAME_US		"US"
+#define REG_NAME_DEFAULT		"DEFAULT"
+
+enum REGION_VERSION {
+    REGION_UNKNOWN = 0,
+    REGION_CN,
+    REGION_IN,
+    REGION_EU,
+    REGION_US,
+    REGION_APAC,
+    REGION_JP,
+   };
+
+#endif /* OPLUS_FEATURE_WIFI_BDF */
+
 
 #ifdef CONFIG_ICNSS2_DEBUG
 bool ignore_fw_timeout;
@@ -970,7 +1010,10 @@ int icnss_wlfw_wlan_mac_req_send_sync(struct icnss_priv *priv,
 	struct wlfw_mac_addr_resp_msg_v01 resp = {0};
 	struct qmi_txn txn;
 	int ret;
-
+#ifdef OPLUS_FEATURE_WIFI_MAC
+	int i;
+	char revert_mac[QMI_WLFW_MAC_ADDR_SIZE_V01];
+#endif /* OPLUS_FEATURE_WIFI_MAC */
 	if (!priv || !mac || mac_len != QMI_WLFW_MAC_ADDR_SIZE_V01)
 		return -EINVAL;
 
@@ -985,7 +1028,16 @@ int icnss_wlfw_wlan_mac_req_send_sync(struct icnss_priv *priv,
 
 	icnss_pr_dbg("Sending WLAN mac req [%pM], state: 0x%lx\n",
 			     mac, priv->state);
+#ifdef OPLUS_FEATURE_WIFI_MAC
+	for (i = 0; i < QMI_WLFW_MAC_ADDR_SIZE_V01 ; i ++){
+		revert_mac[i] = mac[QMI_WLFW_MAC_ADDR_SIZE_V01 - i -1];
+	}
+	icnss_pr_info("Sending revert WLAN mac req [%pM], state: 0x%lx\n",
+		revert_mac, priv->state);
+	memcpy(req.mac_addr, revert_mac, mac_len);
+#else
 	memcpy(req.mac_addr, mac, mac_len);
+#endif /* OPLUS_FEATURE_WIFI_MAC */
 	req.mac_addr_valid = 1;
 
 	ret = qmi_send_request(&priv->qmi, NULL, &txn,
@@ -1112,6 +1164,56 @@ void icnss_dms_deinit(struct icnss_priv *priv)
 	qmi_handle_release(&priv->qmi_dms);
 }
 
+#ifdef OPLUS_FEATURE_WIFI_BDF
+//Modify for: multi projects using different bdf
+static bool is_prj_support_region_id(void) {
+	int project_id = get_project();
+	icnss_pr_dbg("the project support region id is: %d\n", project_id);
+	//for Macan
+	if (project_id == 24877 || project_id == 24878 || project_id == 24879) {
+		return true;
+	}
+	return false;
+}
+
+static void cnss_get_oplus_bdf_file_name(struct icnss_priv *priv, char* file_name, u32 filename_len) {
+    int reg_id = get_Operator_Version();
+    int rf_id = get_Modem_Version();
+    icnss_pr_info("region id: %d, rf id: %d\n", reg_id, rf_id);
+
+    if (reg_id == REGION_IN) {
+        priv->region_name = REG_NAME_IN;
+    } else if (reg_id == REGION_EU || reg_id == REGION_APAC) {
+        priv->region_name = REG_NAME_EU;
+    } else if (reg_id == REGION_US) {
+        priv->region_name = REG_NAME_US;
+    } else {
+        priv->region_name = REG_NAME_CN;
+    }
+
+    if (is_prj_support_region_id()) {
+        if (reg_id == REGION_CN) {
+            snprintf(file_name, filename_len, BDF_FILE_CN);
+        } else if (reg_id == REGION_IN) {
+            snprintf(file_name, filename_len, BDF_FILE_IN);
+            priv->bdf_name = BDF_FILE_IN_GF;
+        } else if (reg_id == REGION_EU || reg_id == REGION_APAC) {
+            snprintf(file_name, filename_len, BDF_FILE_EU);
+            priv->bdf_name = BDF_FILE_EU_GF;
+        } else if (reg_id == REGION_US) {
+            snprintf(file_name, filename_len, BDF_FILE_US);
+            priv->bdf_name = BDF_FILE_US_GF;
+        } else {
+            snprintf(file_name, filename_len, ELF_BDF_FILE_NAME);
+            priv->bdf_name = ELF_BDF_FILE_NAME;
+        }
+    } else {
+        snprintf(file_name, filename_len, ELF_BDF_FILE_NAME);
+        priv->bdf_name = ELF_BDF_FILE_NAME;
+    }
+}
+#endif /* OPLUS_FEATURE_WIFI_BDF */
+
 static int icnss_get_bdf_file_name(struct icnss_priv *priv,
 				   u32 bdf_type, char *filename,
 				   u32 filename_len)
@@ -1123,7 +1225,12 @@ static int icnss_get_bdf_file_name(struct icnss_priv *priv,
 	switch (bdf_type) {
 	case ICNSS_BDF_ELF:
 		if (priv->board_id == 0xFF)
+			#ifndef OPLUS_FEATURE_WIFI_BDF
+			//Modify for: multi projects using different bdf
 			snprintf(filename_tmp, filename_len, ELF_BDF_FILE_NAME);
+			#else
+			cnss_get_oplus_bdf_file_name(priv, filename_tmp, filename_len);
+			#endif /* OPLUS_FEATURE_WIFI_BDF */
 		else if (priv->board_id < 0xFF)
 			snprintf(filename_tmp, filename_len,
 				 ELF_BDF_FILE_NAME_PREFIX "%02x",
@@ -1224,6 +1331,15 @@ int icnss_wlfw_bdf_dnld_send_sync(struct icnss_priv *priv, u32 bdf_type)
 	temp = fw_entry->data;
 	remaining = fw_entry->size;
 
+#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+//Add for: check fw status for switch issue
+	if (bdf_type == ICNSS_BDF_REGDB) {
+		set_bit(CNSS_LOAD_REGDB_SUCCESS, &priv->loadRegdbState);
+	} else if (bdf_type == ICNSS_BDF_ELF){
+		set_bit(CNSS_LOAD_BDF_SUCCESS, &priv->loadBdfState);
+	}
+#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
+
 	icnss_pr_dbg("Downloading %s: %s, size: %u\n",
 		     icnss_bdf_type_to_str(bdf_type), filename, remaining);
 
@@ -1297,6 +1413,16 @@ int icnss_wlfw_bdf_dnld_send_sync(struct icnss_priv *priv, u32 bdf_type)
 err_send:
 	release_firmware(fw_entry);
 err_req_fw:
+
+#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+//Add for: check fw status for switch issue
+	if (bdf_type == ICNSS_BDF_REGDB) {
+		set_bit(CNSS_LOAD_REGDB_FAIL, &priv->loadRegdbState);
+	} else if (bdf_type == ICNSS_BDF_ELF){
+		set_bit(CNSS_LOAD_BDF_FAIL, &priv->loadBdfState);
+	}
+#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
+
 	if (bdf_type != ICNSS_BDF_REGDB)
 		ICNSS_QMI_ASSERT();
 	kfree(req);

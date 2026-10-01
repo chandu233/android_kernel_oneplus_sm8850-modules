@@ -238,6 +238,11 @@
  */
 #define TX_BFER_NDP_PERIODICITY 100
 
+#ifdef OPLUS_BUG_STABILITY
+ //Add for: hotspot manager
+#include <wlan_hdd_hostapd_wext.h>
+#endif /* OPLUS_BUG_STABILITY */
+
 #define g_mode_rates_size (12)
 #define a_mode_rates_size (8)
 
@@ -5650,6 +5655,16 @@ __wlan_hdd_cfg80211_get_features(struct wiphy *wiphy,
 					  QCA_WLAN_VENDOR_FEATURE_ADAPTIVE_11R);
 	}
 
+#ifdef OPLUS_FEATURE_WIFI_VENDOR_FT
+	value = false;
+	value = ucfg_scan_is_vendor_ft_enabled(hdd_ctx->psoc);
+	if (value) {
+		hdd_debug("OPLUS vendor ft is Enabled");
+		wlan_cfg80211_set_feature(feature_flags,
+					  OPLUS_WLAN_VENDOR_FEATURE_VENDOR_FT);
+	}
+#endif /* OPLUS_FEATURE_WIFI_VENDOR_FT */
+
 	hdd_get_twt_requestor(hdd_ctx->psoc, &twt_req);
 	hdd_get_twt_responder(hdd_ctx->psoc, &twt_res);
 	hdd_get_twt_responder_support_for_ht_vht_mode(hdd_ctx->psoc,
@@ -6301,6 +6316,11 @@ roam_control_policy[QCA_ATTR_ROAM_CONTROL_MAX + 1] = {
 			.type = NLA_U32},
 	[QCA_ATTR_ROAM_CONTROL_CANDIDATE_SCORE_THRESHOLD_PERCENTAGE] = {
 			.type = NLA_U8},
+#ifdef OPLUS_BUG_STABILITY
+	// OPLUS command to config roaming params
+	[OPLUS_ATTR_ROAM_CONTROL_BAD_RSSI_2G_OFFSET] = {.type = NLA_U32},
+	[OPLUS_ATTR_ROAM_CONTROL_PER_ENABLE] = {.type = NLA_U32},
+#endif /* OPLUS_BUG_STABILITY */
 	[QCA_ATTR_ROAM_CONTROL_CANDIDATE_SCORE_MIN_DELTA_THRESHOLD] = {
 			.type = NLA_U32},
 	[QCA_ATTR_ROAM_CONTROL_CONNECTED_BSS_RECONNECT_DISALLOW_PERIOD] = {
@@ -7507,6 +7527,60 @@ hdd_set_roam_with_control_config(struct hdd_context *hdd_ctx,
 	if (is_rso_update_required)
 		wlan_roam_update_cfg(hdd_ctx->psoc, vdev_id,
 				     ROAM_SCAN_OFFLOAD_UPDATE_CFG);
+
+#ifdef OPLUS_BUG_STABILITY
+	// OPLUS command to config roaming params
+	attr = tb2[OPLUS_ATTR_ROAM_CONTROL_BAD_RSSI_2G_OFFSET];
+	if (attr) {
+		value = nla_get_u32(attr);
+		if (!cfg_in_range(CFG_LFR_ROAM_BG_SCAN_BAD_RSSI_OFFSET_2G, value)) {
+			hdd_err("Bad RSSI offset 2G value %d is out of range",
+				value);
+			return -EINVAL;
+		}
+
+		hdd_debug("%s roam Bad RSSI offset 2G: %d for vdev %d",
+			  value ? "Enable" : "Disable", value, vdev_id);
+
+		if (!value &&
+		    !wlan_cm_get_roam_bad_rssi_offset_2G(hdd_ctx->psoc)) {
+			hdd_debug("Roam Bad RSSI offset 2G is already disabled");
+			return -EINVAL;
+		}
+
+		status = ucfg_cm_set_roam_bad_rssi_offset_2G(hdd_ctx->psoc,
+								vdev_id, value);
+		if (QDF_IS_STATUS_ERROR(status))
+			hdd_err("Fail to set roam Bad RSSI offset 2G for vdev %d",
+				vdev_id);
+	}
+
+	attr = tb2[OPLUS_ATTR_ROAM_CONTROL_PER_ENABLE];
+	if (attr) {
+		value = nla_get_u32(attr);
+		if (!cfg_in_range(CFG_LFR_PER_ROAM_ENABLE, value)) {
+			hdd_err("Per enable value %d is out of range",
+				value);
+			return -EINVAL;
+		}
+
+		hdd_debug("%s per enable: %d for vdev %d",
+			  value ? "Enable" : "Disable", value, vdev_id);
+
+		if (!value &&
+		    !wlan_cm_get_roam_per_enable(hdd_ctx->psoc)) {
+			hdd_debug("Roam PER Enable is already disabled");
+			return -EINVAL;
+		}
+
+		status = ucfg_cm_set_roam_per_enable(hdd_ctx->psoc,
+								vdev_id, value);
+		if (QDF_IS_STATUS_ERROR(status))
+			hdd_err("Fail to set roam PER enable for vdev %d",
+				vdev_id);
+	}
+
+#endif /* OPLUS_BUG_STABILITY */
 
 	return qdf_status_to_os_return(status);
 }
@@ -12598,6 +12672,12 @@ hdd_update_cache_latency_level(struct hdd_adapter *adapter, uint32_t port_id,
 static int hdd_config_latency_level(struct wlan_hdd_link_info *link_info,
 				    const struct nlattr *attr)
 {
+#ifdef OPLUS_BUG_STABILITY
+// Add for: extended latency level
+#define OPLUS_CONFIG_LATENCY_LEVEL_LOW_EXTENDED (QCA_WLAN_VENDOR_ATTR_CONFIG_LATENCY_LEVEL_MAX + 1)
+#define OPLUS_CONFIG_LATENCY_LEVEL_ULTRALOW_EXTENDED (QCA_WLAN_VENDOR_ATTR_CONFIG_LATENCY_LEVEL_MAX + 2)
+#define OPLUS_CONFIG_LATENCY_LEVEL_NUM 2
+#endif /* OPLUS_BUG_STABILITY */
 	struct hdd_adapter *adapter = link_info->adapter;
 	struct hdd_context *hdd_ctx = WLAN_HDD_GET_CTX(adapter);
 	uint32_t port_id;
@@ -12618,6 +12698,11 @@ static int hdd_config_latency_level(struct wlan_hdd_link_info *link_info,
 	case QCA_WLAN_VENDOR_ATTR_CONFIG_LATENCY_LEVEL_XR:
 	case QCA_WLAN_VENDOR_ATTR_CONFIG_LATENCY_LEVEL_LOW:
 	case QCA_WLAN_VENDOR_ATTR_CONFIG_LATENCY_LEVEL_ULTRALOW:
+	#ifdef OPLUS_BUG_STABILITY
+	// Add for: extended latency level
+	case OPLUS_CONFIG_LATENCY_LEVEL_LOW_EXTENDED:
+	case OPLUS_CONFIG_LATENCY_LEVEL_ULTRALOW_EXTENDED:
+	#endif /* OPLUS_BUG_STABILITY */
 		/* valid values */
 		break;
 	default:
@@ -12625,12 +12710,21 @@ static int hdd_config_latency_level(struct wlan_hdd_link_info *link_info,
 		return -EINVAL;
 	}
 
+	#ifdef OPLUS_BUG_STABILITY
+	// Add for: extended latency level
+	if (latency_level > QCA_WLAN_VENDOR_ATTR_CONFIG_LATENCY_LEVEL_MAX) {
+		host_latency_level = latency_level - OPLUS_CONFIG_LATENCY_LEVEL_NUM - 1;
+        } else {
+		host_latency_level = latency_level - 1;
+	}
+	#else /* OPLUS_BUG_STABILITY */
 	/*
 	 * The latency level value in host/firmware is one less than the value
 	 * received from userspace. Always subtract one before sending the
 	 * latency level to firmware.
 	 */
 	host_latency_level = latency_level - 1;
+	#endif /* OPLUS_BUG_STABILITY */
 
 	if (hdd_get_multi_client_ll_support(adapter)) {
 		if (wlan_hdd_get_multi_ll_req_in_progress(adapter)) {
@@ -12664,11 +12758,19 @@ static int hdd_config_latency_level(struct wlan_hdd_link_info *link_info,
 			goto error;
 		}
 	} else {
+		#ifdef OPLUS_BUG_STABILITY
+		// Add for: extended latency level
+		status = sme_set_wlm_latency_level(hdd_ctx->mac_handle,
+						   link_info->vdev_id,
+						   latency_level - 1, 0,
+						   false);
+		#else /* OPLUS_BUG_STABILITY */
 		hdd_debug("set legacy latency level: %d", latency_level);
 		status = sme_set_wlm_latency_level(hdd_ctx->mac_handle,
 						   link_info->vdev_id,
 						   host_latency_level, 0,
 						   false);
+		#endif /* OPLUS_BUG_STABILITY */
 		if (QDF_IS_STATUS_ERROR(status)) {
 			hdd_err("set latency level failed, %u", status);
 			goto error;
@@ -12692,6 +12794,20 @@ static int hdd_config_latency_level(struct wlan_hdd_link_info *link_info,
 					       latency_host_flags);
 error:
 	ret = qdf_status_to_os_return(status);
+
+//#ifdef OPLUS_FEATURE_WIFI_WSA
+//Add for STBC&MRC
+	if (!ret && (latency_level == QCA_WLAN_VENDOR_ATTR_CONFIG_LATENCY_LEVEL_LOW)) {
+		send_oplus_uevent("forcestbc=status:Success,enable=True");
+	#ifdef OPLUS_BUG_STABILITY
+	// Add for: extended latency level
+	} else if (!ret && (latency_level == OPLUS_CONFIG_LATENCY_LEVEL_LOW_EXTENDED)) {
+		send_oplus_uevent("forcestbc=status:Success,enable=True");
+	#endif /* OPLUS_BUG_STABILITY */
+	} else {
+		send_oplus_uevent("forcestbc=status:Success,enable=False");
+	}
+//#endif /* OPLUS_FEATURE_WIFI_WSA */
 
 	return ret;
 }
@@ -13145,6 +13261,19 @@ static int hdd_set_nss(struct wlan_hdd_link_info *link_info,
 	if (ret == 0 && link_info->adapter->device_mode == QDF_SAP_MODE)
 		ret = wma_cli_set_command(link_info->vdev_id,
 					  wmi_vdev_param_nss, nss, VDEV_CMD);
+
+//#ifdef OPLUS_FEATURE_WIFI_WSA
+//Add for STBC&MRC
+	if (link_info->adapter->device_mode != QDF_SAP_MODE) {
+		if (QDF_IS_STATUS_SUCCESS(ret) && (nss == 1)) {
+			send_oplus_uevent("forcemrc=status:Success,enable=True");
+		} else if (QDF_IS_STATUS_SUCCESS(ret) && (nss == 2)) {
+			send_oplus_uevent("forcemrc=status:Success,enable=False");
+		} else {
+			send_oplus_uevent("forcemrc=status:Fail,reason=SendActionFail");
+		}
+	}
+//#endif /* OPLUS_FEATURE_WIFI_WSA */
 
 	return ret;
 }
@@ -14205,12 +14334,18 @@ static int hdd_set_btm_support_config(struct wlan_hdd_link_info *link_info,
 		  link_info->vdev_id, cfg_val, op_mode,
 		  is_vdev_in_conn_state);
 
+#ifdef OPLUS_BUG_STABILITY
+	// OPLUS command to config roaming params
+	if (op_mode != QDF_STA_MODE)
+		return -EINVAL;
+#else
 	/*
 	 * Change in BTM support configuration is applicable only for STA
 	 * interface and not allowed in connected state.
 	 */
 	if (op_mode != QDF_STA_MODE || is_vdev_in_conn_state)
 		return -EINVAL;
+#endif /* OPLUS_BUG_STABILITY */
 
 	switch (cfg_val) {
 	case QCA_WLAN_BTM_SUPPORT_DISABLE:
@@ -22583,6 +22718,321 @@ static int __wlan_hdd_cfg80211_get_nud_stats(struct wiphy *wiphy,
 	return err;
 }
 
+#ifdef OPLUS_BUG_STABILITY
+// Add for: hotspot manager
+static const struct nla_policy
+	oplus_attr_policy[OPLUS_WLAN_VENDOR_ATTR_MAX + 1] = {
+		[OPLUS_WLAN_VENDOR_ATTR_MAC_ADDR] = {.type = NLA_BINARY,
+		.len = QDF_MAC_ADDR_SIZE},
+		[OPLUS_WLAN_VENDOR_ATTR_WETHER_BLOCK_CLIENT] = {.type = NLA_U8},
+		[OPLUS_WLAN_VENDOR_ATTR_SAP_MAX_CLIENT_NUM] = {.type = NLA_U32},
+		[OPLUS_WLAN_VENDOR_ATTR_CONFIG_MAX_TX_BANDWIDTH] = {.type = NLA_U16},
+		[OPLUS_WLAN_VENDOR_ATTR_MONITOR_CHAIN_RSSI] = {.type = NLA_U8},
+};
+
+static int __wlan_hdd_cfg80211_oplus_modify_acl(struct wiphy *wiphy,
+                                                struct wireless_dev *wdev,
+                                                const void *data,
+                                                int data_len) {
+        int32_t status;
+        struct nlattr *tb[OPLUS_WLAN_VENDOR_ATTR_MAX + 1];
+        uint8_t extra[8];
+        int8_t block;
+
+        hdd_enter();
+
+        status = wlan_cfg80211_nla_parse(tb, OPLUS_WLAN_VENDOR_ATTR_MAX, data,
+                                         data_len, oplus_attr_policy);
+        if (status) {
+                hdd_err("Invalid attributes!");
+                status = -EINVAL;
+                goto out;
+        }
+
+        if (tb[OPLUS_WLAN_VENDOR_ATTR_MAC_ADDR]) {
+                nla_memcpy(extra, tb[OPLUS_WLAN_VENDOR_ATTR_MAC_ADDR],
+                           QDF_MAC_ADDR_SIZE);
+        } else {
+                hdd_err("Invalid argument:No sta mac addr provided!");
+                status = -EINVAL;
+                goto out;
+        }
+        if (tb[OPLUS_WLAN_VENDOR_ATTR_WETHER_BLOCK_CLIENT]) {
+                block =
+                    nla_get_u8(tb[OPLUS_WLAN_VENDOR_ATTR_WETHER_BLOCK_CLIENT]);
+        } else {
+                hdd_err("Invalid argument:No block value!");
+                status = -EINVAL;
+                goto out;
+        }
+
+        // we always modify black list, as for now
+        extra[6] = 0;
+        extra[7] = block;
+
+        status = oplus_wlan_hdd_modify_acl(wdev->netdev, (char *)extra);
+        if (0 != status) {
+                hdd_err("failed to modify acl! %d", status);
+                goto out;
+        }
+
+out:
+        hdd_exit();
+        return status;
+}
+
+/**
+ * wlan_hdd_cfg80211_oplus_modify_acl() - modify acl
+ * @wiphy: Pointer to wiphy
+ * @wdev: Pointer to wireless device
+ * @data: vendor command extra data
+ * @data_len: the size of extra data
+ *
+ * Return: 0 for success, non-zero for failure
+ */
+static int wlan_hdd_cfg80211_oplus_modify_acl(struct wiphy *wiphy,
+                                              struct wireless_dev *wdev,
+                                              const void *data, int data_len) {
+        int errno;
+        struct osif_vdev_sync *vdev_sync;
+
+        errno = osif_vdev_sync_op_start(wdev->netdev, &vdev_sync);
+        if (errno) return errno;
+
+        errno =
+            __wlan_hdd_cfg80211_oplus_modify_acl(wiphy, wdev, data, data_len);
+
+        osif_vdev_sync_op_stop(vdev_sync);
+
+        return errno;
+}
+
+static int __wlan_hdd_cfg80211_oplus_set_max_assoc(struct wiphy *wiphy,
+                                                   struct wireless_dev *wdev,
+                                                   const void *data,
+                                                   int data_len) {
+        uint32_t status;
+        int extra[2];
+        uint32_t max_clients;
+        struct nlattr *tb[OPLUS_WLAN_VENDOR_ATTR_MAX + 1];
+
+        hdd_enter();
+
+        status = wlan_cfg80211_nla_parse(tb, OPLUS_WLAN_VENDOR_ATTR_MAX, data,
+                                         data_len, oplus_attr_policy);
+
+        if (status) {
+                hdd_err("Invalid attributes!");
+                status = -EINVAL;
+                goto out;
+        }
+
+        if (tb[OPLUS_WLAN_VENDOR_ATTR_SAP_MAX_CLIENT_NUM]) {
+                max_clients =
+                    nla_get_u32(tb[OPLUS_WLAN_VENDOR_ATTR_SAP_MAX_CLIENT_NUM]);
+        } else {
+                hdd_err("Invalid argument!");
+                status = -EINVAL;
+                goto out;
+        }
+
+        extra[0] = QCSAP_PARAM_MAX_ASSOC;
+        extra[1] = max_clients;
+
+        status = oplus_wlan_hdd_set_max_assoc(wdev->netdev, (char *)extra);
+        if (0 != status) {
+                hdd_err("failed to set max assoc!");
+                goto out;
+        }
+
+out:
+        hdd_exit();
+        return status;
+}
+
+/**
+ * wlan_hdd_cfg80211_oplus_set_max_assoc() - modify acl
+ * @wiphy: Pointer to wiphy
+ * @wdev: Pointer to wireless device
+ * @data: vendor command extra data
+ * @data_len: the size of extra data
+ *
+ * Return: 0 for success, non-zero for failure
+ */
+static int wlan_hdd_cfg80211_oplus_set_max_assoc(struct wiphy *wiphy,
+                                                 struct wireless_dev *wdev,
+                                                 const void *data,
+                                                 int data_len) {
+        int errno;
+        struct osif_vdev_sync *vdev_sync;
+
+        errno = osif_vdev_sync_op_start(wdev->netdev, &vdev_sync);
+        if (errno) return errno;
+
+        errno = __wlan_hdd_cfg80211_oplus_set_max_assoc(wiphy, wdev, data,
+                                                        data_len);
+
+        osif_vdev_sync_op_stop(vdev_sync);
+
+        return errno;
+}
+
+//Add for ULL TX 20M
+static int hdd_set_max_tx_bandwidth_config(struct wlan_hdd_link_info *link_info,
+                                        const struct nlattr *attr)
+{
+	uint16_t tx_bw;
+	uint16_t default_bw;
+	uint8_t peer_mac_addr[QDF_MAC_ADDR_SIZE];
+	struct wlan_objmgr_peer *peer;
+	int ret;
+	enum wlan_phymode old_peer_phymode;
+	uint32_t fw_phymode;
+
+	tp_wma_handle wma;
+
+	if (hdd_validate_adapter(link_info->adapter)) {
+		hdd_err("Invalid adapter");
+		return -EINVAL;
+	}
+
+	wma = cds_get_context(QDF_MODULE_ID_WMA);
+	if (!wma) {
+		return -EINVAL;
+	}
+
+	if (!wlan_cm_is_vdev_connected(link_info->vdev) || hdd_is_chan_switch_in_progress()) {
+		hdd_err("vdev not connected or chan switch in progress");
+		return -EINVAL;
+	}
+
+	ret = 0;
+	default_bw = link_info->adapter->deflink->session.station.conn_info.ch_width;
+	tx_bw = nla_get_u16(attr);
+
+	if (tx_bw > default_bw) {
+		tx_bw = default_bw;
+	}
+
+	hdd_debug("tx_bw %u default_bw %u", tx_bw, default_bw);
+	qdf_mem_copy(peer_mac_addr, &link_info->adapter->deflink->session.station.conn_info.bssid, QDF_MAC_ADDR_SIZE);
+
+	peer = wlan_objmgr_get_peer_by_mac(link_info->adapter->hdd_ctx->psoc,
+		peer_mac_addr, WLAN_LEGACY_WMA_ID);
+
+	if (!peer) {
+		hdd_debug("Peer nout found");
+		return -EINVAL;
+	}
+
+	wlan_peer_obj_lock(peer);
+	old_peer_phymode = wlan_peer_get_phymode(peer);
+	wlan_peer_obj_unlock(peer);
+	fw_phymode = wmi_host_to_fw_phymode(old_peer_phymode);
+	hdd_debug("before change old_peer_phymode = %u fw_phymode = %u", old_peer_phymode, fw_phymode);
+
+
+	ret = wma_set_peer_param(wma, peer_mac_addr, WMI_PEER_CHWIDTH,
+		tx_bw, link_info->adapter->deflink->vdev_id);
+
+	ret = wma_set_peer_param(wma, peer_mac_addr, WMI_PEER_PHYMODE,
+		fw_phymode, link_info->adapter->deflink->vdev_id);
+	wlan_objmgr_peer_release_ref(peer, WLAN_LEGACY_WMA_ID);
+
+	return ret;
+}
+
+/* vtable for oplus independent setters */
+static const struct independent_setters oplus_independent_setters[] = {
+	{OPLUS_WLAN_VENDOR_ATTR_CONFIG_MAX_TX_BANDWIDTH,
+	 hdd_set_max_tx_bandwidth_config},
+};
+
+static int hdd_set_oplus_independent_configuration(struct wlan_hdd_link_info *link_info,
+					     struct nlattr **tb)
+{
+	uint32_t i;
+	uint32_t id;
+	struct nlattr *attr;
+	independent_setter_fn cb;
+	int errno = 0;
+	int ret;
+
+	for (i = 0; i < QDF_ARRAY_SIZE(oplus_independent_setters); i++) {
+		id = oplus_independent_setters[i].id;
+		attr = tb[id];
+		if (!attr)
+			continue;
+
+		hdd_debug("Oplus Set wifi configuration %d", id);
+
+		cb = oplus_independent_setters[i].cb;
+		ret = cb(link_info, attr);
+		if (ret)
+			errno = ret;
+	}
+
+	return errno;
+}
+
+static int
+__wlan_hdd_cfg80211_oplus_wifi_configuration_set(struct wiphy *wiphy,
+					   struct wireless_dev *wdev,
+					   const void *data,
+					   int data_len)
+{
+	struct net_device *dev = wdev->netdev;
+	struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
+	struct hdd_context *hdd_ctx  = wiphy_priv(wiphy);
+	struct nlattr *tb[OPLUS_WLAN_VENDOR_ATTR_MAX + 1];
+	int errno;
+	int ret;
+
+	hdd_enter_dev(dev);
+
+	if (QDF_GLOBAL_FTM_MODE == hdd_get_conparam()) {
+		hdd_err("Command not allowed in FTM mode");
+		return -EPERM;
+	}
+
+	errno = wlan_hdd_validate_context(hdd_ctx);
+	if (errno)
+		return errno;
+
+	if (wlan_cfg80211_nla_parse(tb, OPLUS_WLAN_VENDOR_ATTR_MAX, data,
+				    data_len, oplus_attr_policy)) {
+		hdd_err("invalid attr");
+		return -EINVAL;
+	}
+
+	ret = hdd_set_oplus_independent_configuration(adapter->deflink, tb);
+	if (ret)
+		errno = ret;
+
+	return errno;
+}
+
+static int wlan_hdd_cfg80211_oplus_wifi_configuration_set(struct wiphy *wiphy,
+						    struct wireless_dev *wdev,
+						    const void *data,
+						    int data_len)
+{
+	int errno;
+	struct osif_vdev_sync *vdev_sync;
+
+	errno = osif_vdev_sync_op_start(wdev->netdev, &vdev_sync);
+	if (errno)
+		return errno;
+
+	errno = __wlan_hdd_cfg80211_oplus_wifi_configuration_set(wiphy, wdev,
+							   data, data_len);
+
+	osif_vdev_sync_op_stop(vdev_sync);
+
+	return errno;
+}
+#endif /* OPLUS_BUG_STABILITY */
+
 /**
  * wlan_hdd_cfg80211_get_nud_stats() - get arp stats command to firmware
  * @wiphy: pointer to wireless wiphy structure.
@@ -25418,6 +25868,40 @@ const struct wiphy_vendor_command hdd_wiphy_vendor_commands[] = {
 		vendor_command_policy(get_usable_channel_policy,
 				      QCA_WLAN_VENDOR_ATTR_MAX)
 	},
+
+	#ifdef OPLUS_BUG_STABILITY
+	//add for: hotspot manager via wificond
+	{
+		.info.vendor_id = QCA_NL80211_VENDOR_ID,
+		.info.subcmd = OPLUS_NL80211_VENDOR_SUBCMD_MODIFY_ACL,
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
+				WIPHY_VENDOR_CMD_NEED_NETDEV |
+				WIPHY_VENDOR_CMD_NEED_RUNNING,
+		.doit = wlan_hdd_cfg80211_oplus_modify_acl,
+		vendor_command_policy(oplus_attr_policy,
+					OPLUS_WLAN_VENDOR_ATTR_MAX)
+	},
+	{
+		.info.vendor_id = QCA_NL80211_VENDOR_ID,
+		.info.subcmd = OPLUS_NL80211_VENDOR_SUBCMD_SET_MAX_ASSOC,
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
+				WIPHY_VENDOR_CMD_NEED_NETDEV |
+				WIPHY_VENDOR_CMD_NEED_RUNNING,
+		.doit = wlan_hdd_cfg80211_oplus_set_max_assoc,
+		vendor_command_policy(oplus_attr_policy,
+					OPLUS_WLAN_VENDOR_ATTR_MAX)
+	},
+	{
+		.info.vendor_id = QCA_NL80211_VENDOR_ID,
+		.info.subcmd = OPLUS_NL80211_VENDOR_SUBCMD_SET_WIFI_CONFIGURATION,
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
+			WIPHY_VENDOR_CMD_NEED_NETDEV |
+			WIPHY_VENDOR_CMD_NEED_RUNNING,
+		.doit = wlan_hdd_cfg80211_oplus_wifi_configuration_set,
+		vendor_command_policy(oplus_attr_policy,
+					OPLUS_WLAN_VENDOR_ATTR_MAX)
+	},
+    #endif /* OPLUS_BUG_STABILITY */
 	FEATURE_ACTIVE_TOS_VENDOR_COMMANDS
 	FEATURE_NAN_VENDOR_COMMANDS
 	FEATURE_FW_STATE_COMMANDS

@@ -81,8 +81,14 @@
 #include "wlan_mlo_mgr_peer.h"
 #include "wlan_mlo_mgr_sta.h"
 #include "wlan_cp_stats_mc_defs.h"
-
 #include "wlan_pmo_wow.h"
+#ifdef OPLUS_FEATURE_CONN_POWER_MONITOR
+//add for  connectivity power monitor
+#include <linux/workqueue.h>
+#include <linux/miscdevice.h>
+#include <linux/fs.h>
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
+
 /**
  * WMA_SET_VDEV_IE_SOURCE_HOST - Flag to identify the source of VDEV SET IE
  * command. The value is 0x0 for the VDEV SET IE WMI commands from mobile
@@ -98,7 +104,11 @@
 #define ADDBA_TXAGGR_SIZE_512 512
 #define ADDBA_TXAGGR_SIZE_BERYLLIUM 1024
 
+#ifndef OPLUS_FEATURE_CONN_POWER_MONITOR
 static bool is_wakeup_event_console_logs_enabled = false;
+#else
+static bool is_wakeup_event_console_logs_enabled = true;
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 
 void wma_set_wakeup_logs_to_console(bool value)
 {
@@ -2742,6 +2752,272 @@ static void wma_log_pkt_icmpv4(uint8_t *data, uint32_t length)
 	wma_debug("Pkt_len: %u, Seq_num: %u",
 		 qdf_cpu_to_be16(pkt_len), qdf_cpu_to_be16(seq_num));
 }
+#ifdef OPLUS_FEATURE_CONN_POWER_MONITOR
+//add for  connectivity power monitor
+#define RET_ERR  1
+#define RET_OK  0
+#define INIT_FINISHED 1
+
+/* Daily wakeup statistics - max 256 wake reasons */
+#define MAX_WOW_WAKE_REASONS 256
+/* 24 hours in microseconds */
+#define WOW_DAILY_REPORT_INTERVAL_US (24ULL * 60 * 60 * 1000 * 1000)
+
+struct wow_daily_wakeup_stats {
+	uint32_t wake_reason_count[MAX_WOW_WAKE_REASONS];
+	uint32_t total_wakeup_count;
+	uint64_t last_report_time_us;  /* Time in microseconds */
+	qdf_spinlock_t lock;
+};
+
+static struct wow_daily_wakeup_stats g_daily_wakeup_stats;
+static bool g_daily_stats_initialized = false;
+
+static struct miscdevice wlan_object;
+static struct work_struct mWork;
+static volatile unsigned char mUeventInit = 0;
+static volatile unsigned char mMiscDevInit = 0;
+static char mUevent[256] = {'\0'};
+
+/* Forward declarations for daily wakeup statistics functions */
+static void wma_init_daily_wakeup_stats(void);
+static void wma_deinit_daily_wakeup_stats(void);
+static void wma_upload_daily_wakeup_stats(void);
+
+static void oplusWorkHandler(struct work_struct *data)
+{
+	char *envp[2];
+
+	if (mUevent[0] == '\0')
+		return;
+
+	if ((mMiscDevInit == INIT_FINISHED) && (wlan_object.this_device != NULL)) {
+		envp[0] = mUevent;
+		envp[1] = NULL;
+		kobject_uevent_env(
+			&wlan_object.this_device->kobj,
+			KOBJ_CHANGE, envp);
+	}
+}
+
+int oplusLpmUeventInit(void)
+{
+	int ret = RET_OK;
+
+	INIT_WORK(&mWork, oplusWorkHandler);
+	wlan_object.name = "lpm";
+	wlan_object.minor = MISC_DYNAMIC_MINOR;
+	if (misc_register(&wlan_object) != 0) {
+		misc_deregister(&wlan_object);
+		return RET_ERR;
+	}
+	if (wlan_object.this_device != NULL) {
+		ret = kobject_uevent(&wlan_object.this_device->kobj, KOBJ_ADD);
+		if (ret == RET_OK) {
+			mUeventInit = INIT_FINISHED;
+			mMiscDevInit = INIT_FINISHED;
+		}
+	}
+
+	/* Initialize daily wakeup statistics */
+	wma_init_daily_wakeup_stats();
+
+	return RET_OK;
+}
+
+void oplusConnUeventDeinit(void)
+{
+	/* Upload final statistics before deinit */
+	if (g_daily_stats_initialized &&
+		g_daily_wakeup_stats.total_wakeup_count > 0) {
+		wma_upload_daily_wakeup_stats();
+	}
+
+	/* Deinitialize daily wakeup statistics */
+	wma_deinit_daily_wakeup_stats();
+
+	if (mUeventInit == INIT_FINISHED) {
+		cancel_work_sync(&mWork);
+	}
+	if ((mMiscDevInit == INIT_FINISHED) && (wlan_object.this_device != NULL)) {
+		misc_deregister(&wlan_object);
+	}
+	mUeventInit = 0;
+}
+
+static int oplusLpmSendUevent(const char *src)
+{
+	if (src == NULL) {
+		return RET_ERR;
+	}
+
+	if (mUeventInit == INIT_FINISHED) {
+		strcpy(mUevent, src);
+		schedule_work(&mWork);
+	}
+
+	return RET_OK;
+}
+
+/**
+ * wma_init_daily_wakeup_stats() - Initialize daily wakeup statistics
+ *
+ * Initialize the daily wakeup statistics data structure
+ *
+ * Return: void
+ */
+static void wma_init_daily_wakeup_stats(void)
+{
+	if (g_daily_stats_initialized)
+		return;
+
+	qdf_mem_zero(&g_daily_wakeup_stats, sizeof(g_daily_wakeup_stats));
+	qdf_spinlock_create(&g_daily_wakeup_stats.lock);
+	g_daily_wakeup_stats.last_report_time_us =
+		qdf_log_timestamp_to_usecs(qdf_get_log_timestamp());
+	g_daily_stats_initialized = true;
+
+	wma_nofl_info("Daily wakeup stats initialized");
+}
+
+/**
+ * wma_deinit_daily_wakeup_stats() - Deinitialize daily wakeup statistics
+ *
+ * Cleanup the daily wakeup statistics data structure
+ *
+ * Return: void
+ */
+static void wma_deinit_daily_wakeup_stats(void)
+{
+	if (!g_daily_stats_initialized)
+		return;
+
+	qdf_spinlock_destroy(&g_daily_wakeup_stats.lock);
+	g_daily_stats_initialized = false;
+
+	wma_nofl_info("Daily wakeup stats deinitialized");
+}
+
+/**
+ * wma_upload_daily_wakeup_stats() - Upload daily wakeup statistics via uevent
+ *
+ * Format and send daily wakeup statistics through uevent
+ *
+ * Return: void
+ */
+static void wma_upload_daily_wakeup_stats(void)
+{
+	char event_msg[512];
+	uint32_t i;
+	int len = 0;
+	uint32_t reason_count = 0;
+
+	if (!g_daily_stats_initialized)
+		return;
+
+	qdf_mem_zero(event_msg, sizeof(event_msg));
+
+	qdf_spinlock_acquire(&g_daily_wakeup_stats.lock);
+
+	/* Format uevent message with total count */
+	len = snprintf(event_msg, sizeof(event_msg),
+		"daily_wakeup_total=%u;reasons=",
+		g_daily_wakeup_stats.total_wakeup_count);
+
+	/* Add all non-zero wakeup reasons with reason name */
+	for (i = 0; i < MAX_WOW_WAKE_REASONS; i++) {
+		if (g_daily_wakeup_stats.wake_reason_count[i] == 0)
+			continue;
+
+		if (reason_count > 0) {
+			len += snprintf(event_msg + len, sizeof(event_msg) - len, ",");
+		}
+
+		len += snprintf(event_msg + len, sizeof(event_msg) - len,
+			"%s:%u", wma_wow_wake_reason_str(i),
+			g_daily_wakeup_stats.wake_reason_count[i]);
+
+		reason_count++;
+
+		/* Prevent buffer overflow */
+		if (len >= (int)(sizeof(event_msg) - 50))
+			break;
+	}
+
+	wma_nofl_info("Uploading daily wakeup stats: total=%u, reason_types=%u",
+		g_daily_wakeup_stats.total_wakeup_count, reason_count);
+
+	/* Log detailed breakdown with reason names */
+	for (i = 0; i < MAX_WOW_WAKE_REASONS; i++) {
+		if (g_daily_wakeup_stats.wake_reason_count[i] > 0) {
+			wma_nofl_info("  Reason[%s(%u)]: count=%u",
+				wma_wow_wake_reason_str(i), i,
+				g_daily_wakeup_stats.wake_reason_count[i]);
+		}
+	}
+
+	/* Reset statistics after upload */
+	qdf_mem_zero(g_daily_wakeup_stats.wake_reason_count,
+		sizeof(g_daily_wakeup_stats.wake_reason_count));
+	g_daily_wakeup_stats.total_wakeup_count = 0;
+	g_daily_wakeup_stats.last_report_time_us =
+		qdf_log_timestamp_to_usecs(qdf_get_log_timestamp());
+
+	qdf_spinlock_release(&g_daily_wakeup_stats.lock);
+
+	/* Send uevent */
+	oplusLpmSendUevent(event_msg);
+}
+
+/**
+ * wma_record_daily_wakeup() - Record a wakeup event for daily statistics
+ * @wake_reason: The wake reason code
+ *
+ * Record the wakeup event and check if it's time to upload daily stats
+ *
+ * Return: void
+ */
+static void wma_record_daily_wakeup(uint32_t wake_reason)
+{
+	uint64_t current_time_us;
+	uint64_t time_diff_us;
+	bool should_upload = false;
+
+	if (!g_daily_stats_initialized) {
+		wma_init_daily_wakeup_stats();
+		if (!g_daily_stats_initialized)
+			return;
+	}
+
+	qdf_spinlock_acquire(&g_daily_wakeup_stats.lock);
+
+	/* Record the wakeup */
+	if (wake_reason < MAX_WOW_WAKE_REASONS) {
+		g_daily_wakeup_stats.wake_reason_count[wake_reason]++;
+	}
+	g_daily_wakeup_stats.total_wakeup_count++;
+
+	/* Convert log timestamp to microseconds for proper time comparison */
+	current_time_us = qdf_log_timestamp_to_usecs(qdf_get_log_timestamp());
+	time_diff_us = current_time_us - g_daily_wakeup_stats.last_report_time_us;
+
+	/* Check if 24 hours have passed (time is in microseconds) */
+	if (time_diff_us >= WOW_DAILY_REPORT_INTERVAL_US) {
+		/* Update last_report_time immediately to prevent concurrent uploads */
+		g_daily_wakeup_stats.last_report_time_us = current_time_us;
+		should_upload = true;
+	}
+
+	qdf_spinlock_release(&g_daily_wakeup_stats.lock);
+
+	/* Upload statistics outside the lock to avoid long-held lock */
+	if (should_upload) {
+		wma_nofl_info("24 hours elapsed, uploading daily wakeup stats");
+		wma_upload_daily_wakeup_stats();
+	}
+}
+
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 
 static void wma_log_pkt_icmpv6(uint8_t *data, uint32_t length)
 {
@@ -2760,48 +3036,98 @@ static void wma_log_pkt_ipv4(uint8_t *data, uint32_t length)
 {
 	uint16_t pkt_len, src_port, dst_port;
 	char *ip_addr;
-
+#ifdef OPLUS_FEATURE_CONN_POWER_MONITOR
+	//add for  connectivity power monitor
+	char event_msg[256] = {'\0'};
+	uint8_t *src_ip;
+	uint8_t *dst_ip;
+	uint8_t poto;
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 	if (length < WMA_IPV4_PKT_INFO_GET_MIN_LEN)
 		return;
 
 	pkt_len = *(uint16_t *)(data + IPV4_PKT_LEN_OFFSET);
 	ip_addr = (char *)(data + IPV4_SRC_ADDR_OFFSET);
+#ifndef OPLUS_FEATURE_CONN_POWER_MONITOR
 	wma_nofl_debug("src addr %d:%d:%d:%d", ip_addr[0], ip_addr[1],
 		      ip_addr[2], ip_addr[3]);
+#else
+	wma_nofl_info("src addr %d:%d:%d:%d", ip_addr[0], ip_addr[1],
+		      ip_addr[2], ip_addr[3]);
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 	ip_addr = (char *)(data + IPV4_DST_ADDR_OFFSET);
+#ifndef OPLUS_FEATURE_CONN_POWER_MONITOR
 	wma_nofl_debug("dst addr %d:%d:%d:%d", ip_addr[0], ip_addr[1],
 		      ip_addr[2], ip_addr[3]);
+#else
+	wma_nofl_info("dst addr %d:%d:%d:%d", ip_addr[0], ip_addr[1],
+		      ip_addr[2], ip_addr[3]);
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 	src_port = *(uint16_t *)(data + IPV4_SRC_PORT_OFFSET);
 	dst_port = *(uint16_t *)(data + IPV4_DST_PORT_OFFSET);
 	wma_debug("Pkt_len: %u, src_port: %u, dst_port: %u",
 		  qdf_cpu_to_be16(pkt_len),
 		  qdf_cpu_to_be16(src_port),
 		  qdf_cpu_to_be16(dst_port));
+#ifdef OPLUS_FEATURE_CONN_POWER_MONITOR
+	//add for  connectivity power monitor
+	src_ip = (char *)(data + IPV4_SRC_ADDR_OFFSET);
+	dst_ip = (char *)(data + IPV4_DST_ADDR_OFFSET);
+	poto = qdf_nbuf_data_get_ipv4_proto(data);
+	snprintf(event_msg, sizeof(event_msg), "wakeup_reason=%d;%d.%d.%d.%d;%u;%d.%d.%d.%d;%u;", poto,
+		src_ip[0], src_ip[1], src_ip[2], src_ip[3], qdf_cpu_to_be16(src_port),
+		dst_ip[0], dst_ip[1], dst_ip[2], dst_ip[3], qdf_cpu_to_be16(dst_port));
+	oplusLpmSendUevent(event_msg);
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 }
 
 static void wma_log_pkt_ipv6(uint8_t *data, uint32_t length)
 {
 	uint16_t pkt_len, src_port, dst_port;
 	char *ip_addr;
-
+#ifdef OPLUS_FEATURE_CONN_POWER_MONITOR
+	//add for  connectivity power monitor
+	char event_msg[256] = {'\0'};
+	uint8_t *src_ip;
+	uint8_t *dst_ip;
+	uint8_t poto;
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 	if (length < WMA_IPV6_PKT_INFO_GET_MIN_LEN)
 		return;
 
 	pkt_len = *(uint16_t *)(data + IPV6_PKT_LEN_OFFSET);
 	ip_addr = (char *)(data + IPV6_SRC_ADDR_OFFSET);
+#ifndef OPLUS_FEATURE_CONN_POWER_MONITOR
 	wma_nofl_debug("src addr "IPV6_ADDR_STR, ip_addr[0],
 		 ip_addr[1], ip_addr[2], ip_addr[3], ip_addr[4],
 		 ip_addr[5], ip_addr[6], ip_addr[7], ip_addr[8],
 		 ip_addr[9], ip_addr[10], ip_addr[11],
 		 ip_addr[12], ip_addr[13], ip_addr[14],
 		 ip_addr[15]);
+#else
+	wma_nofl_info("src addr "IPV6_ADDR_STR, ip_addr[0],
+		 ip_addr[1], ip_addr[2], ip_addr[3], ip_addr[4],
+		 ip_addr[5], ip_addr[6], ip_addr[7], ip_addr[8],
+		 ip_addr[9], ip_addr[10], ip_addr[11],
+		 ip_addr[12], ip_addr[13], ip_addr[14],
+		 ip_addr[15]);
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 	ip_addr = (char *)(data + IPV6_DST_ADDR_OFFSET);
+#ifndef OPLUS_FEATURE_CONN_POWER_MONITOR
 	wma_nofl_debug("dst addr "IPV6_ADDR_STR, ip_addr[0],
 		 ip_addr[1], ip_addr[2], ip_addr[3], ip_addr[4],
 		 ip_addr[5], ip_addr[6], ip_addr[7], ip_addr[8],
 		 ip_addr[9], ip_addr[10], ip_addr[11],
 		 ip_addr[12], ip_addr[13], ip_addr[14],
 		 ip_addr[15]);
+#else
+	wma_nofl_info("dst addr "IPV6_ADDR_STR, ip_addr[0],
+		 ip_addr[1], ip_addr[2], ip_addr[3], ip_addr[4],
+		 ip_addr[5], ip_addr[6], ip_addr[7], ip_addr[8],
+		 ip_addr[9], ip_addr[10], ip_addr[11],
+		 ip_addr[12], ip_addr[13], ip_addr[14],
+		 ip_addr[15]);
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 	src_port = *(uint16_t *)(data + IPV6_SRC_PORT_OFFSET);
 	dst_port = *(uint16_t *)(data + IPV6_DST_PORT_OFFSET);
 	wma_conditional_log(is_wakeup_event_console_logs_enabled,
@@ -2809,6 +3135,16 @@ static void wma_log_pkt_ipv6(uint8_t *data, uint32_t length)
 			    qdf_cpu_to_be16(pkt_len),
 			    qdf_cpu_to_be16(src_port),
 			    qdf_cpu_to_be16(dst_port));
+#ifdef OPLUS_FEATURE_CONN_POWER_MONITOR
+	//add for  connectivity power monitor
+	src_ip = (char *)(data + IPV6_SRC_ADDR_OFFSET);
+	dst_ip = (char *)(data + IPV6_DST_ADDR_OFFSET);
+	poto = qdf_nbuf_data_get_ipv6_proto(data);
+	snprintf(event_msg, sizeof(event_msg), "wakeup_reason=%d;%pI6;%u;%pI6;%u;", poto,
+		src_ip, qdf_cpu_to_be16(src_port),
+		dst_ip, qdf_cpu_to_be16(dst_port));
+	oplusLpmSendUevent(event_msg);
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 }
 
 static void wma_log_pkt_tcpv4(uint8_t *data, uint32_t length)
@@ -2871,6 +3207,11 @@ static void wma_wow_parse_data_pkt(t_wma_handle *wma,
 	uint8_t *dest_mac;
 	const char *proto_subtype_name;
 	enum qdf_proto_subtype proto_subtype;
+#ifdef OPLUS_FEATURE_CONN_POWER_MONITOR
+	//add for  connectivity power monitor
+	char event_msg[256] = {'\0'};
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
+
 
 	wma_debug("packet length: %u", length);
 	if (length < QDF_NBUF_TRAC_IPV4_OFFSET)
@@ -2890,6 +3231,12 @@ static void wma_wow_parse_data_pkt(t_wma_handle *wma,
 	if (proto_subtype_name)
 		wma_conditional_log(is_wakeup_event_console_logs_enabled,
 				    "WOW Wakeup: %s rcvd", proto_subtype_name);
+
+#ifdef OPLUS_FEATURE_CONN_POWER_MONITOR
+	//add for  connectivity power monitor
+	snprintf(event_msg, sizeof(event_msg), "wakeup_package=%s", proto_subtype_name);
+	oplusLpmSendUevent(event_msg);
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 
 	switch (proto_subtype) {
 	case QDF_PROTO_EAPOL_M1:
@@ -3926,6 +4273,23 @@ int wma_wow_wakeup_host_event(void *handle, uint8_t *event, uint32_t len)
 	wma->wow_wakeup_reason = wake_info->wake_reason;
 	wma->wow_wakeup_vdev_id = wake_info->vdev_id;
 	wma->wow_wakeup_reason_valid = true;
+	#ifdef OPLUS_FEATURE_CONN_POWER_MONITOR
+		//add for  connectivity power monitor
+		if(wake_info->wake_reason == WOW_REASON_BEACON_RECV) {
+		    char event_msg[256] = {'\0'};
+		    snprintf(event_msg, sizeof(event_msg), "wakeup_mgmt=%s", wma_wow_wake_reason_str(wake_info->wake_reason));
+		    oplusLpmSendUevent(event_msg);
+		}
+		/* Special handling for LOCAL_DATA_UC_DROP wakeup */
+		//add for 9872014 connectivity power monitor
+		if (wake_info->wake_reason == WOW_REASON_LOCAL_DATA_UC_DROP) {
+		    wma_nofl_info("Reporting WOW wakeup to framework: LOCAL_DATA_UC_DROP (%d)",wake_info->wake_reason);
+		    char event_msg[256] = {'\0'};
+		    snprintf(event_msg, sizeof(event_msg), "wakeup_mgmt=%s", wma_wow_wake_reason_str(wake_info->wake_reason));
+		    /* Report to framework via uevent */
+		    oplusLpmSendUevent(event_msg);
+		}
+	#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 	/* Non-logging actions from wma_wake_event_log_reason */
 	wma_debug_assert_page_fault_wakeup(wake_info->wake_reason);
 	qdf_wow_wakeup_host_event(wake_info->wake_reason);
@@ -3935,6 +4299,11 @@ int wma_wow_wakeup_host_event(void *handle, uint8_t *event, uint32_t len)
 
 	if (wake_info->wake_reason == WOW_REASON_LOCAL_DATA_UC_DROP)
 		hif_rtpm_set_autosuspend_delay(WOW_LARGE_RX_RTPM_DELAY);
+
+#ifdef OPLUS_FEATURE_CONN_POWER_MONITOR
+	/* Record wakeup for daily statistics */
+	wma_record_daily_wakeup(wake_info->wake_reason);
+#endif /* OPLUS_FEATURE_CONN_POWER_MONITOR */
 
 	ucfg_pmo_psoc_wakeup_host_event_received(wma->psoc);
 

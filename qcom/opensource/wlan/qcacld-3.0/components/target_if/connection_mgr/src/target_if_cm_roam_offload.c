@@ -2386,6 +2386,10 @@ target_if_cm_roam_register_rso_req_ops(struct wlan_cm_roam_tx_ops *tx_ops)
 	tx_ops->send_roam_update_config = target_if_cm_roam_send_update_config;
 	tx_ops->send_roam_abort = target_if_cm_roam_abort;
 	tx_ops->send_roam_per_config = target_if_cm_roam_per_config;
+#ifdef OPLUS_BUG_STABILITY
+// OPLUS command to config roaming params
+	tx_ops->send_roam_btm_config = target_if_cm_roam_scan_btm_offload;
+#endif /* OPLUS_BUG_STABILITY */
 	tx_ops->send_roam_triggers = target_if_cm_roam_triggers;
 	tx_ops->send_roam_disable_config =
 					target_if_cm_roam_send_disable_config;

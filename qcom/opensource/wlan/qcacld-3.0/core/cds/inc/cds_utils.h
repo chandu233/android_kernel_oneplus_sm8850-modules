@@ -103,6 +103,10 @@ uint8_t cds_get_mmie_size(void);
  */
 uint8_t cds_get_gmac_mmie_size(void);
 
+#ifdef OPLUS_BUG_STABILITY
+int wlan_hdd_is_wfd(void);
+#endif /* OPLUS_BUG_STABILITY */
+
 static inline void cds_host_diag_log_work(qdf_wake_lock_t *lock, uint32_t msec,
 			    uint32_t reason) {
 	if (((cds_get_ring_log_level(RING_ID_WAKELOCK) >= WLAN_LOG_LEVEL_ACTIVE)

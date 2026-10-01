@@ -291,6 +291,18 @@ static void dp_softap_notify_dhcp_ind(void *link_context, qdf_nbuf_t nbuf)
 	dp_post_dhcp_ind(dp_link, dest_mac_addr, false);
 }
 
+#ifdef OPLUS_BUG_STABILITY
+void qdf_nbuf_clear_dhcp_bc_flags(qdf_nbuf_t buf)
+{
+	uint8_t *data = qdf_nbuf_data(buf);
+	int boot_flags_offset = 0x34;
+	if ((data[boot_flags_offset]&0x80) > 0) {
+		data[boot_flags_offset] = 0x7f&data[boot_flags_offset];
+		dp_info("rx dhcp frame in p2pmode, do clear dhcp bc flags");
+	}
+}
+#endif /* OPLUS_BUG_STABILITY */
+
 int dp_softap_inspect_dhcp_packet(struct wlan_dp_link *dp_link,
 				  qdf_nbuf_t nbuf,
 				  enum qdf_proto_dir dir)
@@ -314,6 +326,15 @@ int dp_softap_inspect_dhcp_packet(struct wlan_dp_link *dp_link,
 						  DHCP_CLIENT_MAC_ADDR_OFFSET);
 
 		subtype = qdf_nbuf_get_dhcp_subtype(nbuf);
+
+#ifdef OPLUS_BUG_STABILITY
+		if ((dir == QDF_RX) && (dp_intf->device_mode == QDF_P2P_GO_MODE)) {
+			if (wlan_hdd_is_wfd()) {
+				dp_info("this is wfd mode, will clear dhcp bc flags");
+				qdf_nbuf_clear_dhcp_bc_flags(nbuf);
+			}
+		}
+#endif /* OPLUS_BUG_STABILITY */
 
 		peer = wlan_objmgr_get_peer_by_mac(dp_intf->dp_ctx->psoc,
 						   src_mac->bytes,

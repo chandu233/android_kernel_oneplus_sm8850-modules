@@ -7885,6 +7885,17 @@ QDF_STATUS sme_set_wlm_latency_level(mac_handle_t mac_handle,
 				uint32_t client_id_bitmap,
 				bool force_reset)
 {
+#ifdef OPLUS_BUG_STABILITY
+// Add for: extended latency level
+#define OPLUS_CONFIG_LATENCY_LEVEL_LOW_EXTENDED (QCA_WLAN_VENDOR_ATTR_CONFIG_LATENCY_LEVEL_MAX + 1)
+#define OPLUS_CONFIG_LATENCY_LEVEL_ULTRALOW_EXTENDED (QCA_WLAN_VENDOR_ATTR_CONFIG_LATENCY_LEVEL_MAX + 2)
+#define OPLUS_CONFIG_LATENCY_LEVEL_LOW_EXTENDED_VALUE (0x184c03)
+#define OPLUS_CONFIG_LATENCY_LEVEL_ULTRALOW_EXTENDED_VALUE (0x180c03)
+#define OPLUS_CONFIG_LATENCY_LEVEL_NUM 2
+	uint64_t flags = 0;
+	QDF_STATUS status_flags_ext = QDF_STATUS_E_FAILURE;
+	struct mac_context *mac = MAC_CONTEXT(mac_handle);
+#endif /* OPLUS_BUG_STABILITY */
 	QDF_STATUS status;
 	struct mac_context *mac_ctx = MAC_CONTEXT(mac_handle);
 	struct wlm_latency_level_param params;
@@ -7905,9 +7916,45 @@ QDF_STATUS sme_set_wlm_latency_level(mac_handle_t mac_handle,
 		return QDF_STATUS_E_FAILURE;
 	}
 
+	#ifdef OPLUS_BUG_STABILITY
+	// Add for: extended latency level
+	if (latency_level > QCA_WLAN_VENDOR_ATTR_CONFIG_LATENCY_LEVEL_MAX - 1) {
+		params.wlm_latency_level = latency_level - OPLUS_CONFIG_LATENCY_LEVEL_NUM;
+		if (latency_level == OPLUS_CONFIG_LATENCY_LEVEL_LOW_EXTENDED - 1) {
+			if (!mac || !(mac->psoc)) {
+				params.wlm_latency_flags = OPLUS_CONFIG_LATENCY_LEVEL_LOW_EXTENDED_VALUE;
+			} else {
+				status_flags_ext = qdf_uint64_parse(cfg_get(mac->psoc, CFG_LATENCY_FLAGS_LOW_EXT), &flags);
+				if (status_flags_ext != QDF_STATUS_SUCCESS) {
+					params.wlm_latency_flags = OPLUS_CONFIG_LATENCY_LEVEL_LOW_EXTENDED_VALUE;
+				} else {
+					params.wlm_latency_flags = flags & 0xFFFFFFFF;
+				}
+			}
+		        sme_debug("WLM latency level setting for LATENCY_LEVEL_LOW_EXTENDED, status:%d", status_flags_ext);
+		} else {
+			if (!mac || !(mac->psoc)) {
+				params.wlm_latency_flags = OPLUS_CONFIG_LATENCY_LEVEL_ULTRALOW_EXTENDED_VALUE;
+			} else {
+				status_flags_ext = qdf_uint64_parse(cfg_get(mac->psoc, CFG_LATENCY_FLAGS_ULTLOW_EXT), &flags);
+				if (status_flags_ext != QDF_STATUS_SUCCESS) {
+					params.wlm_latency_flags = OPLUS_CONFIG_LATENCY_LEVEL_ULTRALOW_EXTENDED_VALUE;
+				} else {
+					params.wlm_latency_flags = flags & 0xFFFFFFFF;
+				}
+			}
+		        sme_debug("WLM latency level setting for LATENCY_LEVEL_ULTRALOW_EXTENDED, status:%d", status_flags_ext);
+		}
+	} else {
+		params.wlm_latency_level = latency_level;
+		params.wlm_latency_flags =
+			mac_ctx->mlme_cfg->wlm_config.latency_flags[latency_level];
+	}
+	#else
 	params.wlm_latency_level = latency_level;
 	params.wlm_latency_flags =
 		mac_ctx->mlme_cfg->wlm_config.latency_flags[latency_level];
+	#endif /* OPLUS_BUG_STABILITY */
 	params.vdev_id = session_id;
 	sme_fill_multi_client_info(&params, client_id_bitmap, force_reset);
 

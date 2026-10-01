@@ -952,6 +952,16 @@ static void cnss_get_oplus_bdf_file_name(struct cnss_plat_data *plat_priv, char*
 	int region_nv_id = 0;
 	cnss_pr_info("region id: %d, wcn chip_id: 0x%02x\n", reg_id, plat_priv->chip_info.chip_id);
 
+	if (reg_id == REG_ID_IN) {
+	    plat_priv->region_name = REG_NAME_IN;
+	} else if (reg_id == REG_ID_EU) {
+	    plat_priv->region_name = REG_NAME_EU;
+	} else if (reg_id == REG_ID_US) {
+	    plat_priv->region_name = REG_NAME_US;
+	} else {
+	    plat_priv->region_name = REG_NAME_CN;
+	}
+
 	if (plat_priv->chip_info.chip_id & CHIP_ID_GF_MASK) {
 		if (is_prj_support_region_id()) {
 			if (reg_id == REG_ID_IN) {
@@ -968,11 +978,11 @@ static void cnss_get_oplus_bdf_file_name(struct cnss_plat_data *plat_priv, char*
 				plat_priv->region_name = REG_NAME_US;
 			} else {
 				snprintf(file_name, filename_len, ELF_BDF_FILE_NAME_GF);
+				plat_priv->bdf_name = ELF_BDF_FILE_NAME_GF;
 			}
 		} else {
 			snprintf(file_name, filename_len, ELF_BDF_FILE_NAME_GF);
 			plat_priv->bdf_name = ELF_BDF_FILE_NAME_GF;
-			plat_priv->region_name = REG_NAME_CN;
 		}
 	} else {
 		if (is_prj_support_region_id()) {
@@ -1006,7 +1016,6 @@ static void cnss_get_oplus_bdf_file_name(struct cnss_plat_data *plat_priv, char*
 		} else {
 			snprintf(file_name, filename_len, ELF_BDF_FILE_NAME);
 			plat_priv->bdf_name = ELF_BDF_FILE_NAME;
-			plat_priv->region_name = REG_NAME_CN;
 		}
 	}
 }
@@ -1237,8 +1246,19 @@ int cnss_wlfw_bdf_dnld_send_sync(struct cnss_plat_data *plat_priv,
 	temp = fw_entry->data;
 	remaining = fw_entry->size;
 
+	#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+	//Add for wifi switch monitor
+	if (bdf_type == CNSS_BDF_REGDB) {
+		set_bit(CNSS_LOAD_REGDB_SUCCESS, &plat_priv->loadRegdbState);
+	} else if (bdf_type == CNSS_BDF_ELF){
+		set_bit(CNSS_LOAD_BDF_SUCCESS, &plat_priv->loadBdfState);
+	}
+	cnss_pr_info("Downloading %s: %s, size: %u\n",
+		    cnss_bdf_type_to_str(bdf_type), filename, remaining);
+	#else
 	cnss_pr_dbg("Downloading %s: %s, size: %u\n",
 		    cnss_bdf_type_to_str(bdf_type), filename, remaining);
+	#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
 
 	while (remaining) {
 		req->valid = 1;
@@ -1361,6 +1381,14 @@ err_bdf_retry:
 err_send:
 	release_firmware(fw_entry);
 err_req_fw:
+	#ifdef OPLUS_FEATURE_WIFI_DCS_SWITCH
+	//Add for wifi switch monitor
+	if (bdf_type == CNSS_BDF_REGDB) {
+		set_bit(CNSS_LOAD_REGDB_FAIL, &plat_priv->loadRegdbState);
+	} else if (bdf_type == CNSS_BDF_ELF){
+		set_bit(CNSS_LOAD_BDF_FAIL, &plat_priv->loadBdfState);
+	}
+	#endif /* OPLUS_FEATURE_WIFI_DCS_SWITCH */
 	/* IN_REBOOT and -EAGAIN are benign; REGDB is always non-fatal. */
 	if (!(bdf_type == CNSS_BDF_REGDB ||
 	      test_bit(CNSS_IN_REBOOT, &plat_priv->driver_state) ||
