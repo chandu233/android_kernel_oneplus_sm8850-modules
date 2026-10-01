@@ -334,6 +334,9 @@ struct cam_ife_hw_mgr_ctx_flags {
 	bool   dynamic_drv_supported;
 	bool   skip_reg_dump_buf_put;
 	bool   is_hw_ctx_acq;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+    bool   is_ipp_eof_enabled;
+#endif
 };
 
 /**

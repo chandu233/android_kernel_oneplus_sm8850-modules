@@ -663,6 +663,9 @@ struct cam_ife_csid_exp_info_update_args {
 	uint32_t                           num_sensor_out_exp;
 	bool                               last_exp_valid;
 	uint32_t                           last_exp_res_id;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+    bool                               is_ipp_eof_enabled;
+#endif
 };
 
 #endif /* _CAM_CSID_HW_INTF_H_ */

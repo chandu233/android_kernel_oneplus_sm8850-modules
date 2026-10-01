@@ -262,6 +262,11 @@ struct cam_flash_ctrl {
 	uint32_t                            last_flush_req;
 	uint32_t                            streamoff_count;
 	int32_t                             apply_streamoff;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	const char*                         flash_name;
+	uint32_t                            flash_current;
+	uint32_t                            flash_max_current;
+#endif
 	uint32_t                            led_cldev_en;
 	struct led_classdev                *pmic_lcdev[CAM_FLASH_MAX_LED_TRIGGERS];
 	struct led_classdev_flash          *pmic_flcdev[CAM_FLASH_MAX_LED_TRIGGERS];
