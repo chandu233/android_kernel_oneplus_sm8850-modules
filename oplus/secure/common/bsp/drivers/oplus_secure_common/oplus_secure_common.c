@@ -692,6 +692,13 @@ exit:
 
 static void oplus_secure_common_remove(struct platform_device *pdev)
 {
+        if (oplus_secure_common_dir) {
+                proc_remove(oplus_secure_common_dir);
+                oplus_secure_common_dir = NULL;
+        }
+        if (secure_data_ptr) {
+                secure_data_ptr = NULL;
+        }
         return;
 }
 
