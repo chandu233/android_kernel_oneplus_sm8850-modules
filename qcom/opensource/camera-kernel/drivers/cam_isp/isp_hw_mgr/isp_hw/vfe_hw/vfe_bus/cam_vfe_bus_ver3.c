@@ -4289,9 +4289,7 @@ static int cam_vfe_bus_ver3_update_wm(void *priv, void *cmd_args, uint32_t arg_s
 					reg_val_pair, i, &j);
 			}
 #ifdef OPLUS_FEATURE_CAMERA_COMMON
-			if ((wm_data->out_rsrc_data->mc_based ||
-				wm_data->out_rsrc_data->cntxt_cfg_except) &&
-				wm_data->mc_data[hw_cntxt_id].ubwc_cfg_data.ubwc_mode_cfg) {
+			if (ubwc_enabled) {
 				cam_vfe_bus_ver3_update_ubwc_meta_addr(
 					reg_val_pair, &j,
 					wm_data,
@@ -4300,14 +4298,6 @@ static int cam_vfe_bus_ver3_update_wm(void *priv, void *cmd_args, uint32_t arg_s
 					bus_priv->common_data.core_index, wm_data->index,
 					update_buf->wm_update->image_buf[i]);
 
-			} else if (wm_data->ubwc_cfg_data.ubwc_mode_cfg) {
-				cam_vfe_bus_ver3_update_ubwc_meta_addr(
-					reg_val_pair, &j,
-					wm_data,
-					update_buf->wm_update->image_buf[i]);
-				CAM_DBG(CAM_ISP, "VFE:%u WM:%d ubwc meta addr 0x%llx",
-					bus_priv->common_data.core_index, wm_data->index,
-					update_buf->wm_update->image_buf[i]);
 			}
 #else
 			/* UBWC meta address */

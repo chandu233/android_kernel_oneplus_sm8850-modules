@@ -1357,7 +1357,11 @@ void cam_sensor_shutdown(struct cam_sensor_ctrl_t *s_ctrl)
 	cam_sensor_release_stream_rsc(s_ctrl);
 	cam_sensor_release_per_frame_resource(s_ctrl);
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	if (s_ctrl->sensor_state != CAM_SENSOR_INIT || (s_ctrl->sensor_state == CAM_SENSOR_INIT && s_ctrl->sensor_power_state != CAM_SENSOR_POWER_OFF))
+#else
 	if (s_ctrl->sensor_state != CAM_SENSOR_INIT)
+#endif
 		cam_sensor_power_down(s_ctrl);
 
 	if (s_ctrl->bridge_intf.device_hdl != -1) {

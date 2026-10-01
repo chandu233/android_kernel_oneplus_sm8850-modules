@@ -1164,14 +1164,40 @@ void cam_actuator_shutdown(struct cam_actuator_ctrl_t *a_ctrl)
 		cam_actuator_wait_for_park_done(a_ctrl);
 
 	a_ctrl->is_deferred_park_lens = false;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	if (a_ctrl->actuator_parklens_thread) {
+		CAM_INFO(CAM_ACTUATOR, "actuator_parklens_thread exist");
+		wait_for_completion(&a_ctrl->actuator_parklens_thread_completion);
+		a_ctrl->actuator_parklens_thread = NULL;
+	}
 
+	if (a_ctrl->is_af_parklens != 0) {
+		if (NULL != a_ctrl->parklens_power_info.power_setting) {
+			CAM_MEM_FREE(a_ctrl->parklens_power_info.power_setting);
+			a_ctrl->parklens_power_info.power_setting = NULL;
+			a_ctrl->parklens_power_info.power_setting_size = 0;
+		}
+		if (NULL != a_ctrl->parklens_power_info.power_down_setting) {
+			CAM_MEM_FREE(a_ctrl->parklens_power_info.power_down_setting);
+			a_ctrl->parklens_power_info.power_down_setting = NULL;
+			a_ctrl->parklens_power_info.power_down_setting_size = 0;
+		}
+	}
+#endif
 	if (a_ctrl->cam_act_state == CAM_ACTUATOR_INIT)
 		return;
-
 	if (a_ctrl->cam_act_state >= CAM_ACTUATOR_CONFIG) {
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+		if(a_ctrl->is_af_parklens == 0) {
+			rc = cam_actuator_power_down(a_ctrl);
+			if (rc < 0)
+				CAM_ERR(CAM_ACTUATOR, "Actuator Power down failed");
+		}
+#else
 		rc = cam_actuator_power_down(a_ctrl);
 		if (rc < 0)
 			CAM_ERR(CAM_ACTUATOR, "Actuator Power down failed");
+#endif
 		a_ctrl->cam_act_state = CAM_ACTUATOR_ACQUIRE;
 	}
 
@@ -1184,14 +1210,31 @@ void cam_actuator_shutdown(struct cam_actuator_ctrl_t *a_ctrl)
 		a_ctrl->bridge_intf.session_hdl = -1;
 	}
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	if(a_ctrl->is_af_parklens == 0) {
+		if (power_info) {
+			if (power_info->power_setting) {
+				CAM_MEM_FREE(power_info->power_setting);
+				power_info->power_setting = NULL;
+				power_info->power_setting_size = 0;
+			}
+			if (power_info->power_down_setting) {
+				CAM_MEM_FREE(power_info->power_down_setting);
+				power_info->power_down_setting = NULL;
+				power_info->power_down_setting_size = 0;
+			}
+		}
+	}
+#else
 	CAM_MEM_FREE(power_info->power_setting);
 	CAM_MEM_FREE(power_info->power_down_setting);
 	power_info->power_setting = NULL;
 	power_info->power_down_setting = NULL;
 	power_info->power_setting_size = 0;
 	power_info->power_down_setting_size = 0;
-	a_ctrl->last_flush_req = 0;
 
+#endif
+	a_ctrl->last_flush_req = 0;
 	a_ctrl->cam_act_state = CAM_ACTUATOR_INIT;
 }
 
@@ -1301,6 +1344,23 @@ int32_t cam_actuator_driver_cmd(struct cam_actuator_ctrl_t *a_ctrl,
 			if (a_ctrl->is_deferred_park_lens) {
 				CAM_DBG(CAM_ACTUATOR, "Actuator park in deferred task");
 			} else {
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+				if(a_ctrl->is_af_parklens == 0) {
+					rc = cam_actuator_power_down(a_ctrl);
+					if (rc < 0) {
+						CAM_ERR(CAM_ACTUATOR,
+							"Actuator Power Down Failed");
+						goto release_mutex;
+					}
+					a_ctrl->cam_act_state = CAM_ACTUATOR_INIT;
+					CAM_MEM_FREE(power_info->power_setting);
+					CAM_MEM_FREE(power_info->power_down_setting);
+					power_info->power_setting = NULL;
+					power_info->power_down_setting = NULL;
+					power_info->power_down_setting_size = 0;
+					power_info->power_setting_size = 0;
+				}
+#else
 				rc = cam_actuator_power_down(a_ctrl);
 				if (rc < 0) {
 					CAM_ERR(CAM_ACTUATOR,
@@ -1315,6 +1375,7 @@ int32_t cam_actuator_driver_cmd(struct cam_actuator_ctrl_t *a_ctrl,
 				power_info->power_down_setting = NULL;
 				power_info->power_down_setting_size = 0;
 				power_info->power_setting_size = 0;
+#endif
 			}
 		}
 

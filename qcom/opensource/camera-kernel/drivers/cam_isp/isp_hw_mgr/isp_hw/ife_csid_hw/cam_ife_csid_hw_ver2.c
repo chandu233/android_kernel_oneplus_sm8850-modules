@@ -741,9 +741,12 @@ static int cam_ife_csid_ver2_eof_irq_enable(
 			irq_controller = csid_hw->path_irq_controller[res->res_id];
 			break;
 		case CAM_IFE_PIX_PATH_RES_RDI_1:
-			if (!path_data->path_cfg.is_aeb_en ||
-				!(csid_reg->cmn_reg->capabilities & CAM_IFE_CSID_CAP_MULTI_CTXT))
-				continue;
+		case CAM_IFE_PIX_PATH_RES_RDI_2:
+		case CAM_IFE_PIX_PATH_RES_RDI_3:
+		case CAM_IFE_PIX_PATH_RES_RDI_4:
+			if (!csid_hw->flags.last_exp_valid ||
+				!path_data->path_cfg.allow_epoch_eof_cb)
+					continue;
 
 			irq_masks[0] = path_data->reg_offsets->eof_irq_mask;
 			irq_handle = path_data->path_cfg.irq_handle;
@@ -9214,9 +9217,14 @@ static int cam_ife_csid_ver2_path_exp_info_update(
 			path_data)
 			path_data->path_cfg.allow_epoch_eof_cb = false;
 	}
-
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	if (((exp_info->num_sensor_out_exp > 1) &&
+		(exp_info->num_sensor_out_exp > exp_info->num_process_exp)) &&
+		!exp_info->is_ipp_eof_enabled)
+#else
 	if ((exp_info->num_sensor_out_exp > 1) &&
 		(exp_info->num_sensor_out_exp > exp_info->num_process_exp))
+#endif
 		path_data =  (struct cam_ife_csid_ver2_path_data *)
 			csid_hw->path_res[exp_info->last_exp_res_id].res_priv;
 	else
