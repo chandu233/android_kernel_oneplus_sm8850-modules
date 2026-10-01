@@ -409,6 +409,26 @@ int cam_flash_get_dt_data(struct cam_flash_ctrl *fctrl,
 			fctrl->flash_type = CAM_FLASH_TYPE_PMIC;
 		}
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	rc = of_property_read_string(of_node, "qcom,flash-name",
+		&fctrl->flash_name);
+	if (rc < 0) {
+		CAM_ERR(CAM_FLASH, "get flash_name failed rc %d", rc);
+	}
+	fctrl->flash_current = 0;
+	rc = of_property_read_u32(of_node, "qcom,flash-current",
+		&fctrl->flash_current);
+	if (rc < 0) {
+		CAM_ERR(CAM_FLASH, "get flash_current failed rc %d", rc);
+	}
+	fctrl->flash_max_current = 0;
+	rc = of_property_read_u32(of_node, "oplus,flash-max-current",
+		&fctrl->flash_max_current);
+	if (rc < 0) {
+		CAM_ERR(CAM_FLASH, "get flash_max_current failed rc %d", rc);
+	}
+#endif
+
 	if (fctrl->flash_type == CAM_FLASH_TYPE_I2C) {
 		rc = cam_get_source_node_info(of_node, fctrl, soc_info->soc_private);
 		if (rc) {

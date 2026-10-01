@@ -26,9 +26,21 @@
 #include "include/cam_csiphy_2_4_0_hwreg_lafa_front.h"
 #include "include/cam_csiphy_2_4_0_hwreg_lafa_tele.h"
 #include "include/cam_csiphy_2_4_0_hwreg_macan_main.h"
+#include "include/cam_csiphy_2_4_0_hwreg_swangoose_tele.h"
+#include "include/cam_csiphy_2_4_0_hwreg_u9_main.h"
 #include "include/cam_csiphy_2_4_0_hwreg_fairlady_main.h"
-#include "include/cam_csiphy_2_4_0_hwreg_fairlady_tele.h"
 #include "include/cam_csiphy_2_4_0_hwreg_fairlady_front.h"
+#include "include/cam_csiphy_2_4_0_hwreg_fairlady_tele.h"
+#include "include/cam_csiphy_2_4_0_hwreg_lighthousefront.h"
+#include "include/cam_csiphy_2_4_0_hwreg_lighthousewide.h"
+#include "include/cam_csiphy_2_4_0_hwreg_lighthousemain.h"
+#include "include/cam_csiphy_2_4_0_hwreg_lighthouseultratele.h"
+#include "include/cam_csiphy_2_4_0_hwreg_lighthousetele.h"
+#include "include/cam_csiphy_2_4_0_hwreg_u9_tele.h"
+#include "include/cam_csiphy_2_4_0_hwreg_u9b_tele.h"
+#include "include/cam_csiphy_2_4_0_hwreg_u9b_main.h"
+#include "include/cam_csiphy_2_4_0_hwreg_u9_wide.h"
+#include "include/cam_csiphy_2_4_0_hwreg_u9b_wide.h"
 #endif
 
 /* Clock divide factor for CPHY spec v1.0 */
@@ -423,6 +435,44 @@ int32_t cam_csiphy_parse_dt_info(struct platform_device *pdev,
 		csiphy_dev->hw_version = CSIPHY_VERSION_V240_LAFA_TELE;
 		csiphy_dev->is_divisor_32_comp = true;
 		csiphy_dev->clk_lane = 0;
+	} else if (of_device_is_compatible(soc_info->dev->of_node, "qcom,csiphy-macanmain")) {
+		csiphy_dev->ctrl_reg = &ctrl_reg_2_4_0_macan_main;
+		csiphy_dev->hw_version = CSIPHY_VERSION_V240_MACAN_MAIN;
+		csiphy_dev->is_divisor_32_comp = true;
+		csiphy_dev->clk_lane = 0;
+	} else if (of_device_is_compatible(soc_info->dev->of_node, "qcom,csiphy-swangoosetele")) {
+		csiphy_dev->ctrl_reg = &ctrl_reg_2_4_0_swangoose_tele;
+		csiphy_dev->hw_version = CSIPHY_VERSION_V240_SWANGOOSE_TELE;
+		csiphy_dev->is_divisor_32_comp = true;
+		csiphy_dev->clk_lane = 0;
+	} else if (of_device_is_compatible(soc_info->dev->of_node, "qcom,csiphy-lighthousemain")) {
+		csiphy_dev->ctrl_reg = &ctrl_reg_2_4_0_lighthouse_main;
+		csiphy_dev->hw_version = CSIPHY_VERSION_V240_LIGHTHOUSE_MAIN;
+		csiphy_dev->is_divisor_32_comp = true;
+		csiphy_dev->clk_lane = 0;
+	}  else if (of_device_is_compatible(soc_info->dev->of_node, "qcom,csiphy-lighthousefront")) {
+		csiphy_dev->ctrl_reg = &ctrl_reg_2_4_0_lighthouse_front;
+		csiphy_dev->hw_version = CSIPHY_VERSION_V240_LIGHTHOUSE_FRONT;
+		csiphy_dev->is_divisor_32_comp = true;
+		csiphy_dev->clk_lane = 0;
+	}  else if (of_device_is_compatible(soc_info->dev->of_node, "qcom,csiphy-lighthousewide")) {
+		csiphy_dev->ctrl_reg = &ctrl_reg_2_4_0_lighthouse_wide;
+		csiphy_dev->hw_version = CSIPHY_VERSION_V240_LIGHTHOUSE_WIDE;
+		csiphy_dev->is_divisor_32_comp = true;
+		csiphy_dev->clk_lane = 0;
+	}  else if (of_device_is_compatible(soc_info->dev->of_node, "qcom,csiphy-lighthousetele")) {
+		csiphy_dev->ctrl_reg = &ctrl_reg_2_4_0_lighthouse_tele;
+		csiphy_dev->hw_version = CSIPHY_VERSION_V240_LIGHTHOUSE_TELE;
+		csiphy_dev->is_divisor_32_comp = true;
+		csiphy_dev->clk_lane = 0;
+	}else if (of_device_is_compatible(soc_info->dev->of_node, "qcom,csiphy-lighthouseultratele")) {
+		csiphy_dev->ctrl_reg = &ctrl_reg_2_4_0_lighthouse_ultratele;
+		csiphy_dev->hw_version = CSIPHY_VERSION_V240_LIGHTHOUSE_ULTRATELE;
+		csiphy_dev->is_divisor_32_comp = true;
+		csiphy_dev->clk_lane = 0;
+	} else if (of_device_is_compatible(soc_info->dev->of_node, "qcom,csiphy-u9main")) {
+		csiphy_dev->ctrl_reg = &ctrl_reg_2_4_0_u9_main;
+		csiphy_dev->hw_version = CSIPHY_VERSION_V240_U9_MAIN;
 	} else if (of_device_is_compatible(soc_info->dev->of_node, "qcom,csiphy-fairladymain")) {
 		csiphy_dev->ctrl_reg = &ctrl_reg_2_4_0_fairlady_main;
 		csiphy_dev->hw_version = CSIPHY_VERSION_V240_FAIRLADY_MAIN;
@@ -438,9 +488,29 @@ int32_t cam_csiphy_parse_dt_info(struct platform_device *pdev,
 		csiphy_dev->hw_version = CSIPHY_VERSION_V240_FAIRLADY_FRONT;
 		csiphy_dev->is_divisor_32_comp = true;
 		csiphy_dev->clk_lane = 0;
-	} else if (of_device_is_compatible(soc_info->dev->of_node, "qcom,csiphy-macanmain")) {
-		csiphy_dev->ctrl_reg = &ctrl_reg_2_4_0_macan_main;
-		csiphy_dev->hw_version = CSIPHY_VERSION_V240_MACAN_MAIN;
+	} else if (of_device_is_compatible(soc_info->dev->of_node, "qcom,csiphy-u9tele")) {
+		csiphy_dev->ctrl_reg = &ctrl_reg_2_4_0_u9_tele;
+		csiphy_dev->hw_version = CSIPHY_VERSION_V240_U9_TELE;
+		csiphy_dev->is_divisor_32_comp = true;
+		csiphy_dev->clk_lane = 0;
+	} else if (of_device_is_compatible(soc_info->dev->of_node, "qcom,csiphy-u9btele")) {
+		csiphy_dev->ctrl_reg = &ctrl_reg_2_4_0_u9b_tele;
+		csiphy_dev->hw_version = CSIPHY_VERSION_V240_U9B_TELE;
+		csiphy_dev->is_divisor_32_comp = true;
+		csiphy_dev->clk_lane = 0;
+	} else if (of_device_is_compatible(soc_info->dev->of_node, "qcom,csiphy-u9bmain")) {
+		csiphy_dev->ctrl_reg = &ctrl_reg_2_4_0_u9b_main;
+		csiphy_dev->hw_version = CSIPHY_VERSION_V240_U9B_MAIN;
+		csiphy_dev->is_divisor_32_comp = true;
+		csiphy_dev->clk_lane = 0;
+	} else if (of_device_is_compatible(soc_info->dev->of_node, "qcom,csiphy-u9wide")) {
+		csiphy_dev->ctrl_reg = &ctrl_reg_2_4_0_u9_wide;
+		csiphy_dev->hw_version = CSIPHY_VERSION_V240_U9_WIDE;
+		csiphy_dev->is_divisor_32_comp = true;
+		csiphy_dev->clk_lane = 0;
+	} else if (of_device_is_compatible(soc_info->dev->of_node, "qcom,csiphy-u9bwide")) {
+		csiphy_dev->ctrl_reg = &ctrl_reg_2_4_0_u9b_wide;
+		csiphy_dev->hw_version = CSIPHY_VERSION_V240_U9B_WIDE;
 		csiphy_dev->is_divisor_32_comp = true;
 		csiphy_dev->clk_lane = 0;
 #endif
