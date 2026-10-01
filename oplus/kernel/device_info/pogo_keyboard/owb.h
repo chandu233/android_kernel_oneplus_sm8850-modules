@@ -88,15 +88,25 @@ typedef enum
     ONE_WIRE_BUS_PACKET_USER_GENERAL_TP_STATUS_CMD   = 0x0C, //TP禁用状态上报
     ONE_WIRE_BUS_PACKET_USER_GENERAL_BATTERY_STATUS_CMD   = 0x0E, //电池电量及状态上报
     ONE_WIRE_BUS_PACKET_USER_GENERAL_TP_DISABLE_CMD   = 0x11, //TP禁用状态下发
+    ONE_WIRE_BUS_PACKET_USER_GENERAL_OTA_TP_INFO_START_CMD   = 0x12, //dfu ota,send pt info start
+    ONE_WIRE_BUS_PACKET_USER_GENERAL_OTA_TP_DATAS_CMD   = 0x13, //dfu ota,send pt datas
+    ONE_WIRE_BUS_PACKET_USER_GENERAL_OTA_TP_INFO_END_CMD   = 0x14, //dfu ota,send pt info end
     ONE_WIRE_BUS_PACKET_USER_GENERAL_TP_OTA_STATUS_CMD   = 0x16, //TP升级状态上报
     ONE_WIRE_BUS_PACKET_USER_GENERAL_TP_OTA_DFU_CMD   = 0x18, //TP升级搬运
     ONE_WIRE_BUS_PACKET_USER_GENERAL_TP_DIST_CMD   = 0x1A, //TP调试数据上报
+    ONE_WIRE_BUS_PACKET_USER_GENERAL_SET_TOUCH_PRESS_CMD   = 0x1B, // touch press set cmd
+    ONE_WIRE_BUS_PACKET_USER_GENERAL_SET_BRIGHTNESS_CMD   = 0x1C, // kb brightness set cmd
+    ONE_WIRE_BUS_PACKET_USER_GENERAL_OTA_PT_INFO_START_CMD   = 0x1D, //triple ota,send pt info start
+    ONE_WIRE_BUS_PACKET_USER_GENERAL_OTA_PT_DATAS_CMD   = 0x1E, //triple ota,send pt datas
+    ONE_WIRE_BUS_PACKET_USER_GENERAL_OTA_PT_INFO_END_CMD   = 0x1F, //triple ota,send pt info end
+    ONE_WIRE_BUS_PACKET_USER_GENERAL_OTA_START_BOOT_CMD   = 0x20, //triple ota,start boot mode
+    ONE_WIRE_BUS_PACKET_USER_GENERAL_SET_PT_DISABLE_CMD   = 0x21, // touch press set cmd
 }em_one_wire_bus_package_general_cmd_sub_cmd_t;
 
 typedef enum
 {
     ONE_WIRE_BUS_PACKET_USER_PASSTHROUGH_KBVER_CMD  = 0x08, //键盘版本号
-    ONE_WIRE_BUS_PACKET_USER_PASSTHROUGH_DFU_OTA_CMD    = 0x0a, //键盘版本号
+    ONE_WIRE_BUS_PACKET_USER_PASSTHROUGH_DFU_OTA_CMD    = 0x0a, //DFU OTA
 }em_one_wire_bus_package_passthrough_cmd_sub_cmd_t;
 
 #endif

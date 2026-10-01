@@ -868,6 +868,8 @@ void report_camera_key(void)
     int level = BIT_LEVEL_UNKNOWN;
     bool is_swipe = false;
 
+    g_cs_press.irq_ok = true;
+
     ret = cs_press_iic_read(addr, rbuf, AP_FORCEDATA_LEN);
     if (ret < 0) {
         LOG_ERR("read reg=0x%02x error, ret = %d\n", addr, ret);
@@ -2170,6 +2172,7 @@ err_release_cfg:
     cs_press_set_trigger_strength(g_cs_press.strength_cfg);
 #endif
     g_cs_press.update_done = 1;
+exit:
     mutex_unlock(&press_lock);
     LOG_INFO("end\n");
 }
@@ -3318,10 +3321,24 @@ int cs_press_init(void)
     {
         LOG_ERR("chipid err return\n");
         g_cs_press.is_update_log = 1;
+        g_cs_press.update_done = 1;
+        g_cs_press.is_boot_ver_err = true;
         return -1;
     }
     /* reset ic */
     /* check whether need to update ap fw */
+
+    /*****fw updating return****/
+    if(get_device_updating_flag()){
+        LOG_ERR("updating, no need update again\n");
+        return 0;
+    }
+
+    if(g_cs_press.update_done){
+        LOG_ERR("update done, no need update again\n");
+        return 0;
+    }
+
     ret = fml_fw_update_by_file();
     /*ret = fml_fw_update_by_array();*/
 
@@ -4089,8 +4106,15 @@ static int cs_proc_local_fw_info_show(struct seq_file *m,void *v)
     ret = request_firmware(&fw, FW_FILE_NAME, &(g_cs_press.client->dev));
     if (!ret && fw) {
         //fw_array = fw->data;
-        seq_printf(m,"ic: CSA37F71\nfw_ver: %u %u %u %u\n",
-             fw->data[FW_ADDR_VERSION-2], fw->data[FW_ADDR_VERSION-1], fw->data[FW_ADDR_VERSION], fw->data[FW_ADDR_VERSION+1]);
+        if (g_cs_press.fw_update_error < 0
+                || g_cs_press.fw_update_error >= 0x80){
+            seq_printf(m,"ic: CSA37F71\nfw_ver: %u %u %u %u\nfw update err: 0x%02x",
+                 fw->data[FW_ADDR_VERSION-2], fw->data[FW_ADDR_VERSION-1], fw->data[FW_ADDR_VERSION], fw->data[FW_ADDR_VERSION+1],
+                 g_cs_press.fw_update_error);
+        } else {
+            seq_printf(m,"ic: CSA37F71\nfw_ver: %u %u %u %u\n",
+                 fw->data[FW_ADDR_VERSION-2], fw->data[FW_ADDR_VERSION-1], fw->data[FW_ADDR_VERSION], fw->data[FW_ADDR_VERSION+1]);
+        }
     } else {
         LOG_ERR("read fw info err, ret=%d\n", ret);
         seq_printf(m,"read fw info err\n");
@@ -4182,7 +4206,13 @@ static int cs_auto_test_show(struct seq_file *m, void *v)
 
     LOG_INFO("boot_ver: %02X %02X %02X %02X\n", boot_ver_buf[0], boot_ver_buf[1], boot_ver_buf[2], boot_ver_buf[3]);
 */
-    cs_press_wakeup_iic();
+    //cs_press_wakeup_iic();
+    while (get_device_updating_flag() && update_wait) {
+        LOG_INFO("updating now, wait for finish...\n");
+        msleep(500);
+        update_wait--;
+    }
+
     ret = cs_press_iic_read(AP_VERSION_REG, read_temp, CS_FW_VERSION_LENGTH);  /*FW Version*/
     if(ret == 0){
         LOG_INFO("fw_ver: %d %d %d %d\n",
@@ -6363,9 +6393,9 @@ static ssize_t csa37f71_write(struct file *file, const char __user *buf,
         err = 1;
     }
 
-    exit_kfree:
+exit_kfree:
     kfree(kbuf);
-    exit:
+exit:
     return err;
 }
 
@@ -6374,6 +6404,8 @@ static ssize_t csa37f71_read(struct file *filp, char __user *buf, size_t count, 
     int err = 0;
     char *kbuf = NULL;
     char reg = 0;
+    char err_code = 0;
+
      /*****fw updating return****/
     if(get_device_updating_flag()){
         LOG_ERR("updating\n");
@@ -6392,9 +6424,27 @@ static ssize_t csa37f71_read(struct file *filp, char __user *buf, size_t count, 
         LOG_DEBUG("copy from user err\n");
         goto exit_kfree;
     }
-    err = cs_press_iic_read(reg, kbuf, count);
-    if (err < 0){
-        goto exit_kfree;
+
+    if (reg == DEBUG_ENGINEER_TEST_REG) {
+        if (g_cs_press.is_boot_ver_err) {
+            err_code = ERROR_CODE_RST;
+        } else if (!g_cs_press.irq_ok) {
+            err_code = ERROR_CODE_IRQ;
+        } else if (g_cs_press.fw_update_error < 0
+                || g_cs_press.fw_update_error >= 0x80){
+            err_code = ERROR_CODE_FW_UPDATE;
+        } else {
+           err = cs_press_iic_read(reg, kbuf, count);
+            if (err < 0){
+                err_code = ERROR_CODE_IIC;
+            }
+        }
+        memset(kbuf, err_code, count);
+    } else {
+        err = cs_press_iic_read(reg, kbuf, count);
+        if (err < 0){
+            goto exit_kfree;
+        }
     }
     if (copy_to_user(buf+1, kbuf, count)){
         LOG_DEBUG("copy from user err\n");
@@ -6402,9 +6452,9 @@ static ssize_t csa37f71_read(struct file *filp, char __user *buf, size_t count, 
     }else{
         err = 1;
     }
-    exit_kfree:
+exit_kfree:
     kfree(kbuf);
-    exit:
+exit:
     return err;
 }
 
@@ -6437,10 +6487,6 @@ static int csa37f71_probe(struct i2c_client *client)
 #endif
 
     LOG_DEBUG("probe init\n");
-    ret = misc_register(&csa37f71_misc); /*dev node*/
-    if(ret){
-        LOG_DEBUG("misc_register err %d\n",ret);
-    }
     g_cs_press.client = client;
     cs_parse_dts(g_cs_press.client);
     cs_press_struct_init();
@@ -6458,10 +6504,13 @@ static int csa37f71_probe(struct i2c_client *client)
 
     if (retry == 10) {
         LOG_ERR("ts check panel dt failed\n");
-        misc_deregister(&csa37f71_misc); /*dev node*/
         return -EPROBE_DEFER; /* retry */
     }
 #endif
+    ret = misc_register(&csa37f71_misc); /*dev node*/
+    if(ret){
+        LOG_DEBUG("misc_register err %d\n", ret);
+    }
     g_cs_press.pinctrl = devm_pinctrl_get(&client->dev);
     if (IS_ERR_OR_NULL(g_cs_press.pinctrl)) {
         LOG_ERR("get pinctrl fail\n");
