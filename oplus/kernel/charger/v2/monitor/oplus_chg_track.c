@@ -39,6 +39,7 @@
 #include <oplus_mms_gauge.h>
 #include <oplus_chg_vooc.h>
 #include <oplus_chg_ufcs.h>
+#include <ufcs_class.h>
 #include <oplus_chg_comm.h>
 #include <oplus_chg_exception.h>
 #include <oplus_chg_wls.h>
@@ -207,7 +208,7 @@
 #define TRACK_HIDL_CHG_UP_LIMIT_INFO_LEN		512
 #define TRACK_HIDL_HYPER_INFO_LEN		256
 #define TRACK_HIDL_BDD_INFO_LEN			512
-#define TRACK_HIDL_BAT_INFO_LEN			256
+#define TRACK_HIDL_BAT_INFO_LEN			512
 #define TRACK_SOFT_ABNORMAL_UPLOAD_PERIOD	(24 * 3600)
 #define TRACK_SOFT_UPLOAD_COUNT_MAX		10
 #define TRACK_SOFT_SOH_UPLOAD_COUNT_MAX		2000
@@ -301,7 +302,7 @@ enum oplus_chg_track_hidl_type {
 	TRACK_HIDL_EIS_ERR,
 	TRACK_HIDL_ANTI_EXPANSION_INFO,
 	TRACK_HIDL_CHG_UP_LIMIT_INFO,
-	TRACK_HIDL_BAT_INFO,
+	TRACK_HIDL_SHUTDOWN_INFO,
 	TRACK_HIDL_BDD_INFO,
 };
 
@@ -621,16 +622,17 @@ struct oplus_chg_track_hidl_ttf_info {
 	struct oplus_chg_track_hidl_ttf_info_cmd ttf_info;
 };
 
-struct oplus_chg_track_hidl_bat_info_cmd {
+struct oplus_chg_track_hidl_shutdown_info_cmd {
 	u8 data_buf[TRACK_HIDL_BAT_INFO_LEN];
+	u8 bat_buf[TRACK_HIDL_BAT_INFO_LEN];
 };
 
-struct oplus_chg_track_hidl_bat_info {
+struct oplus_chg_track_hidl_shutdown_info {
 	struct mutex track_bat_info_lock;
 	bool bat_info_uploading;
 	oplus_chg_track_trigger *bat_info_load_trigger;
-	struct delayed_work bat_info_load_trigger_work;
-	struct oplus_chg_track_hidl_bat_info_cmd bat_info;
+	struct delayed_work shutdown_info_load_trigger_work;
+	struct oplus_chg_track_hidl_shutdown_info_cmd shutdown_info;
 };
 
 struct oplus_chg_track_hidl_hyper_info {
@@ -912,7 +914,7 @@ struct oplus_chg_track_status {
 	struct oplus_chg_track_hidl_ttf_info *ttf_info;
 	struct oplus_chg_track_hidl_bcc_si bcc_si;
 	struct oplus_chg_track_hidl_eis eis;
-	struct oplus_chg_track_hidl_bat_info bat_info_s;
+	struct oplus_chg_track_hidl_shutdown_info shutdown_info_s;
 	struct oplus_chg_track_hidl_bdd_info bdd_info_s;
 	int wired_max_power;
 	int wls_max_power;
@@ -1070,8 +1072,9 @@ struct oplus_chg_track {
 	oplus_chg_track_trigger *soccp_crash_trigger;
 	oplus_chg_track_trigger *bs_info_trigger;
 	oplus_chg_track_trigger *state_keep_info_trigger;
-	oplus_chg_track_trigger *usbin_abnormal_trigger;
+	oplus_chg_track_trigger *vote_abnormal_trigger;
 	oplus_chg_track_trigger *sec_ic_meminfo_trigger;
+	oplus_chg_track_trigger *usbin_abnormal_trigger;
 
 	struct delayed_work mmi_chg_info_trigger_work;
 	struct delayed_work slow_chg_info_trigger_work;
@@ -1089,8 +1092,9 @@ struct oplus_chg_track {
 	struct delayed_work soccp_crash_trigger_work;
 	struct delayed_work bs_info_trigger_work;
 	struct delayed_work state_keep_info_trigger_work;
-	struct delayed_work usbin_abnormal_trigger_work;
+	struct delayed_work vote_abnormal_trigger_work;
 	struct delayed_work sec_ic_meminfo_trigger_work;
+	struct delayed_work usbin_abnormal_trigger_work;
 
 	struct mutex mmi_chg_info_lock;
 	struct mutex slow_chg_info_lock;
@@ -1109,8 +1113,9 @@ struct oplus_chg_track {
 	struct mutex soccp_crash_lock;
 	struct mutex bs_info_lock;
 	struct mutex state_keep_info_lock;
-	struct mutex usbin_abnormal_lock;
+	struct mutex vote_abnormal_lock;
 	struct mutex sec_ic_meminfo_lock;
+	struct mutex usbin_abnormal_lock;
 
 	char voocphy_name[OPLUS_CHG_TRACK_VOOCPHY_NAME_LEN];
 
@@ -1339,8 +1344,9 @@ static struct flag_reason_table track_flag_reason_table[] = {
 	{ TRACK_NOTIFY_FLAG_EIS_ABNORMAL, "EisAbnormal" },
 	{ TRACK_NOTIFY_FLAG_BAL_ABNORMAL, "BalAbnormal" },
 	{ TRACK_NOTIFY_FLAG_STATE_KEEP_ABNORMAL, "StateKeepAbnormal" },
-	{ TRACK_NOTIFY_FLAG_USBIN_ABNORMAL, "UsbinAbnormal" },
+	{ TRACK_NOTIFY_FLAG_VOTE_ABNORMAL, "VoteAbnormal" },
 	{ TRACK_NOTIFY_FLAG_SEC_IC_MEMINFO, "SecICMemInfo" },
+	{ TRACK_NOTIFY_FLAG_USBIN_ABNORMAL, "UsbinAbnormal" },
 
 	{ TRACK_NOTIFY_FLAG_UPLOAD_BREAK_LOG, "UploadBreakLog" },
 	{ TRACK_NOTIFY_FLAG_UPLOAD_NO_CHG_LOG, "UploadNoChgLog" },
@@ -2776,8 +2782,8 @@ static void oplus_track_upload_shutdown_bat_info(struct work_struct *work)
 {
 	int index = 0;
 	struct delayed_work *dwork = to_delayed_work(work);
-	struct oplus_chg_track_hidl_bat_info *bat_info_p = container_of(
-		dwork, struct oplus_chg_track_hidl_bat_info, bat_info_load_trigger_work);
+	struct oplus_chg_track_hidl_shutdown_info *shutdown_info_p = container_of(
+		dwork, struct oplus_chg_track_hidl_shutdown_info, shutdown_info_load_trigger_work);
 	struct oplus_chg_track *track_chip = g_track_chip;
 	struct oplus_monitor *monitor;
 
@@ -2785,86 +2791,197 @@ static void oplus_track_upload_shutdown_bat_info(struct work_struct *work)
 		return;
 
 	monitor = track_chip->monitor;
-	mutex_lock(&bat_info_p->track_bat_info_lock);
-	if (bat_info_p->bat_info_load_trigger)
-		kfree(bat_info_p->bat_info_load_trigger);
-	bat_info_p->bat_info_load_trigger = kzalloc(sizeof(oplus_chg_track_trigger), GFP_KERNEL);
-	if (!bat_info_p->bat_info_load_trigger) {
+	mutex_lock(&shutdown_info_p->track_bat_info_lock);
+	if (shutdown_info_p->bat_info_load_trigger)
+		kfree(shutdown_info_p->bat_info_load_trigger);
+	shutdown_info_p->bat_info_load_trigger = kzalloc(sizeof(oplus_chg_track_trigger), GFP_KERNEL);
+	if (!shutdown_info_p->bat_info_load_trigger) {
 		chg_err("bat_info_load_trigger memery alloc fail\n");
-		mutex_unlock(&bat_info_p->track_bat_info_lock);
+		mutex_unlock(&shutdown_info_p->track_bat_info_lock);
 		return;
 	}
-	bat_info_p->bat_info_load_trigger->type_reason =
+	shutdown_info_p->bat_info_load_trigger->type_reason =
 		TRACK_NOTIFY_TYPE_DEVICE_ABNORMAL;
-	bat_info_p->bat_info_load_trigger->flag_reason =
+	shutdown_info_p->bat_info_load_trigger->flag_reason =
 		TRACK_NOTIFY_FLAG_POWER_DOWN_ABNORMAL;
-	bat_info_p->bat_info_uploading = true;
-	mutex_unlock(&bat_info_p->track_bat_info_lock);
+	shutdown_info_p->bat_info_uploading = true;
 
-	index += scnprintf(&(bat_info_p->bat_info_load_trigger->crux_info[index]),
-			OPLUS_CHG_TRACK_CURX_INFO_LEN - index, "$$err_scene@@%s", "uvlo");
-	index += scnprintf(&(bat_info_p->bat_info_load_trigger->crux_info[index]),
-			OPLUS_CHG_TRACK_CURX_INFO_LEN - index, "$$now_info@@");
-	index += scnprintf(&(bat_info_p->bat_info_load_trigger->crux_info[index]),
-			OPLUS_CHG_TRACK_CURX_INFO_LEN - index, "$$batt_temp@@%d", monitor->batt_temp);
-	index += scnprintf(&(bat_info_p->bat_info_load_trigger->crux_info[index]),
-			OPLUS_CHG_TRACK_CURX_INFO_LEN - index, "$$vbat_mv@@%d", monitor->vbat_mv);
-	index += scnprintf(&(bat_info_p->bat_info_load_trigger->crux_info[index]),
-			OPLUS_CHG_TRACK_CURX_INFO_LEN - index, "$$ibat_ma@@%d", monitor->ibat_ma);
-	index += scnprintf(&(bat_info_p->bat_info_load_trigger->crux_info[index]),
-			OPLUS_CHG_TRACK_CURX_INFO_LEN - index, "$$batt_soc@@%d", monitor->batt_soc);
-	index += scnprintf(&(bat_info_p->bat_info_load_trigger->crux_info[index]),
-			OPLUS_CHG_TRACK_CURX_INFO_LEN - index, "$$ui_soc@@%d", monitor->ui_soc);
+	index += scnprintf(&(shutdown_info_p->bat_info_load_trigger->crux_info[index]),
+			OPLUS_CHG_TRACK_CURX_INFO_LEN - index, "$$s_batt_temp@@%d", monitor->batt_temp);
+	index += scnprintf(&(shutdown_info_p->bat_info_load_trigger->crux_info[index]),
+			OPLUS_CHG_TRACK_CURX_INFO_LEN - index, "$$s_vbat_mv@@%d", monitor->vbat_mv);
+	index += scnprintf(&(shutdown_info_p->bat_info_load_trigger->crux_info[index]),
+			OPLUS_CHG_TRACK_CURX_INFO_LEN - index, "$$s_ibat_ma@@%d", monitor->ibat_ma);
+	index += scnprintf(&(shutdown_info_p->bat_info_load_trigger->crux_info[index]),
+			OPLUS_CHG_TRACK_CURX_INFO_LEN - index, "$$s_batt_soc@@%d", monitor->batt_soc);
+	index += scnprintf(&(shutdown_info_p->bat_info_load_trigger->crux_info[index]),
+			OPLUS_CHG_TRACK_CURX_INFO_LEN - index, "$$s_ui_soc@@%d", monitor->ui_soc);
 
-	index += scnprintf(&(bat_info_p->bat_info_load_trigger->crux_info[index]),
+	index += scnprintf(&(shutdown_info_p->bat_info_load_trigger->crux_info[index]),
 			OPLUS_CHG_TRACK_CURX_INFO_LEN - index,
-			"$$shutdown_info@@%s", bat_info_p->bat_info.data_buf);
+			"$$shutdown_info@@%s", shutdown_info_p->shutdown_info.bat_buf);
 
-	oplus_chg_track_upload_trigger_data(bat_info_p->bat_info_load_trigger);
-	if (bat_info_p->bat_info_load_trigger) {
-		kfree(bat_info_p->bat_info_load_trigger);
-		bat_info_p->bat_info_load_trigger = NULL;
+	mutex_unlock(&shutdown_info_p->track_bat_info_lock);
+	oplus_chg_track_upload_trigger_data(shutdown_info_p->bat_info_load_trigger);
+	if (shutdown_info_p->bat_info_load_trigger) {
+		kfree(shutdown_info_p->bat_info_load_trigger);
+		shutdown_info_p->bat_info_load_trigger = NULL;
 	}
 	chg_info("success\n");
 }
 
-static int oplus_chg_track_set_hidl_bat_info(
+static char *extract_bat_info(char *data_buf, char *start_token, char *end_token)
+{
+	char *value_str = NULL;
+	const char *start;
+	const char *end;
+
+	if (data_buf == NULL || start_token == NULL || end_token == NULL) {
+		chg_err("extract_bat_info data_buf or token is NULL\n");
+		return NULL;
+	}
+
+	start = strstr(data_buf, start_token);
+	if (start == NULL) {
+		chg_err("cant find the start_token\n");
+		return NULL;
+	}
+
+	start += strlen(start_token);
+	end = strstr(start, end_token);
+	if (end == NULL) {
+		chg_err("cant find the end_token\n");
+		return NULL;
+	} else if (end <= start) {
+		chg_err("end < start\n");
+		return NULL;
+	}
+
+	value_str = kzalloc(end - start + 1, GFP_KERNEL);
+	if (!value_str) {
+		chg_err("memory allocation failed\n");
+		return NULL;
+	}
+	strncpy(value_str, start, end - start);
+
+	return value_str;
+}
+
+static void oplus_chg_track_extract_other_info(struct oplus_chg_track *track_chip)
+{
+	struct oplus_chg_track_hidl_shutdown_info *shutdown_info_p;
+	char *start_token = "$$high_temp_vol_time@@";
+	char *end_token = "$$";
+	char *value_str = NULL;
+	struct oplus_monitor *monitor;
+	int ret = -1;
+
+	if (!track_chip || !track_chip->monitor)
+		return;
+
+	monitor = track_chip->monitor;
+	shutdown_info_p = &(track_chip->track_status.shutdown_info_s);
+	value_str = extract_bat_info(shutdown_info_p->shutdown_info.data_buf, start_token, end_token);
+	if (value_str != NULL) {
+		ret = kstrtouint(value_str, 10, &monitor->h_tmp_vol_time);
+		kfree(value_str);
+	}
+	chg_info("extract_bat ret = %d, h_tmp_vol_time: %d", ret, monitor->h_tmp_vol_time);
+}
+static void oplus_chg_track_extract_uvlo_bat_info(struct oplus_chg_track *track_chip)
+{
+	struct oplus_chg_track_hidl_shutdown_info *shutdown_info_p;
+	char *check_token = "$$uvlo@@";
+	char *check_end_token = "$$";
+	char *start;
+	char *end = "$$high_temp_vol_time";
+	char *value_str = NULL;
+	size_t len;
+	unsigned int uvlo_status = 0;
+	int ret;
+
+	if (!track_chip)
+		return;
+
+	shutdown_info_p = &(track_chip->track_status.shutdown_info_s);
+	value_str = extract_bat_info(shutdown_info_p->shutdown_info.data_buf, check_token, check_end_token);
+	if (value_str != NULL) {
+		ret = kstrtouint(value_str, 10, &uvlo_status);
+		kfree(value_str);
+		if (ret)
+			return;
+	}
+
+	if (!uvlo_status) {
+		chg_err(" dont trigger the uvlo\n");
+		return;
+	}
+
+	if (shutdown_info_p->bat_info_uploading) {
+		chg_err("bat_info have uploaded, should return\n");
+		return;
+	}
+
+	start = shutdown_info_p->shutdown_info.data_buf;
+	end = strstr(shutdown_info_p->shutdown_info.data_buf, end);
+	if (end == NULL) {
+		chg_err("cant find the end_token\n");
+		return;
+	}
+	len = end - start;
+	if (len > TRACK_HIDL_BAT_INFO_LEN - 1)
+		len = TRACK_HIDL_BAT_INFO_LEN - 1;
+
+	strncpy(shutdown_info_p->shutdown_info.bat_buf, shutdown_info_p->shutdown_info.data_buf, len);
+	shutdown_info_p->shutdown_info.bat_buf[len] = '\0';
+
+	schedule_delayed_work(&shutdown_info_p->shutdown_info_load_trigger_work, msecs_to_jiffies(5000));
+	chg_info("extract_bat shutdown info: %s", shutdown_info_p->shutdown_info.bat_buf);
+}
+
+static int oplus_chg_track_set_hidl_shutdown_info(
 	struct oplus_chg_track_hidl_cmd *cmd, struct oplus_chg_track *track_chip)
 {
-	struct oplus_chg_track_hidl_bat_info *bat_info_p;
+	struct oplus_chg_track_hidl_shutdown_info *shutdown_info_p;
+	size_t len;
 
-	if (!cmd)
+	if (!cmd || !track_chip)
 		return -EINVAL;
 
-	bat_info_p = &(track_chip->track_status.bat_info_s);
-	mutex_lock(&bat_info_p->track_bat_info_lock);
-	if (bat_info_p->bat_info_uploading) {
-		chg_debug("bat_info have uploaded, should return\n");
-		mutex_unlock(&bat_info_p->track_bat_info_lock);
-		return 0;
+	shutdown_info_p = &(track_chip->track_status.shutdown_info_s);
+	len = min_t(size_t, cmd->data_size, TRACK_HIDL_BAT_INFO_LEN - 1);
+	mutex_lock(&shutdown_info_p->track_bat_info_lock);
+	memcpy(shutdown_info_p->shutdown_info.data_buf, cmd->data_buf, len);
+	shutdown_info_p->shutdown_info.data_buf[len] = '\0';
+	if (strstr(shutdown_info_p->shutdown_info.data_buf, "$$high_temp_vol_time@@")) {
+		oplus_chg_track_extract_uvlo_bat_info(track_chip);
+		oplus_chg_track_extract_other_info(track_chip);
+	} else if (!shutdown_info_p->bat_info_uploading) {
+		/* Older phone services send the shutdown text without UVLO fields. */
+		memcpy(shutdown_info_p->shutdown_info.bat_buf,
+			shutdown_info_p->shutdown_info.data_buf, len + 1);
+		schedule_delayed_work(&shutdown_info_p->shutdown_info_load_trigger_work,
+			msecs_to_jiffies(5000));
 	}
-	memcpy(&bat_info_p->bat_info.data_buf, cmd->data_buf, cmd->data_size);
-	chg_info("cmd data_size :%d\n", cmd->data_size);
-	mutex_unlock(&bat_info_p->track_bat_info_lock);
+	mutex_unlock(&shutdown_info_p->track_bat_info_lock);
 
-	schedule_delayed_work(&bat_info_p->bat_info_load_trigger_work, msecs_to_jiffies(5000));
 	return 0;
 }
 
 static int oplus_chg_track_bat_info_init(struct oplus_chg_track *chip)
 {
-	struct oplus_chg_track_hidl_bat_info *bat_info_p;
+	struct oplus_chg_track_hidl_shutdown_info *shutdown_info_p;
 
 	if (!chip)
 		return -EINVAL;
 
-	bat_info_p = &(chip->track_status.bat_info_s);
-	mutex_init(&bat_info_p->track_bat_info_lock);
-	bat_info_p->bat_info_uploading = false;
-	bat_info_p->bat_info_load_trigger = NULL;
+	shutdown_info_p = &(chip->track_status.shutdown_info_s);
+	mutex_init(&shutdown_info_p->track_bat_info_lock);
+	shutdown_info_p->bat_info_uploading = false;
+	shutdown_info_p->bat_info_load_trigger = NULL;
 
-	memset(&bat_info_p->bat_info, 0, sizeof(bat_info_p->bat_info));
-	INIT_DELAYED_WORK(&bat_info_p->bat_info_load_trigger_work, oplus_track_upload_shutdown_bat_info);
+	memset(&shutdown_info_p->shutdown_info, 0, sizeof(shutdown_info_p->shutdown_info));
+	INIT_DELAYED_WORK(&shutdown_info_p->shutdown_info_load_trigger_work, oplus_track_upload_shutdown_bat_info);
 
 	return 0;
 }
@@ -3331,8 +3448,8 @@ int oplus_chg_track_set_hidl_info(const char *buf, size_t count)
 	case TRACK_HIDL_CHG_UP_LIMIT_INFO:
 		oplus_chg_track_set_hidl_chg_up_info(p_cmd, track_chip);
 		break;
-	case TRACK_HIDL_BAT_INFO:
-		oplus_chg_track_set_hidl_bat_info(p_cmd, track_chip);
+	case TRACK_HIDL_SHUTDOWN_INFO:
+		oplus_chg_track_set_hidl_shutdown_info(p_cmd, track_chip);
 		break;
 	case TRACK_HIDL_BDD_INFO:
 		oplus_chg_track_set_hidl_bdd_info(p_cmd, track_chip);
@@ -3447,10 +3564,30 @@ oplus_chg_track_get_vooc_type_info(int vooc_type,
 static void oplus_chg_track_get_ufcs_type_info(struct oplus_chg_track_status *track_status,
 	bool is_oplus, int id, int adapter_power, int emark_power)
 {
+	bool is_vivo = false;
+	int rc;
+	u64 dev_info = 0;
+	union mms_msg_data data = { 0 };
+	struct oplus_chg_track *track_chip = g_track_chip;
+
 	if (!strstr(track_status->power_info.wired_info.adapter_type, "ufcs"))
 		return;
 
-	if (is_oplus)
+	if (track_chip) {
+		rc = oplus_mms_get_item_data(track_chip->monitor->ufcs_topic, UFCS_ITEM_DEV_INFO, &data, true);
+		if (rc < 0) {
+			chg_err("can't get UFCS_ITEM_DEV_INFO data, rc=%d\n", rc);
+		} else {
+			sscanf(data.strval, "%llx", &dev_info);
+		}
+		if (rc >= 0 && (UFCS_DEVICE_INFO_DEV_VENDOR(dev_info) == UFCS_VIVO_DEV_ID))
+			is_vivo = true;
+	}
+
+	if (is_vivo)
+		strncpy(track_status->power_info.wired_info.adapter_type, "ufcs_vivo",
+			OPLUS_CHG_TRACK_POWER_TYPE_LEN - 1);
+	else if (is_oplus)
 		strncpy(track_status->power_info.wired_info.adapter_type, "ufcs_oplus",
 			OPLUS_CHG_TRACK_POWER_TYPE_LEN - 1);
 	else
@@ -3989,6 +4126,7 @@ oplus_chg_track_record_charger_info(struct oplus_monitor *monitor,
 	int fv_dec = 0, wired_ffc_dec = 0, wls_ffc_dec = 0, vct = 0;
 	char adapter_type[OPLUS_CHG_TRACK_POWER_TYPE_LEN] = { 0 };
 	bool wls_ocar_occur = false;
+	bool wls_camera_occur = false;
 	bool cv_mode = false;
 
 	if (monitor == NULL || p_trigger_data == NULL || track_status == NULL || monitor->track == NULL)
@@ -4086,11 +4224,16 @@ oplus_chg_track_record_charger_info(struct oplus_monitor *monitor,
 				 OPLUS_CHG_TRACK_CURX_INFO_LEN - index,
 				 "$$wls_t@@%llu",
 				 track_status->wls_chg_t_total);
-			if (is_wls_rx_disable_votable_available(monitor))
+			if (is_wls_rx_disable_votable_available(monitor)) {
 				wls_ocar_occur = get_client_vote(monitor->wls_rx_disable_votable, "CALL_NAME_2");
+				wls_camera_occur = get_client_vote(monitor->wls_rx_disable_votable, "CALL_NAME_9");
+			}
 			index += scnprintf(&(p_trigger_data->crux_info[index]),
 				 OPLUS_CHG_TRACK_CURX_INFO_LEN - index,
 				 "$$ocar@@%d", wls_ocar_occur);
+			index += scnprintf(&(p_trigger_data->crux_info[index]),
+				 OPLUS_CHG_TRACK_CURX_INFO_LEN - index,
+				 "$$camera@@%d", wls_camera_occur);
 		}
 	}
 
@@ -4370,6 +4513,11 @@ oplus_chg_track_record_charger_info(struct oplus_monitor *monitor,
                 OPLUS_CHG_TRACK_CURX_INFO_LEN - index, "$$fcl@@%d,%s,%d",
                 track_status->fcl.one_full_trigger_cnt, track_status->fcl.info, track_status->fcl.n_full_trigger_cnt);
 	memset(&(track_status->fcl), 0, sizeof(track_status->fcl));
+
+	index += scnprintf(&(p_trigger_data->crux_info[index]), OPLUS_CHG_TRACK_CURX_INFO_LEN - index,
+			    "$$h_tmp_vol_chg@@%d,%d,%d,%d,%d,%d",
+				monitor->h_tmp_vol_time, monitor->h_bat_tmp, monitor->h_bat_vol,
+				monitor->h_led_on, monitor->h_bat_cur, monitor->h_full_tmp);
 
 	index += scnprintf(&(p_trigger_data->crux_info[index]),
 			  OPLUS_CHG_TRACK_CURX_INFO_LEN - index,
@@ -4904,6 +5052,19 @@ static void oplus_chg_track_state_keep_info_trigger_work(struct work_struct *wor
 		chip->state_keep_info_trigger = NULL;
 	}
 	mutex_unlock(&chip->state_keep_info_lock);
+}
+
+static void oplus_chg_track_vote_abnormal_trigger_work(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct oplus_chg_track *chip = container_of(dwork, struct oplus_chg_track, vote_abnormal_trigger_work);
+
+	if (chip->vote_abnormal_trigger) {
+		oplus_chg_track_upload_trigger_data(chip->vote_abnormal_trigger);
+		kfree(chip->vote_abnormal_trigger);
+		chip->vote_abnormal_trigger = NULL;
+	}
+	mutex_unlock(&chip->vote_abnormal_lock);
 }
 
 static void oplus_chg_track_sec_ic_meminfo_trigger_work(struct work_struct *work)
@@ -5617,6 +5778,7 @@ static int oplus_chg_track_init(struct oplus_chg_track *track_dev)
 	mutex_init(&chip->sub_gauge_info.batt_monitor_lock);
 	mutex_init(&chip->bs_info_lock);
 	mutex_init(&chip->state_keep_info_lock);
+	mutex_init(&chip->vote_abnormal_lock);
 	mutex_init(&chip->usbin_abnormal_lock);
 
 	chip->gauge_info.debug_err_type = TRACK_GAGUE_ERR_DEFAULT;
@@ -5869,9 +6031,10 @@ static int oplus_chg_track_init(struct oplus_chg_track *track_dev)
 	INIT_DELAYED_WORK(&chip->soccp_crash_trigger_work, oplus_chg_track_soccp_crash_trigger_work);
 	INIT_DELAYED_WORK(&chip->bs_info_trigger_work, oplus_chg_track_bs_info_trigger_work);
 	INIT_DELAYED_WORK(&chip->state_keep_info_trigger_work, oplus_chg_track_state_keep_info_trigger_work);
-	INIT_DELAYED_WORK(&chip->usbin_abnormal_trigger_work, oplus_chg_track_usbin_abnormal_trigger_work);
-	INIT_DELAYED_WORK(&chip->sec_ic_meminfo_trigger_work, oplus_chg_track_sec_ic_meminfo_trigger_work);
+	INIT_DELAYED_WORK(&chip->vote_abnormal_trigger_work, oplus_chg_track_vote_abnormal_trigger_work);
 	INIT_DELAYED_WORK(&chip->wired_reverse_chg_trigger_work, oplus_chg_track_wired_reverse_chg_trigger_work);
+	INIT_DELAYED_WORK(&chip->sec_ic_meminfo_trigger_work, oplus_chg_track_sec_ic_meminfo_trigger_work);
+	INIT_DELAYED_WORK(&chip->usbin_abnormal_trigger_work, oplus_chg_track_usbin_abnormal_trigger_work);
 
 	return ret;
 }
@@ -9228,6 +9391,9 @@ static int oplus_chg_track_get_speed_slow_reason(
 		 track_status->power_info.power_type == TRACK_CHG_TYPE_WIRELESS)
 		chip->slow_charging_trigger.flag_reason =
 			TRACK_NOTIFY_FLAG_CHG_SLOW_VERITY_FAIL;
+	else if (chip->monitor && chip->monitor->curr_derating_trig)
+		chip->slow_charging_trigger.flag_reason =
+			TRACK_NOTIFY_FLAG_CHG_SLOW_CYCLE_CURR_DERATING;
 	else
 		chip->slow_charging_trigger.flag_reason =
 			oplus_chg_track_get_cycle_derating_slow_flag(chip->monitor);
@@ -11353,6 +11519,45 @@ static int oplus_chg_track_upload_state_keep_abnormal(struct oplus_chg_track *ch
 	scnprintf(chip->state_keep_info_trigger->crux_info,
 		OPLUS_CHG_TRACK_CURX_INFO_LEN, "%s", data.strval);
 	schedule_delayed_work(&chip->state_keep_info_trigger_work, 0);
+	chg_info("success\n");
+
+	return 0;
+}
+
+static int oplus_chg_track_upload_vote_abnormal(struct oplus_chg_track *chip)
+{
+	union mms_msg_data data = { 0 };
+	int rc;
+
+	if (!chip)
+		return -EINVAL;
+
+	mutex_lock(&chip->vote_abnormal_lock);
+	if (chip->vote_abnormal_trigger)
+		kfree(chip->vote_abnormal_trigger);
+
+	chip->vote_abnormal_trigger = kzalloc(sizeof(oplus_chg_track_trigger), GFP_KERNEL);
+	if (!chip->vote_abnormal_trigger) {
+		chg_err("memory alloc fail\n");
+		mutex_unlock(&chip->vote_abnormal_lock);
+		return -ENOMEM;
+	}
+
+	chip->vote_abnormal_trigger->type_reason = TRACK_NOTIFY_TYPE_SOFTWARE_ABNORMAL;
+	chip->vote_abnormal_trigger->flag_reason = TRACK_NOTIFY_FLAG_VOTE_ABNORMAL;
+
+	rc = oplus_mms_get_item_data(chip->monitor->err_topic, ERR_ITEM_VOTE_ABNORMAL, &data, false);
+	if (rc < 0) {
+		chg_err("get vote abnormal error, rc=%d\n", rc);
+		kfree(chip->vote_abnormal_trigger);
+		chip->vote_abnormal_trigger = NULL;
+		mutex_unlock(&chip->vote_abnormal_lock);
+		return -ENOMEM;
+	}
+
+	scnprintf(chip->vote_abnormal_trigger->crux_info,
+		OPLUS_CHG_TRACK_CURX_INFO_LEN, "%s", data.strval);
+	schedule_delayed_work(&chip->vote_abnormal_trigger_work, 0);
 	chg_info("success\n");
 
 	return 0;
@@ -13605,14 +13810,17 @@ static void oplus_chg_track_err_subs_callback(struct mms_subscribe *subs,
 		case ERR_ITEM_STATE_KEEP_ABNORMAL:
 			oplus_chg_track_upload_state_keep_abnormal(track);
 			break;
-		case ERR_ITEM_USBIN_ABNORMAL:
-			oplus_chg_track_upload_usbin_abnormal(track);
+		case ERR_ITEM_VOTE_ABNORMAL:
+			oplus_chg_track_upload_vote_abnormal(track);
 			break;
 		case ERR_ITEM_SEC_IC_MEM_INFO:
 			oplus_chg_track_upload_sec_ic_mem_info(track);
 			break;
 		case ERR_ITEM_SHUTDOWN_VOL:
 			oplus_chg_track_upload_shutdown_vol_info(track);
+			break;
+		case ERR_ITEM_USBIN_ABNORMAL:
+			oplus_chg_track_upload_usbin_abnormal(track);
 			break;
 		default:
 			break;

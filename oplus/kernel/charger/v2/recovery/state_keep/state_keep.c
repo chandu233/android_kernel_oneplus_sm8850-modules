@@ -32,6 +32,9 @@
 
 #include "detection/wired_disconnect_detection.h"
 #include "detection/vooc_disconnect_detection.h"
+#if IS_ENABLED(CONFIG_OPLUS_CHG_STATE_KEEP_DCP)
+#include "detection/dcp_disconnect_detection.h"
+#endif
 
 struct state_keep_data {
 	bool wired_online;
@@ -1883,6 +1886,14 @@ static void state_keep_init_detection_algorithm(struct state_keep *sk)
 		if (rc < 0)
 			chg_err("vooc_disconnect_detection init failed, rc=%d\n", rc);
 	}
+#if IS_ENABLED(CONFIG_OPLUS_CHG_STATE_KEEP_DCP)
+	node = of_find_node_by_name(sk->node, "dcp_disconnect_detection");
+	if (node != NULL) {
+		rc = dcp_disconnect_detection_init(node);
+		if (rc < 0)
+			chg_err("dcp_disconnect_detection init failed, rc=%d\n", rc);
+	}
+#endif
 }
 
 static void state_keep_exit_detection_algorithm(struct state_keep *sk)
@@ -1891,6 +1902,10 @@ static void state_keep_exit_detection_algorithm(struct state_keep *sk)
 		wired_disconnect_monitor_exit();
 	if (of_find_node_by_name(sk->node, "vooc_disconnect_detection") != NULL)
 		vooc_disconnect_monitor_exit();
+#if IS_ENABLED(CONFIG_OPLUS_CHG_STATE_KEEP_DCP)
+	if (of_find_node_by_name(sk->node, "dcp_disconnect_detection") != NULL)
+		dcp_disconnect_monitor_exit();
+#endif
 }
 
 static int state_keep_status_show(struct seq_file *m, void *data)

@@ -147,4 +147,11 @@ enum {
     OPLUS_SET_PD_SINK_CAP,
     OPLUS_PROPERTY_MAX,
 } oplus_property_type_e;
+
+/* Iceland and Find X9 Ultra firmware put the ITERM commands before PD. */
+enum oplus_iterm_first_property_id {
+    OPLUS_ITERM_FIRST_CHECK_STAT = 129,
+    OPLUS_ITERM_FIRST_TIMEOUT = 130,
+    OPLUS_ITERM_FIRST_PD_COMPLETED = 131,
+};
 #endif /*_USBPD_DPM_H_*/

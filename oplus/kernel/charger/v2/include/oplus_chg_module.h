@@ -17,7 +17,7 @@ struct oplus_chg_module {
 	chg_module_exit_t chg_module_exit;
 };
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0))
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)) && !IS_ENABLED(CONFIG_OPLUS_CHARGER_DDK_BUILD)
 
 #define OPLUS_CHG_MODULE_MAGIC 0x20300000
 
@@ -57,7 +57,7 @@ struct oplus_chg_module __name##_module = {			\
 	.chg_module_exit = __name##_exit,			\
 }
 
-#else /* (LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)) */
+#else /* (LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)) && !IS_ENABLED(CONFIG_OPLUS_CHARGER_DDK_BUILD) */
 
 #define OPLUS_CHG_MODULE_CORE_MAGIC	0x20300000
 #define OPLUS_CHG_MODULE_EARLY_MAGIC	0x20300001
@@ -136,7 +136,7 @@ struct oplus_chg_module __name##_module = {				\
 	.chg_module_exit = NULL,					\
 }
 
-#endif /* (LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)) */
+#endif /* (LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)) && !IS_ENABLED(CONFIG_OPLUS_CHARGER_DDK_BUILD) */
 
 #else /* MODULE */
 

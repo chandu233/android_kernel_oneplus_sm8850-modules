@@ -6,7 +6,6 @@
 ** -----------Revision History: -------------------------------
 ** <author>        <data>    <version >       <desc>
 ****************************************************************/
-
 #define pr_fmt(fmt) "[VIRTUAL_REVERSE_CHG]([%s][%d]): " fmt, __func__, __LINE__
 
 #include <linux/module.h>

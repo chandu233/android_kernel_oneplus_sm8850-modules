@@ -196,6 +196,10 @@ enum oplus_ap_message_id {
 	AP_MESSAGE_MAX_SIZE = 32,
 };
 
+enum oplus_ap_read_buffer_index {
+	AP_READ_BUFFER_INDEX_PD_SVOOC = 11,
+};
+
 struct oplus_ap_write_req_msg {
 	struct pmic_glink_hdr hdr;
 	u32 message_id;
@@ -406,6 +410,9 @@ enum usb_property_id {
 #endif /*OPLUS_FEATURE_CHG_BASIC*/
 	USB_PROP_MAX,
 };
+
+/* Tablet firmware reuses the phone SVID slot; selected by its DT flag. */
+#define USB_SET_PMIC_HIGH_IMPEDANCE USB_ADAPTER_SVID
 
 enum wireless_property_id {
 	WLS_ONLINE,
@@ -793,12 +800,12 @@ struct battery_chg_dev {
 	struct delayed_work	gauge_register_work;
 	struct delayed_work	ufcs_reset_work;
 	struct delayed_work	update_common_charge_flag_work;
+	struct delayed_work	reverse_chg_svid_check_work;
+	struct delayed_work	source_pdo_check_work;
 	struct delayed_work	check_abnormal_usbin_status_work;
 	struct delayed_work     crash_timeout_work;
 	struct delayed_work	update_pd_completed_work;
 	int			abnormal_usbin_count;
-	struct delayed_work	reverse_chg_svid_check_work;
-	struct delayed_work	source_pdo_check_work;
 	bool			qos_status;
 	u32			oem_misc_ctl_data;
 	bool			oem_usb_online;
@@ -835,6 +842,8 @@ struct battery_chg_dev {
 	bool			usb_aicl_enhance;
 	bool			soccp_support;
 	bool				qcom_gauge_cali_track_support;
+	bool			pmic_high_impedance_support;
+	bool			pmic_glink_iterm_first;
 	bool			fg_register_flag;
 	struct gauge_track_cali_info_s 	*pre_info;
 	struct work_struct		gauge_cali_track_by_plug_work;

@@ -64,53 +64,6 @@ void Ecc_Rng128( uint32_t * gf2n_RandomValue )
 	gf2n_RandomValue[4] = 0u;
 }
 
-#if defined (SLE95100) || defined (SLE95300)
-/* ****************************************************************************
-   name:      Ecc_DoAuthentication()
-
-   function:  execute a complete ECCS authentication sequence.
-
-   input:     nil
-   output:    bool
-
-   return:    true, if all was ok.
-              false, if errors detected.
-
-   date:      .
- ************************************************************************* */
-BOOL Ecc_DoAuthentication( )
-{
-	dwordvec_t gf2nRandomValue = {0,0,0,0,0,0};
-	dwordvec_t gf2nChallenge = {0,0,0,0,0,0};
-	dwordvec_t gf2nReturnX = {0,0,0,0,0,0};
-	dwordvec_t gf2nReturnZ = {0,0,0,0,0,0};
-	dwordvec_t gf2nCheck = {0,0,0,0,0,0};
-
-	if( Ecc_GenerateChallenge( gf2nChallenge, gf2nRandomValue, MODE_ECCS ) == FALSE)
-	{
-		return FALSE;
-	}
-
-	if( Ecc_GenerateCheckValue( gf2nCheck, gf2nRandomValue, g_public_key_131, MODE_ECCS )== FALSE)
-	{
-		return FALSE;
-	}
-
-	if( Ecc_StartECC( gf2nChallenge, gf2nReturnX, gf2nReturnZ, TRUE, MODE_ECCS ) == FALSE )
-	{
-		return FALSE;
-	}
-
-	if( Ecc_VerifyResponse( gf2nReturnX, gf2nReturnZ, gf2nCheck, g_public_key_131, MODE_ECCS ) == FALSE )
-	{
-		return FALSE;
-	}
-
-	return TRUE;
-}
-
-#endif
-
 #if defined (SLE95150) || defined (SLE95250) || defined (SLE95300)
 /* ****************************************************************************
    name:      Ecc_DoAuthenticationEnhanced()

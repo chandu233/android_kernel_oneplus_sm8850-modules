@@ -945,6 +945,11 @@ static int rt1711_get_power_status(
 
 	if (ret & RT1711H_REG_VBUS_80)
 		*pwr_status |= TCPC_REG_POWER_STATUS_EXT_VSAFE0V;
+	else {
+		if (tcpc->vbus_level == TCPC_VBUS_VALID && !tcpc->pd_wait_hard_reset_complete &&
+				tcpc->pd_transmit_state != PD_TX_STATE_WAIT_HARD_RESET)
+			*pwr_status |= TCPC_REG_POWER_STATUS_VBUS_PRES;
+	}
 
 	return 0;
 }

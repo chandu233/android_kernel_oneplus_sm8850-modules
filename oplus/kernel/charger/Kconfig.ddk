@@ -17,6 +17,12 @@ config OPLUS_CHARGER_MTK
 	help
 	  Say Y here to declare charging system is on MTK
 
+config OPLUS_CHARGER_UNISOC
+	bool "OPLUS charger on UNISOC"
+	default n
+	help
+	  Say Y here to declare charging system is on UNISOC
+
 config OPLUS_HVDCP_SUPPORT
         bool "OPLUS_HVDCP_SUPPORT"
         default n
@@ -186,6 +192,12 @@ config OPLUS_CHARGER_WIRELESS_RA9530
 	help
 	  Say Y to include support
 
+config OPLUS_PD_EXT_SUPPORT
+	bool "TypeC Port Controller Extern"
+	default n
+	help
+	  Say Y to enable
+
 endif #OPLUS_CHARGER
 
 source "$(KCONFIG_EXT_PREFIX)test-kit/Kconfig.ddk"
@@ -194,6 +206,7 @@ source "$(KCONFIG_EXT_PREFIX)config/Kconfig.ddk"
 source "$(KCONFIG_EXT_PREFIX)wireless_pen/Kconfig.ddk"
 source "$(KCONFIG_EXT_PREFIX)gauge_i2c_rst/Kconfig.ddk"
 source "$(KCONFIG_EXT_PREFIX)oplus_chg_symbol/Kconfig.ddk"
+source "$(KCONFIG_EXT_PREFIX)pd_ext/Kconfig.ddk"
 
 config OPLUS_FEATURE_OLC
         tristate "Add for oplus log core"

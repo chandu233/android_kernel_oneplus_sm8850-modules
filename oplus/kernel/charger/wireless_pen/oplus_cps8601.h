@@ -191,13 +191,6 @@ struct q_cali_result {
 	int q_cali_width_var;
 };
 
-enum HBOOST_STATUS {
-	HBOOST_UNKNOWN,
-	HBOOST_SET_FAIL,
-	HBOOST_SET_SUCCESS,
-	HBOOST_IS_SETTING_BOOST,
-};
-
 enum FW_UPDATE_STATUS {
 	FW_UPDATE_UNKNOWN,
 	FW_UPDATE_FAIL,

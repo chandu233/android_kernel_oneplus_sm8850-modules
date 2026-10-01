@@ -358,6 +358,17 @@ struct oplus_monitor {
 	unsigned long reverse_on_time;
 	unsigned long reverse_end_time;
 	char reverse_str[OPLUS_MONITOR_REVERSE_STR_MAX];
+
+	/* hightemp chg check */
+	int hightemp_temp;
+	int hightemp_dec_fv;
+	int h_bat_tmp;
+	int h_bat_vol;
+	int h_led_on;
+	int h_bat_cur;
+	int h_full_tmp;
+	unsigned int h_tmp_vol_time;
+	unsigned int start_record_time;
 	bool curr_derating_trig;
 	bool tier_derating_trig;
 };

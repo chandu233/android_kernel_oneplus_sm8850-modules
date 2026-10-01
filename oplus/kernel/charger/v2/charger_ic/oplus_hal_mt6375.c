@@ -84,48 +84,6 @@ static int mt6375_get_local_time_ms(void)
 	return local_time_ms;
 }
 
-__maybe_unused static int mt6375_vcoon_is_rvp(struct mt6375_device *chip)
-{
-	int rc;
-	unsigned int data;
-
-	rc = regmap_read(chip->rmap, MT6375_REG_MTINT2, &data);
-	if (rc < 0) {
-		chg_err("failed to 0x%02x, rc=%d\n", MT6375_REG_MTINT2, rc);
-		return rc;
-	}
-
-	return (data & MT6375_VCOON_RVP_MASK) == MT6375_VCOON_RVP_MASK;
-}
-
-__maybe_unused static int mt6375_vcoon_is_ocp(struct mt6375_device *chip)
-{
-	int rc;
-	unsigned int data;
-
-	rc = regmap_read(chip->rmap, MT6375_TCPC_V10_REG_FAULT_STATUS, &data);
-	if (rc < 0) {
-		chg_err("failed to 0x%02x, rc=%d\n", MT6375_TCPC_V10_REG_FAULT_STATUS,
-			rc);
-		return rc;
-	}
-
-	return (data & MT6375_VCOON_OCP_MASK) == MT6375_VCOON_OCP_MASK;
-}
-
-__maybe_unused static int mt6375_vcoon_is_ovp(struct mt6375_device *chip)
-{
-	int rc;
-	unsigned int data;
-
-	rc = regmap_read(chip->rmap, MT6375_REG_MTINT2, &data);
-	if (rc < 0) {
-		chg_err("failed to 0x%02x, rc=%d\n", MT6375_REG_MTINT2, rc);
-		return rc;
-	}
-
-	return (data & MT6375_VCOON_OVP_MASK) == MT6375_VCOON_OVP_MASK;
-}
 
 static int mt6375_vbus_is_error(struct mt6375_device *chip)
 {

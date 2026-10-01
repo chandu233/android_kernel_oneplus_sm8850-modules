@@ -24,6 +24,7 @@
 #include <oplus_chg_monitor.h>
 #include <oplus_mms.h>
 #include <oplus_mms_wired.h>
+#include <oplus_dischg_boost.h>
 
 /**********************************************************************
 * wls rx APIs:
@@ -955,6 +956,7 @@ int oplus_chg_wls_nor_get_input_vol(struct oplus_chg_ic_dev *nor_ic, int *vol_mv
 int oplus_chg_wls_nor_set_boost_en(struct oplus_chg_ic_dev *nor_ic, bool en)
 {
 	int rc;
+	struct oplus_mms *dischg_boost_topic;
 
 	if (nor_ic == NULL) {
 		chg_err("nor_ic is NULL!\n");
@@ -966,6 +968,11 @@ int oplus_chg_wls_nor_set_boost_en(struct oplus_chg_ic_dev *nor_ic, bool en)
 		chg_err("set boost %s error, rc=%d\n", en ? "enable" : "disable", rc);
 		return rc;
 	}
+
+	dischg_boost_topic = oplus_mms_get_by_name("dischg_boost");
+	if (dischg_boost_topic)
+		oplus_boost_set_fam_en(dischg_boost_topic, en);
+	chg_info("oplus_boost_set_fam_en %d!!\n", en);
 
 	return 0;
 }

@@ -1,5 +1,7 @@
 ccflags-y += -Werror=parentheses
 
+test-kit-objs += test-kit-core.o
+test-kit-objs += test-kit-unisoc.o
 obj-$(CONFIG_OPLUS_CHG_TEST_KIT) += test-kit.o
 
 subdir-ccflags-y += -I$(srctree)/drivers/pinctrl/mediatek

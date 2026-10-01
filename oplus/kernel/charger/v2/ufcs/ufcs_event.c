@@ -239,6 +239,8 @@ struct ufcs_msg *ufcs_unpack_msg(struct ufcs_class *class, const u8 *buf, int le
 		}
 		break;
 	case UFCS_DATA_MSG:
+		if (len < msg_size + 1)
+			goto err;
 		msg->data_msg.command = buf[MSG_DATA_INDEX];
 		msg->data_msg.length = buf[MSG_DATA_INDEX + 1];
 		if (msg->data_msg.length + msg_size + 1 != len) {
@@ -247,7 +249,8 @@ struct ufcs_msg *ufcs_unpack_msg(struct ufcs_class *class, const u8 *buf, int le
 			goto err;
 		}
 		memcpy(msg->data_msg.data, &buf[MSG_DATA_INDEX + 2], msg->data_msg.length);
-		ufcs_data_msg_init(&msg->data_msg);
+		if (ufcs_data_msg_init(&msg->data_msg) < 0)
+			goto err;
 		if (config->check_crc) {
 			msg->crc = buf[MSG_DATA_INDEX + 2 + msg->data_msg.length];
 			crc = crc8_calculate(buf, MSG_DATA_INDEX + 1 + msg->data_msg.length);
@@ -307,6 +310,7 @@ static int ufcs_pack_msg(struct ufcs_class *class, struct ufcs_msg *msg, u8 *buf
 	unsigned char crc;
 	u16 head;
 	int msg_size;
+	u8 data_msg[UFCS_DATA_MSG_DATA_SIZE_MAX];
 
 	config = &class->config;
 	if (config->check_crc)
@@ -337,8 +341,10 @@ static int ufcs_pack_msg(struct ufcs_class *class, struct ufcs_msg *msg, u8 *buf
 		}
 		buf[index++] = msg->data_msg.command;
 		buf[index++] = msg->data_msg.length;
+		memmove(data_msg, msg->data_msg.data, msg->data_msg.length);
 		ufcs_data_msg_pack(&msg->data_msg);
-		memcpy(&buf[index], msg->data_msg.data, msg->data_msg.length);
+		memmove(&buf[index], msg->data_msg.data, msg->data_msg.length);
+		memmove(msg->data_msg.data, data_msg, msg->data_msg.length);
 		index += msg->data_msg.length;
 		break;
 	case UFCS_VENDOR_MSG:
@@ -470,6 +476,8 @@ retry:
 		case UFCS_VENDOR_MSG:
 			mutex_unlock(&class->sender.lock);
 			rc = ufcs_send_ctrl_msg_soft_reset(class);
+			if (class->ufcs->ops->clr_rx_buf)
+				class->ufcs->ops->clr_rx_buf(class->ufcs);
 			if (rc < 0) {
 				ufcs_err("send soft reset error, rc=%d\n", rc);
 				return -EIO;
@@ -580,6 +588,9 @@ static void ufcs_check_exit_ufcs_ack(struct ufcs_class *class, unsigned int dev_
 static int ufcs_check_error_info(struct ufcs_class *class, unsigned int dev_err_flag)
 {
 	struct ufcs_msg_sender *sender;
+	int rc;
+	struct ufcs_dev *ufcs = class->ufcs;
+	u8 buf[UFCS_MSG_SIZE_MAX];
 
 	sender = &class->sender;
 
@@ -590,7 +601,7 @@ static int ufcs_check_error_info(struct ufcs_class *class, unsigned int dev_err_
 
 	ufcs_check_exit_ufcs_ack(class, dev_err_flag);
 
-	if ((dev_err_flag & BIT(UFCS_HW_ERR_HARD_RESET)) && !class->exit_ufcs_ack_received) {
+	if (!class->cable_accpet && (dev_err_flag & BIT(UFCS_HW_ERR_HARD_RESET)) && !class->exit_ufcs_ack_received) {
 		if (class->start_cable_detect) {
 			ufcs_send_state(UFCS_NOTIFY_CABLE_HW_RESET, NULL);
 			ufcs_err("cable hard reset\n");
@@ -647,6 +658,13 @@ static int ufcs_check_error_info(struct ufcs_class *class, unsigned int dev_err_
 		}
 	} else {
 		if (!(dev_err_flag & BIT(UFCS_RECV_ERR_DATA_READY))) {
+			if ((dev_err_flag & BIT(UFCS_RECV_ERR_BUFF_BUSY))) {
+				rc = ufcs->ops->read_msg(ufcs, buf, sizeof(buf));
+				if (rc < 0) {
+					ufcs_err("buff busy, read ufcs msg error, rc=%d\n", rc);
+					return rc;
+				}
+			}
 			ufcs_err("sent packet complete = 0 && data ready = 0\n");
 			goto err;
 		}

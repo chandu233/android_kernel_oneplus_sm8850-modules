@@ -43,6 +43,8 @@ struct test_kit_typec_port_info {
 struct test_kit_soc_gpio_info {
 	struct gpio_chip *chip;
 	const char *name;
+	const char *pin_comm_name;
+	const char *pin_misc_name;
 	int num;
 	bool is_out;
 	bool is_high;
@@ -62,6 +64,8 @@ bool test_kit_qcom_soc_gpio_test(struct test_feature *feature,
 				 char *buf, size_t len);
 bool test_kit_mtk_soc_gpio_test(struct test_feature *feature,
 				 char *buf, size_t len);
+bool test_kit_unisoc_soc_gpio_test(struct test_feature *feature,
+				 char *buf, size_t len);
 int test_kit_reg_typec_port_check(test_kit_typec_port_check_func_t func);
 void test_kit_unreg_typec_port_check(void);
 int test_kit_reg_qcom_soc_gpio_check(test_kit_gpio_check_func_t func);
@@ -74,6 +78,7 @@ int test_kit_reg_mtk_spmi_gpio_check(test_kit_gpio_check_func_t func);
 void test_kit_unreg_mtk_spmi_gpio_check(void);
 bool test_kit_mtk_gpio_check(void *info, char *buf, size_t len, size_t *use_size);
 bool test_kit_qcom_gpio_check(void *info, char *buf, size_t len, size_t *use_size);
+bool test_kit_unisoc_gpio_check(void *info, char *buf, size_t len, size_t *use_size);
 #else /* CONFIG_OPLUS_CHG_TEST_KIT */
 inline static struct test_feature *
 test_feature_register(const struct test_feature_cfg *cfg, void *private_data)
@@ -92,6 +97,12 @@ inline static bool test_kit_qcom_soc_gpio_test(
 }
 
 inline static bool test_kit_mtk_soc_gpio_test(struct test_feature *feature,
+				 char *buf, size_t len)
+{
+	return false;
+}
+
+inline static bool test_kit_unisoc_soc_gpio_test(struct test_feature *feature,
 				 char *buf, size_t len)
 {
 	return false;

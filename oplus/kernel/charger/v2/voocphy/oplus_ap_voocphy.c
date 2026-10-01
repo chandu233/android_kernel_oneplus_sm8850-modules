@@ -5867,6 +5867,16 @@ static int oplus_voocphy_curr_event_handle(struct device *dev, unsigned long dat
 				else
 					oplus_voocphy_set_slave_chg_pmid2out(chip, true, SETTING_REASON_VOOC);
 			}
+		} else if (chip->chip_id == CHIP_ID_SC6607A) {
+			pmid2out_status = oplus_voocphy_get_chg_pmid2out(chip);
+			voocphy_err("sc6607a pmid2out 600mv = %d, chip->master_cp_ichg = %d\n", pmid2out_status, chip->master_cp_ichg);
+			if (pmid2out_status == false && chip->master_cp_ichg > 500) {
+				voocphy_err("IBUS > 500mA set pmid2vout 600mv !\n");
+				if (chip->adapter_type == ADAPTER_SVOOC)
+					oplus_voocphy_set_chg_pmid2out(chip, true, SETTING_REASON_SVOOC);
+				else
+					oplus_voocphy_set_chg_pmid2out(chip, true, SETTING_REASON_VOOC);
+			}
 		}
 	}
 
