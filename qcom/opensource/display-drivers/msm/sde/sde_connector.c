@@ -4987,11 +4987,6 @@ int sde_connector_register_custom_event(struct sde_kms *kms,
 		}
 #endif /* OPLUS_FEATURE_DISPLAY */
 		break;
-#ifdef OPLUS_FEATURE_DISPLAY
-	case DRM_EVENT_TP_TOUCHDOWN:
-		ret = 0;
-		break;
-#endif /* OPLUS_FEATURE_DISPLAY */
 	case DRM_EVENT_SSR:
 		if (!conn_drm) {
 			SDE_ERROR("invalid connector\n");
@@ -5033,11 +5028,6 @@ int sde_connector_event_notify(struct drm_connector *connector, uint32_t type,
 #ifdef OPLUS_FEATURE_DISPLAY
 	case DRM_EVENT_TP_TOUCHDOWN:
 #endif /* OPLUS_FEATURE_DISPLAY */
-		break;
-#ifdef OPLUS_FEATURE_DISPLAY
-	case DRM_EVENT_TP_TOUCHDOWN:
-#endif /* OPLUS_FEATURE_DISPLAY */
-		ret = 0;
 		break;
 	case DRM_EVENT_SSR:
 		c_conn = to_sde_connector(connector);
