@@ -470,6 +470,7 @@ struct hbp_device *hbp_device_create(void *priv,
 	hbp_dev->pen_ck = devm_clk_get(hbp_dev->dev, hbp_dev->clk_name);
 	if (IS_ERR(hbp_dev->pen_ck)) {
 		hbp_err("failed to get %s.\n", hbp_dev->clk_name);
+		hbp_dev->pen_ck = NULL;
 	}
 
 	return hbp_dev;
