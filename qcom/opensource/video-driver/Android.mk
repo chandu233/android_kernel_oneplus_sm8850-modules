@@ -63,6 +63,7 @@ include $(CLEAR_VARS)
 # For incremental compilation
 LOCAL_SRC_FILES           := $(wildcard $(LOCAL_PATH)/**/*) $(wildcard $(LOCAL_PATH)/*)
 LOCAL_MODULE              := msm_video.ko
+LOCAL_MULTILIB := first
 LOCAL_MODULE_KBUILD_NAME  := msm_video/msm_video.ko
 LOCAL_MODULE_TAGS         := optional
 LOCAL_MODULE_DEBUG_ENABLE := true
