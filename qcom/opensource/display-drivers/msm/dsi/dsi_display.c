@@ -4855,7 +4855,6 @@ static bool dsi_display_is_seamless_dfps_possible(
 				tgt->timing.h_back_porch);
 		if (dfps_type != DSI_DFPS_IMMEDIATE_HV_P)
 			return false;
-		return false;
 	}
 
 	if (cur->timing.h_sync_width != tgt->timing.h_sync_width) {
@@ -5617,15 +5616,17 @@ static int dsi_display_get_dfps_timing(struct dsi_display *display,
 	case DSI_DFPS_IMMEDIATE_HV_P:
 		if (i < 0)
 			break;
-
-		if (!dfps_caps.dfps_hfp_list) {
-			DSI_ERR("dfps_caps.dfps_hfp_list is null ptr!");
+		if (i >= dfps_caps.dfps_list_len || !dfps_caps.dfps_hfp_list ||
+			!dfps_caps.dfps_hbp_list || !dfps_caps.dfps_hpw_list ||
+			!dfps_caps.dfps_vbp_list || !dfps_caps.dfps_vfp_list ||
+			!dfps_caps.dfps_vpw_list) {
+			rc = -EINVAL;
 			break;
 		}
 
-		adj_mode->timing.h_front_porch = dfps_caps.dfps_hfp_list[i] *= display->ctrl_count;
-		adj_mode->timing.h_back_porch = dfps_caps.dfps_hbp_list[i] *= display->ctrl_count;
-		adj_mode->timing.h_sync_width = dfps_caps.dfps_hpw_list[i] *= display->ctrl_count;
+		adj_mode->timing.h_front_porch = dfps_caps.dfps_hfp_list[i] * display->ctrl_count;
+		adj_mode->timing.h_back_porch = dfps_caps.dfps_hbp_list[i] * display->ctrl_count;
+		adj_mode->timing.h_sync_width = dfps_caps.dfps_hpw_list[i] * display->ctrl_count;
 		adj_mode->timing.v_back_porch = dfps_caps.dfps_vbp_list[i];
 		adj_mode->timing.v_front_porch = dfps_caps.dfps_vfp_list[i];
 		adj_mode->timing.v_sync_width = dfps_caps.dfps_vpw_list[i];
