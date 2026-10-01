@@ -7,6 +7,8 @@
 static DEFINE_MUTEX(magcvr_stats_by_index_lock);
 static struct magnetic_cover_info *g_magcvr_info_by_index[MAGCVR_STATS_INDEX_MAX];
 
+#define MAGCVR_PROC_NODE_NAME "magcvr_healthinfo"
+#define MAGCVR_PROC_NODE_LEN (sizeof(MAGCVR_PROC_NODE_NAME) - 1)
 // fault injection start
 void fault_injection_check(struct magnetic_cover_info *magcvr_info, char *token)
 {
@@ -958,7 +960,6 @@ int interface_for_proc_init(struct magnetic_cover_info *magcvr_info)
 			true,
 		},
 	};
-
 	if (magcvr_info->iic_client && magcvr_info->mc_ops->chip_init) {
 		is_i2c_chip = true;
 	}
@@ -985,6 +986,12 @@ int interface_for_proc_init(struct magnetic_cover_info *magcvr_info)
 
 	for (i = 0; i < ARRAY_SIZE(magcvr_proc_node); i++) {
 		if (magcvr_proc_node[i].is_support) {
+			if (strncmp(magcvr_proc_node[i].name, MAGCVR_PROC_NODE_NAME, MAGCVR_PROC_NODE_LEN) == 0) {
+				if (!is_i2c_chip) {
+					magcvr_proc_node[i].is_created = false;
+					continue;
+				}
+			}
 			magcvr_proc_node[i].node =
                 proc_create_data(magcvr_proc_node[i].name,
                                 magcvr_proc_node[i].mode,
