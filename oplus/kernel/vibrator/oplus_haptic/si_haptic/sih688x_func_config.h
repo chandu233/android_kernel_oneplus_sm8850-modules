@@ -19,7 +19,6 @@
 #define HAPTIC_CONFIG_FILE_INDEX				0
 #define HAPTIC_CONFIG_FILE_BUF_LEN				64
 #define HAPTIC_CONFIG_FILE_PATH					"mnt"
-#define HAPTIC_CONFIG_MAX_REG_NUM				256
 #define HAPTIC_F0_FILE_PATH_LEN					64
 #define HAPTIC_F0_FILE_PATH					"/data"
 
@@ -29,12 +28,6 @@ typedef enum reg_operation {
 	OPERATION_BIT = 2,
 	OPERATION_END = 3,
 } reg_op_e;
-
-typedef enum reg_func_type {
-	REG_FUNC_CONT = 0,
-	REG_FUNC_RL = 1,
-	REG_FUNC_VBAT = 2,
-} reg_func_type_e;
 
 typedef struct haptic_reg_format {
 	uint8_t reg_addr;
@@ -72,5 +65,5 @@ extern reg_format_t detect_rl_config_list[];
 extern reg_format_t detect_vbat_config_list[];
 
 void sih_load_reg_config(sih_haptic_t *sih_haptic, uint8_t func_type);
-int sih_lra_config_load(sih_haptic_t *sih_haptic);
+int sih688x_config_load(sih_haptic_t *sih_haptic);
 #endif

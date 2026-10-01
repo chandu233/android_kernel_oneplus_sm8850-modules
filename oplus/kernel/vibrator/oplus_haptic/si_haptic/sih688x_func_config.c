@@ -774,13 +774,12 @@ void sih_reg_config_parse(sih_haptic_t *sih_haptic,
 	for (i = 0; i < reg_config->reg_num; i++) {
 		reg_addr = reg_config->reg_cont[i].reg_addr;
 		reg_value = reg_config->reg_cont[i].reg_value;
-		haptic_regmap_write(sih_haptic->regmapp.regmapping,
-			reg_addr, SIH_I2C_OPERA_BYTE_ONE, &reg_value);
+		i2c_write_bytes(sih_haptic, reg_addr, &reg_value, SIH_I2C_OPERA_BYTE_ONE);
 		//hp_info("%s:0x%02x:0x%02x\n", __func__, reg_addr, reg_value);
 	}
 }
 
-int sih_lra_config_load(sih_haptic_t *sih_haptic)
+int sih688x_config_load(sih_haptic_t *sih_haptic)
 {
 	int i;
 
