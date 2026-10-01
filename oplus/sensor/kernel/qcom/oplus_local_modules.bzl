@@ -117,17 +117,6 @@ def define_oplus_local_modules():
         ko_deps = smem_ko_deps + qmi_ko_deps,
     )
 
-    define_oplus_ddk_module(
-        name = "oplus_data_record",
-        srcs = native.glob([
-            "oplus_data_record/*.h",
-            "oplus_data_record/*.c",
-        ]),
-        includes = ["oplus_data_record"],
-        local_defines = ["CFG_OPLUS_ARCH_IS_QCOM"],
-        ko_deps = smem_ko_deps + oplus_bsp_kfb_ko_deps,
-    )
-
     ddk_copy_to_dist_dir(
         name = "oplus_bsp_sensor",
         module_list = [
@@ -137,7 +126,6 @@ def define_oplus_local_modules():
             "oplus_sensor_interact",
             "oplus_sensor_feedback",
             "pseudo_sensor",
-            "oplus_data_record",
         ],
         conditional_builds = {
             "pseudo_sensor": {
