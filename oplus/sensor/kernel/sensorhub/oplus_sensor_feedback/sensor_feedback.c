@@ -33,6 +33,10 @@
 #include <soc/oplus/system/oplus_trace_sensor.h>
 static bool enable_report = false;
 #endif
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_TRACE_SENSOR_ERR)
+#include "oplus_sensor_err/oplus_trace_sensor_err.h"
+static bool enable_report_err = true;
+#endif
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
 #ifndef PDE_DATA
@@ -267,7 +271,6 @@ static ssize_t adsp_notify_store(struct device *dev,
 		node_type);
 
 	set_bit(THREAD_WAKEUP, (unsigned long *)&sensor_fb_cxt->wakeup_flag);
-	/*wake_up_interruptible(&sensor_fb_cxt->wq);*/
 	wake_up(&sensor_fb_cxt->wq);
 	return count;
 }
@@ -284,7 +287,6 @@ int scp_notify_store(uint16_t node_type, uint16_t adsp_event_counts)
 		node_type);
 
 	set_bit(THREAD_WAKEUP, (unsigned long *)&sensor_fb_cxt->wakeup_flag);
-	/*wake_up_interruptible(&sensor_fb_cxt->wq);*/
 	wake_up(&sensor_fb_cxt->wq);
 	return 0;
 }
@@ -364,7 +366,6 @@ static ssize_t test_id_store(struct device *dev,
 	pr_info("test_id_store event_id = %d, event_data=%d \n", event_id, event_data);
 
 	set_bit(THREAD_WAKEUP, (unsigned long *)&sensor_fb_cxt->wakeup_flag);
-	/*wake_up_interruptible(&sensor_fb_cxt->wq);*/
 	wake_up(&sensor_fb_cxt->wq);
 	return count;
 }
@@ -383,10 +384,7 @@ static ssize_t sensor_list_show(struct device *dev,
 	return snprintf(buf, PAGE_SIZE, "phy = 0x%x, virt = 0x%x\n", sensor_list[0],
 			sensor_list[1]);
 }
-log_center_t *oplus_get_log_center(void)
-{
-	return &g_log_center;
-}
+
 static int oplus_log_configure_ap(int sensor_type, log_level_t log_level)
 {
 	struct sensor_fb_cxt *sensor_fb_cxt = g_sensor_fb_cxt;
@@ -559,7 +557,7 @@ static int read_data_from_share_mem(struct sensor_fb_cxt *sensor_fb_cxt)
 		return -2;
 	}
 
-	memcpy((void *)&sensor_fb_cxt->fb_smem, (void *)fb_event,
+	memmove((void *)&sensor_fb_cxt->fb_smem, (void *)fb_event,
 		sizeof(sensor_fb_cxt->fb_smem));
 	return 0;
 }
@@ -635,6 +633,13 @@ static int parse_shr_info(struct sensor_fb_cxt *sensor_fb_cxt)
 			oplus_trace_sensor_fault_report(g_fb_conf[index].event_id,
 					g_fb_conf[index].fb_event_id, g_fb_conf[index].fb_field,
 					sensor_fb_cxt->fb_smem.event[count].count);
+		}
+#endif
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_TRACE_SENSOR_ERR)
+		if (enable_report_err) {
+			oplus_trace_sensor_err_report(g_fb_conf[index].event_id,
+					g_fb_conf[index].fb_event_id, g_fb_conf[index].fb_field,
+					payload);
 		}
 #endif
 	}

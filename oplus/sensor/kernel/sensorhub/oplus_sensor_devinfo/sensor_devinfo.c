@@ -386,7 +386,7 @@ static void get_accgyro_cali_version(void)
 		return;
 	} else {
 		DEVINFO_LOG("acc range x y z [%u, %u, %u]", acc_thrd[0], acc_thrd[1], acc_thrd[2]);
-		sprintf(acc_cali_range, "%u %u %u", acc_thrd[0], acc_thrd[1], acc_thrd[2]);
+		snprintf(acc_cali_range, sizeof(acc_cali_range), "%u %u %u", acc_thrd[0], acc_thrd[1], acc_thrd[2]);
 	}
 }
 
@@ -458,7 +458,7 @@ static void choose_special_gold_cct_value(int support_panel)
 			gold_cct[0], gold_cct[1], gold_cct[2],
 			gold_cct[3], gold_cct[4], gold_cct[5]);
 
-		sprintf(gold_cct_3k, "%u %u %u %u %u %u",
+		snprintf(gold_cct_3k, sizeof(gold_cct_3k), "%u %u %u %u %u %u",
 			 gold_cct[0], gold_cct[1], gold_cct[2],
 			 gold_cct[3], gold_cct[4], gold_cct[5]);
 	}
@@ -494,7 +494,7 @@ static void choose_special_gold_cct_value(int support_panel)
 			gold_cct[0], gold_cct[1], gold_cct[2],
 			gold_cct[3], gold_cct[4], gold_cct[5]);
 
-		sprintf(gold_cct_6k, "%u %u %u %u %u %u",
+		snprintf(gold_cct_6k, sizeof(gold_cct_6k), "%u %u %u %u %u %u",
 			 gold_cct[0], gold_cct[1], gold_cct[2],
 			 gold_cct[3], gold_cct[4], gold_cct[5]);
 	}
@@ -555,7 +555,7 @@ static void get_front_cct_feature(void)
 				gold_cct[0], gold_cct[1], gold_cct[2],
 				gold_cct[3], gold_cct[4], gold_cct[5]);
 
-			sprintf(gold_cct_3k, "%u %u %u %u %u %u",
+			snprintf(gold_cct_3k, sizeof(gold_cct_3k), "%u %u %u %u %u %u",
 				 gold_cct[0], gold_cct[1], gold_cct[2],
 				 gold_cct[3], gold_cct[4], gold_cct[5]);
 		}
@@ -591,7 +591,7 @@ static void get_front_cct_feature(void)
 				gold_cct[0], gold_cct[1], gold_cct[2],
 				gold_cct[3], gold_cct[4], gold_cct[5]);
 
-			sprintf(gold_cct_6k, "%u %u %u %u %u %u",
+			snprintf(gold_cct_6k, sizeof(gold_cct_6k), "%u %u %u %u %u %u",
 				 gold_cct[0], gold_cct[1], gold_cct[2],
 				 gold_cct[3], gold_cct[4], gold_cct[5]);
 		}
@@ -602,14 +602,14 @@ static void get_front_cct_feature(void)
 	ret = oplus_get_dts_feature(parent_node, "light", "gold_cct_factor", gold_cct);
 	if (ret < 0) {
 		DEVINFO_LOG("gold_cct_factor fail, use default\n");
-		sprintf(gold_cct_factor, "%d %d %d %d %d %d", 1001, 1001, 1001, 1001, 1001, 1001);
+		snprintf(gold_cct_factor, sizeof(gold_cct_factor), "%d %d %d %d %d %d", 1001, 1001, 1001, 1001, 1001, 1001);
 		return;
 	} else {
 		DEVINFO_LOG("gold_cct_factor [%u, %u, %u, %u, %u, %u]",
 			gold_cct[0], gold_cct[1], gold_cct[2],
 			gold_cct[3], gold_cct[4], gold_cct[5]);
 
-		sprintf(gold_cct_factor, "%u %u %u %u %u %u",
+		snprintf(gold_cct_factor, sizeof(gold_cct_factor), "%u %u %u %u %u %u",
 			 gold_cct[0], gold_cct[1], gold_cct[2],
 			 gold_cct[3], gold_cct[4], gold_cct[5]);
 	}
@@ -800,7 +800,7 @@ static void get_gold_rear_spectrum(void)
 			gold_spectrum[8], gold_spectrum[9], gold_spectrum[10], gold_spectrum[11],
 			gold_spectrum[12], gold_spectrum[13]);
 
-		sprintf(gold_rear_spectrum_3k, "%u %u %u %u %u %u %u %u %u %u %u %u %u %u",
+		snprintf(gold_rear_spectrum_3k, sizeof(gold_rear_spectrum_3k), "%u %u %u %u %u %u %u %u %u %u %u %u %u %u",
 			gold_spectrum[0], gold_spectrum[1], gold_spectrum[2], gold_spectrum[3],
 			gold_spectrum[4], gold_spectrum[5], gold_spectrum[6], gold_spectrum[7],
 			gold_spectrum[8], gold_spectrum[9], gold_spectrum[10], gold_spectrum[11],
@@ -820,7 +820,7 @@ static void get_gold_rear_spectrum(void)
 			gold_spectrum[8], gold_spectrum[9], gold_spectrum[10], gold_spectrum[11],
 			gold_spectrum[12], gold_spectrum[13]);
 
-		sprintf(gold_rear_spectrum_6k, "%u %u %u %u %u %u %u %u %u %u %u %u %u %u",
+		snprintf(gold_rear_spectrum_6k, sizeof(gold_rear_spectrum_6k), "%u %u %u %u %u %u %u %u %u %u %u %u %u %u",
 			gold_spectrum[0], gold_spectrum[1], gold_spectrum[2], gold_spectrum[3],
 			gold_spectrum[4], gold_spectrum[5], gold_spectrum[6], gold_spectrum[7],
 			gold_spectrum[8], gold_spectrum[9], gold_spectrum[10], gold_spectrum[11],
@@ -840,7 +840,7 @@ static void get_gold_rear_spectrum(void)
 			gold_spectrum[8], gold_spectrum[9], gold_spectrum[10], gold_spectrum[11],
 			gold_spectrum[12], gold_spectrum[13]);
 
-		sprintf(g_gold_rear_spectrum_factor_512gain, "%u %u %u %u %u %u %u %u %u %u %u %u %u %u",
+		snprintf(g_gold_rear_spectrum_factor_512gain, sizeof(g_gold_rear_spectrum_factor_512gain), "%u %u %u %u %u %u %u %u %u %u %u %u %u %u",
 			gold_spectrum[0], gold_spectrum[1], gold_spectrum[2], gold_spectrum[3],
 			gold_spectrum[4], gold_spectrum[5], gold_spectrum[6], gold_spectrum[7],
 			gold_spectrum[8], gold_spectrum[9], gold_spectrum[10], gold_spectrum[11],
@@ -860,7 +860,7 @@ static void get_gold_rear_spectrum(void)
 			gold_spectrum[8], gold_spectrum[9], gold_spectrum[10], gold_spectrum[11],
 			gold_spectrum[12], gold_spectrum[13]);
 
-		sprintf(g_gold_rear_spectrum_factor_2048gain, "%u %u %u %u %u %u %u %u %u %u %u %u %u %u",
+		snprintf(g_gold_rear_spectrum_factor_2048gain, sizeof(g_gold_rear_spectrum_factor_2048gain), "%u %u %u %u %u %u %u %u %u %u %u %u %u %u",
 			gold_spectrum[0], gold_spectrum[1], gold_spectrum[2], gold_spectrum[3],
 			gold_spectrum[4], gold_spectrum[5], gold_spectrum[6], gold_spectrum[7],
 			gold_spectrum[8], gold_spectrum[9], gold_spectrum[10], gold_spectrum[11],
@@ -885,7 +885,7 @@ static void get_fold_hall_limit(void)
 			fold_hall_limit[6], fold_hall_limit[7],
 			fold_hall_limit[8], fold_hall_limit[9]);
 
-		sprintf(g_fold_hall_limit, "%u %u %u %u %u %u %u %u %u %u",
+		snprintf(g_fold_hall_limit, sizeof(g_fold_hall_limit), "%u %u %u %u %u %u %u %u %u %u",
 			fold_hall_limit[0], fold_hall_limit[1],
 			fold_hall_limit[2], fold_hall_limit[3],
 			fold_hall_limit[4], fold_hall_limit[5],
@@ -908,7 +908,7 @@ static void get_gold_rear_cct(void)
 			gold_rear_cct[0], gold_rear_cct[1], gold_rear_cct[2],
 			gold_rear_cct[3], gold_rear_cct[4], gold_rear_cct[5]);
 
-		sprintf(gold_rear_cct_3k, "%u %u %u %u %u %u",
+		snprintf(gold_rear_cct_3k, sizeof(gold_rear_cct_3k), "%u %u %u %u %u %u",
 			 gold_rear_cct[0], gold_rear_cct[1], gold_rear_cct[2],
 			 gold_rear_cct[3], gold_rear_cct[4], gold_rear_cct[5]);
 	}
@@ -924,7 +924,7 @@ static void get_gold_rear_cct(void)
 			gold_rear_cct[0], gold_rear_cct[1], gold_rear_cct[2],
 			gold_rear_cct[3], gold_rear_cct[4], gold_rear_cct[5]);
 
-		sprintf(gold_rear_cct_6k, "%u %u %u %u %u %u",
+		snprintf(gold_rear_cct_6k, sizeof(gold_rear_cct_6k), "%u %u %u %u %u %u",
 			 gold_rear_cct[0], gold_rear_cct[1], gold_rear_cct[2],
 			 gold_rear_cct[3], gold_rear_cct[4], gold_rear_cct[5]);
 	}
@@ -934,14 +934,14 @@ static void get_gold_rear_cct(void)
 	ret = oplus_get_dts_feature(parent_node, "rear_cct", "gold_rear_cct_factor", gold_rear_cct);
 	if (ret < 0) {
 		DEVINFO_LOG("gold_rear_cct_factor fail, use default\n");
-		sprintf(gold_rear_cct_factor, "%d %d %d %d %d %d", 976, 994, 1038, 981, 920, 1001);
+		snprintf(gold_rear_cct_factor, sizeof(gold_rear_cct_factor), "%d %d %d %d %d %d", 976, 994, 1038, 981, 920, 1001);
 		return;
 	} else {
 		DEVINFO_LOG("gold_rear_cct_factor [%u, %u, %u, %u, %u, %u]",
 			gold_rear_cct[0], gold_rear_cct[1], gold_rear_cct[2],
 			gold_rear_cct[3], gold_rear_cct[4], gold_rear_cct[5]);
 
-		sprintf(gold_rear_cct_factor, "%u %u %u %u %u %u",
+		snprintf(gold_rear_cct_factor, sizeof(gold_rear_cct_factor), "%u %u %u %u %u %u",
 			 gold_rear_cct[0], gold_rear_cct[1], gold_rear_cct[2],
 			 gold_rear_cct[3], gold_rear_cct[4], gold_rear_cct[5]);
 	}
@@ -968,7 +968,7 @@ static void get_proximity_paras(void)
 	} else if (ret == g_multi_offset_level) {
 		DEVINFO_LOG("g_multi_offset_coef [%d %d %d]\n", multi_offset_coef[0],
 				multi_offset_coef[1], multi_offset_coef[2]);
-		sprintf(g_multi_offset_coef, "%d %d %d", multi_offset_coef[0],
+		snprintf(g_multi_offset_coef, sizeof(g_multi_offset_coef), "%d %d %d", multi_offset_coef[0],
 				multi_offset_coef[1], multi_offset_coef[2]);
 	} else {
 		DEVINFO_LOG("multi_oft_coef ret %d\n", ret);
@@ -1002,7 +1002,7 @@ static ssize_t parameter_proc_read(struct file *file, char __user *buf,
 	char page[512];
 	int len = 0;
 
-	len = sprintf(page, "{%s,\n %s,\n %s}", para_buf[0], para_buf[1], para_buf[2]);
+	len = snprintf(page, sizeof(page), "{%s,\n %s,\n %s}", para_buf[0], para_buf[1], para_buf[2]);
 
 	if ((para_buf[2][0] == '\0') && (para_buf[1][0] == '\0')) {
 		page[len - 4] = ' ';
@@ -1064,9 +1064,6 @@ static int get_msensor_parameter(struct device_node *ch_node, int num)
 	} else {
 		DEVINFO_LOG(" %s match project start, para_num = %d\n", ch_node->name, para_num);
 
-		/*sprintf(project, "%d", get_project());
-		DEVINFO_LOG("project %s\n", project);
-		*/
 		for_each_child_of_node(ch_node, para_ch_node) {
 			DEVINFO_LOG("parse %s", para_ch_node->name);
 			ret = of_property_read_string(ch_node, "match_projects", &match_project);
@@ -1090,23 +1087,23 @@ static int get_msensor_parameter(struct device_node *ch_node, int num)
 		}
 	}
 
-	if (!strcmp(libname, "mmc") || !strcmp(libname, "mxg")) { /*Memsic parameter need analyze*/
+	if (!strncmp(libname, "mmc", strlen(libname)) || !strncmp(libname, "mxg", strlen(libname))) { /*Memsic parameter need analyze*/
 		for (index = 0; index < 9; index++) {
 			temp_data = mag_data[2 * index];
-			sprintf(float_buf, "%c%d.%d%d%d%d", mag_data[2 * index + 1] ? '-' : ' ',
+			snprintf(float_buf, sizeof(float_buf), "%c%d.%d%d%d%d", mag_data[2 * index + 1] ? '-' : ' ',
 				temp_data / 10000, temp_data % 10000 / 1000, temp_data % 1000 / 100, temp_data % 100 / 10,
 				temp_data % 10);
-			sprintf(para_buf[num], "%s,%s", temp_buf, float_buf);
-			strcpy(temp_buf, para_buf[num]);
+			snprintf(para_buf[num], sizeof(para_buf[num]), "%s,%s", temp_buf, float_buf);
+			strncpy(temp_buf, para_buf[num], sizeof(temp_buf));
 		}
 		temp_buf[0] = ' ';
-		sprintf(para_buf[num], "\"%s\":[%s]", libname, temp_buf);
-	} else if (!strcmp(libname, "akm")) {
+		snprintf(para_buf[num], sizeof(para_buf[num]), "\"%s\":[%s]", libname, temp_buf);
+	} else if (!strncmp(libname, "akm", strlen(libname))) {
 		for (index = 1; index < elements; index++) {
-			sprintf(para_buf[num], "%s,%d", temp_buf, mag_data[index]);
-			strcpy(temp_buf, para_buf[num]);
+			snprintf(para_buf[num], sizeof(para_buf[num]), "%s,%d", temp_buf, mag_data[index]);
+			strncpy(temp_buf, para_buf[num], sizeof(temp_buf));
 		}
-		sprintf(para_buf[num], "\"%s\":[%u%s]", libname, mag_data[0], temp_buf);
+		snprintf(para_buf[num], sizeof(para_buf[num]), "\"%s\":[%u%s]", libname, mag_data[0], temp_buf);
 	}
 	return 0;
 }
@@ -1320,6 +1317,12 @@ static ssize_t sensor_feature_write(struct file *filp, const char *ubuf, size_t 
 		case CCT_CLOCK_MODE:
 			ret = si->send_factory_mode(SENSOR_TYPE_FRONT_CCT, 2, &result);
 			break;
+		case CCT_LOCK_GAIN_MODE:
+			ret = si->send_factory_mode(SENSOR_TYPE_FRONT_CCT, 3, &result);
+			break;
+		case CCT_UNLOCK_GAIN_MODE:
+			ret = si->send_factory_mode(SENSOR_TYPE_FRONT_CCT, 4, &result);
+			break;
 		case HINGE_DETECT_NORMAL_MODE:
 			ret = si->send_factory_mode(SENSOR_TYPE_HINGE_DETECT, 0, &result);
 			break;
@@ -1382,13 +1385,6 @@ static ssize_t sensor_feature_write(struct file *filp, const char *ubuf, size_t 
 		g_reg_value = val;
 
 		DEVINFO_LOG("g_reg_add = 0x%x g_reg_val = 0x%x\n", g_reg_address, g_reg_value);
-		/*if (si && si->send_reg_config) {
-		 *	ret = si->send_reg_config(SENSOR_TYPE_SAR);
-		 *}
-		 *if (ret < 0) {
-		 *	DEVINFO_LOG("send sar config fail\n");
-		 *}
-		 */
 		break;
 	case CONFIG_ALSPS_REG:
 		sscanf(buf, "%u %u", &g_alsps_reg_addr, &g_alsps_reg_val);

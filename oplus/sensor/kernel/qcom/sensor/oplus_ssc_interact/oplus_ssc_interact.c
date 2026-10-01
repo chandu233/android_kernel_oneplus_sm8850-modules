@@ -29,8 +29,6 @@
 
 #define FIFO_SIZE 32
 
-/*static DECLARE_KFIFO_PTR(test, struct fifo_frame);*/
-
 #if IS_ENABLED(CONFIG_OPLUS_SENSOR_DRM_PANEL_NOTIFY)
 /* to do */
 #else
@@ -45,7 +43,6 @@ static void ssc_interactive_set_fifo(uint8_t type, uint16_t data)
 	struct fifo_frame fifo_fm;
 	struct ssc_interactive *ssc_cxt = g_ssc_cxt;
 	int ret = 0;
-	/*pr_info("type= %u, data=%d\n", type, data);*/
 	memset(&fifo_fm, 0, sizeof(struct fifo_frame));
 	fifo_fm.type = type;
 	fifo_fm.data = data;
@@ -293,11 +290,9 @@ static void ssc_interactive_set_brightness(enum panel_event_notifier_tag panel_t
 	}
 
 	if (brigtness == ssc_cxt->a_info.brightness) {
-		/* pr_info("brigtness=%d is the same\n", brigtness); */
 		spin_unlock(&ssc_cxt->rw_lock);
 		return;
 	}
-	/*pr_info("new brigtness=%d, brightness=%d\n", brigtness, ssc_cxt->a_info.brightness);*/
 
 	ssc_cxt->a_info.brightness = brigtness;
 	spin_unlock(&ssc_cxt->rw_lock);
@@ -423,8 +418,6 @@ static ssize_t screenshot_info_device_write(struct file *file, const char __user
 		return -EFAULT;
 	}
 
-	/* pr_err("screenshot_info_device_write: %s\n", tmp); */
-
 	sscanf(tmp, "%lld,%lld,%d,%d", &ss_info.start_ts, &ss_info.end_ts, &ss_info.index, &ss_info.info_type);
 
 	spin_lock(&ssc_cxt->rw_lock);
@@ -497,7 +490,7 @@ static ssize_t brightness_show(struct device *dev,
 
 	pr_info("brightness_show brightness=  %d\n", brightness);
 
-	return sprintf(buf, "%d\n", brightness);
+	return snprintf(buf, PAGE_SIZE, "%d\n", brightness);
 }
 
 
@@ -561,10 +554,6 @@ static void lcdinfo_callback(enum panel_event_notifier_tag panel_tag,
 		pr_err("Invalid notification\n");
 		return;
 	}
-
-	/* pr_err("Notification panel_type:%d, type:%d, data:%d",
-			panel_tag, notification->notif_type,
-			notification->notif_data.data); */
 
 	switch (notification->notif_type) {
 	case DRM_PANEL_EVENT_BACKLIGHT:
@@ -795,13 +784,6 @@ static void parse_br_level_info_dts(struct ssc_interactive *ssc_cxt,
 		if (brl_num > 0 && brl_num <= BRL_MAX_LEN) {
 			rc = of_property_read_u32_array(ch_node, "brl_thrd",
 					&ssc_cxt->brl_info.pri_brl_thrd[0], brl_num);
-
-			if (!rc) {
-				/*uint32_t cnt = 0;
-				for (cnt = 0; cnt < brl_num; cnt++) {
-					pr_info("primary pri_brl_%u: %u\n", cnt, ssc_cxt->brl_info.pri_brl_thrd[cnt]);
-				}*/
-			}
 		}
 
 		value = 0;
@@ -836,13 +818,6 @@ static void parse_br_level_info_dts(struct ssc_interactive *ssc_cxt,
 		if (brl_num > 0 && brl_num <= BRL_MAX_LEN) {
 			rc = of_property_read_u32_array(ch_node, "brl_thrd",
 					&ssc_cxt->brl_info.secd_brl_thrd[0], brl_num);
-
-			if (!rc) {
-				/*uint32_t cnt = 0;
-				for (cnt = 0; cnt < brl_num; cnt++) {
-					pr_info("secd_brl_%u: %u\n", cnt, ssc_cxt->brl_info.secd_brl_thrd[cnt]);
-				}*/
-			}
 		}
 
 		value = 0;

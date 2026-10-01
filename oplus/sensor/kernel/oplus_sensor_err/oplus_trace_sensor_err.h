@@ -1,5 +1,12 @@
-#ifndef __OPLUS_TRACE_SENSOR_H__
-#define __OPLUS_TRACE_SENSOR_H__
+/** Copyright (C), 2018-2024, OPLUS Mobile Comm Corp., Ltd.
+* Description: This header file defines the sensor error trace API and event ID enumeration.
+*              It provides the interface for reporting sensor error information to the kernel
+*              trace system. The trace event format matches oplusSensorErrToStatsd function.
+* Create: 2025-11-19
+*/
+
+#ifndef __OPLUS_TRACE_SENSOR_ERR_H__
+#define __OPLUS_TRACE_SENSOR_ERR_H__
 
 #if defined(CFG_OPLUS_ARCH_IS_MTK)
 enum sensor_fb_event_id {
@@ -288,7 +295,6 @@ enum sensor_fb_event_id {
 	HINGE_DETECT_MAIN_GYRO_DATA_LOST_ID = 760,
 	HINGE_DETECT_SUB_GYRO_INIT_FAIL_ID = 761,
 	HINGE_DETECT_SUB_GYRO_DATA_LOST_ID = 762,
-
 	/*790~799*/
 	FREE_FALL_TRIGGER_ID = 790,
 
@@ -376,10 +382,24 @@ enum sensor_fb_event_id {
 #define SENSOR_MEMORY_TYPE	  "10006"
 #endif
 
-#define SENSOR_FAULT_APP_ID         20120
-#define SENSOR_FAULT_LOG_TAG        "PSW_BSP_SENSOR"
+#define SENSOR_ERR_APP_ID         20120
+#define SENSOR_ERR_LOG_TAG        "PSW_BSP_SENSOR"
 
-int oplus_trace_sensor_fault_report(uint16_t event_id, char* fb_event_id, char* fb_field, uint32_t error_count);
-int oplus_trace_sensor_crash_report(char* subsys);
+/**
+ * oplus_trace_sensor_err_report - Report sensor error to trace
+ * @event_id: Event ID number for filtering (must be in allowed list)
+ * @fb_event_id: Event ID string
+ * @fb_field: Log type string
+ * @payload: Payload string
+ *
+ * This function reports sensor error information to the kernel trace system.
+ * The trace event will be named "sensor_err" and can be viewed via ftrace.
+ * The field order matches sensorErrRecordToStatsd function expectations.
+ * Only events with event_id in the allowed list will be reported.
+ * Uses SENSOR_ERR_APP_ID and SENSOR_ERR_LOG_TAG macros for app_id and log_tag.
+ *
+ * Returns: 0 on success, negative error code on failure
+ */
+int oplus_trace_sensor_err_report(uint16_t event_id, char* fb_event_id, char* fb_field, const char* payload);
 
 #endif

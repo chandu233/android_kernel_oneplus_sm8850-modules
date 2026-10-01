@@ -1,3 +1,4 @@
+load(":repo_paths.bzl", "modules_label")
 load("//build/kernel/kleaf:kernel.bzl", "ddk_headers")
 load(":oplus_modules_define.bzl", "define_oplus_ddk_module", "oplus_ddk_get_kernel_version", "bazel_support_platform")
 load(":oplus_modules_dist.bzl", "ddk_copy_to_dist_dir")
@@ -25,11 +26,25 @@ def define_oplus_local_modules():
             "//kernel_device_modules-{}/drivers/misc/mediatek/scp/include:scp_public_headers".format(kernel_version),
             "//kernel_device_modules-{}/drivers/misc/mediatek/scp/rv:ddk_public_headers".format(kernel_version),
             "//kernel_device_modules-{}/drivers/soc/oplus/dft/bazel:oplus_dft_headers".format(kernel_version),
+            modules_label("oplus/sensor/kernel:oplus_trace_sensor_err_headers"),
+        ]
+        oplus_trace_sensor_err_ko_deps = [
+            modules_label("oplus/sensor/kernel:oplus_trace_sensor_err"),
+        ]
+        oplus_local_defines = [
+            "CFG_OPLUS_ARCH_IS_MTK",
+            "CONFIG_OPLUS_FEATURE_FEEDBACK=1",
+            "CONFIG_OPLUS_FEATURE_TRACE_SENSOR_ERR=1",
         ]
     else :
         oplus_mtk_deps = []
         oplus_mtk_copts = []
         oplus_header_deps = []
+        oplus_trace_sensor_err_ko_deps = []
+        oplus_local_defines = [
+            "CFG_OPLUS_ARCH_IS_MTK",
+            "CONFIG_OPLUS_FEATURE_FEEDBACK=1",
+        ]
 
     define_oplus_ddk_module(
         name = "oplus_sensor_feedback",
@@ -38,13 +53,10 @@ def define_oplus_local_modules():
             "*.c",
         ]),
         includes = ["."],
-        local_defines = [
-            "CFG_OPLUS_ARCH_IS_MTK",
-            "CONFIG_OPLUS_FEATURE_FEEDBACK=1",
-        ],
+        local_defines = oplus_local_defines,
         header_deps = oplus_header_deps,
         copts = oplus_mtk_copts,
-        ko_deps = oplus_mtk_deps,
+        ko_deps = oplus_mtk_deps + oplus_trace_sensor_err_ko_deps,
     )
 
     ddk_copy_to_dist_dir(
