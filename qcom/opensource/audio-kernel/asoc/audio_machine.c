@@ -512,14 +512,17 @@ static int dmic_regulator_enable(struct dmic_supply_data *supply_data, bool enab
 				ret = regulator_set_voltage(supply_data->supply, supply_data->min_uV, supply_data->max_uV);
 				if (ret) {
 					pr_err("%s: regulator set vol fail, ret %d\n", __func__, ret);
+					supply_data->supply_enable_cnt--;
+					return ret;
 				}
 			}
 			ret = regulator_enable(supply_data->supply);
 			if (ret) {
 				pr_err("%s: regulator enable failed, ret %d\n", __func__, ret);
-			} else {
-				supply_data->supply_enabled = true;
+				supply_data->supply_enable_cnt--;
+				return ret;
 			}
+			supply_data->supply_enabled = true;
 		}
 	} else {
 		if (supply_data->supply_enable_cnt > 0) {
@@ -564,7 +567,9 @@ static int dmic_power_supply_by_ldo(
 
 	switch (event) {
 		case SND_SOC_DAPM_PRE_PMU:
-			dmic_regulator_enable(supply_data, true);
+			ret = dmic_regulator_enable(supply_data, true);
+			if (ret)
+				break;
 			if (!IS_ERR_OR_NULL(supply_data->bias_enable)) {
 				if (supply_data->enable_cnt == 0) {
 					pinctrl_select_state(pdata->dmic_en_pinctrl, supply_data->bias_enable);
@@ -585,7 +590,7 @@ static int dmic_power_supply_by_ldo(
 				}
 				dev_info(component->dev, "%s: dmic power off, enable_cnt=%d\n", __func__, supply_data->enable_cnt);
 			}
-			dmic_regulator_enable(supply_data, false);
+			ret = dmic_regulator_enable(supply_data, false);
 			break;
 
 		default:
