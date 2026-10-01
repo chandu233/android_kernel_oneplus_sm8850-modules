@@ -146,6 +146,7 @@ int oplus_display_panel_get_panel_bpp(void *buf);
 int oplus_display_panel_get_panel_name(void *buf);
 int oplus_display_panel_set_hbm_max(void *data);
 int oplus_display_panel_get_hbm_max(void *data);
+int oplus_display_set_shutdown_flag(void *buf);
 int oplus_display_panel_set_dc_compensate(void *data);
 int oplus_display_panel_set_mipi_err_check(void *data);
 int oplus_display_panel_get_mipi_err_check(void *data);
@@ -153,4 +154,6 @@ int oplus_display_panel_set_white_point_status(void *data);
 int oplus_display_ioctl_get_panel_btbsn(void *data);
 int oplus_display_get_brightness_time(void *data);
 int oplus_display_panel_print_xlog(void *data);
+int oplus_display_panel_set_LGD_value(void *buf);
+int oplus_display_panel_get_LGD_value(void *buf);
 #endif /* _OPLUS_DISPLAY_DEVICE_IOCTL_H_ */

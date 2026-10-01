@@ -113,6 +113,11 @@ int oplus_panel_power_off(struct dsi_panel *panel);
 int oplus_panel_prepare(struct dsi_panel *panel);
 bool oplus_panel_pre_prepare(struct dsi_panel *panel);
 void oplus_panel_register_supply_notifier(void);
+int oplus_bl_ic_ktz8869_power_on(struct dsi_panel *panel);
+void oplus_bl_ic_ktz8869_power_off(struct dsi_panel *panel);
+void oplus_reset_custom(struct dsi_panel *panel, struct dsi_panel_reset_config *r_config);
+
 int oplus_bl_ic_ktz8868_power_on(struct dsi_panel *panel);
 void oplus_bl_ic_ktz8868_power_off(struct dsi_panel *panel);
+
 #endif /* _OPLUS_DISPLAY_POWER_H_ */

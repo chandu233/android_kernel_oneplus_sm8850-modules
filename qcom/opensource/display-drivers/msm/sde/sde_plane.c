@@ -764,6 +764,7 @@ int sde_plane_wait_input_fence(struct drm_plane *plane, uint32_t wait_ms, int *e
 				EXCEPTION_TRACKPOINT_REPORT("DisplayDriverID@@%d$$fence timeout, wait_ms=%d\n",
 								OPLUS_DISP_Q_ERROR_FENCE_TIMEOUT, wait_ms);
 #endif
+				sde_trace_kgsl_fence_timeout(input_fence);
 				break;
 			case -ERESTARTSYS:
 				SDE_ERROR_PLANE(psde,

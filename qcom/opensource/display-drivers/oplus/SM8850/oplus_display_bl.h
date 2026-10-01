@@ -68,6 +68,13 @@ static struct backlight_8868_log {
 	struct timespec64 past_times[BACKLIGHT_CACHE_MAX];
 }oplus_bl_8868_log[DISPLAY_MAX];
 
+static struct backlight_8869_log {
+	u32 bl_count;
+	u32 backlight[BACKLIGHT_CACHE_MAX];
+	u32 Map_backlight[BACKLIGHT_CACHE_MAX];
+	struct timespec64 past_times[BACKLIGHT_CACHE_MAX];
+}oplus_bl_8869_log[DISPLAY_MAX];
+
 static struct backlight_log {
 	u32 bl_count;
 	u32 backlight[BACKLIGHT_CACHE_MAX];
@@ -361,6 +368,7 @@ void oplus_panel_update_backlight(struct dsi_panel *panel,
 u32 oplus_panel_silence_backlight(struct dsi_panel *panel, u32 bl_lvl);
 void oplus_printf_backlight_log(struct dsi_display *display, u32 bl_lvl);
 void oplus_printf_backlight_8868_log(struct dsi_display *display, u32 bl_lvl);
+void oplus_printf_backlight_8869_log(struct dsi_display *display, u32 bl_lvl);
 int oplus_sync_panel_brightness_video(struct drm_encoder *drm_enc);
 
 /**

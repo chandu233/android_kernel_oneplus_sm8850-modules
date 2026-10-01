@@ -58,11 +58,21 @@ extern bool g_gamma_regs_read_done;
 extern bool g_gamma_inverse;
 
 static DEFINE_SPINLOCK(g_bk_lock);
+unsigned int panel_pcb = NO_OVERRIDE;
 
 struct oplus_display_ops oplus_display_ops = {};
 #ifdef OPLUS_FEATURE_TP_BASIC
 struct oplus_display_notify_tp_ops oplus_display_notify_tp_ops = {};
 #endif /* OPLUS_FEATURE_TP_BASIC */
+
+bool oplus_pcb_before_evt(void)
+{
+	// OPLUS_EVT1 = 24
+	if (panel_pcb < 24) {
+		return true;
+	}
+	return false;
+}
 
 void oplus_display_set_backlight_pre(struct dsi_display *display, int *bl_lvl, int brightness)
 {
@@ -151,7 +161,9 @@ void oplus_panel_set_backlight_pre(struct dsi_display *display, int *bl_lvl)
 
 	*bl_lvl = oplus_panel_silence_backlight(panel, *bl_lvl);
 
-	if(panel->oplus_panel.bl_ic_ktz8868_used) {
+	if(panel->oplus_panel.bl_ic_ktz8869_used) {
+		oplus_printf_backlight_8869_log(display, *bl_lvl);
+	} else if (panel->oplus_panel.bl_ic_ktz8868_used) {
 		oplus_printf_backlight_8868_log(display, *bl_lvl);
 	} else {
 		oplus_printf_backlight_log(display, *bl_lvl);
@@ -266,6 +278,21 @@ int oplus_panel_enable_post(struct dsi_panel *panel)
 		if (rc)
 			OPLUS_DSI_ERR("[%s] failed to send DSI_CMD_SET_DC_ON cmds rc=%d\n",
 				panel->name, rc);
+	}
+
+	/* add for 25021/25022/25211/25212 lgd switch */
+	if (panel->oplus_panel.lgd_support == true) {
+		if (panel->oplus_panel.lgd_status == 1) {
+			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_SWITCH_LGD_ON, false);
+			if (rc)
+				OPLUS_DSI_ERR("[%s] failed to send DSI_CMD_SET_SWITCH_LGD_ON cmds rc=%d\n",
+					panel->name, rc);
+			} else {
+				rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_SWITCH_LGD_OFF, false);
+				if (rc)
+					OPLUS_DSI_ERR("[%s] failed to send DSI_CMD_SET_SWITCH_LGD_OFF cmds rc=%d\n",
+						panel->name, rc);
+			}
 	}
 
 	panel->oplus_panel.need_power_on_backlight = true;
@@ -449,6 +476,17 @@ int oplus_display_parse_cmdline_topology(struct dsi_display *display,
 	OPLUS_DSI_INFO("Parse cmdline display%d PanelSN-0x%016lX\n",
 			display_type,
 			panel_sn);
+
+	str = strnstr(boot_str, ":PcbVersion-0x", strlen(boot_str));
+
+	if (str) {
+		if (sscanf(str, ":PcbVersion-0x%X", &panel_pcb) != 1) {
+			OPLUS_DSI_ERR("invalid PanelPcb override: %s\n",
+					boot_str);
+			return -1;
+		}
+	}
+	OPLUS_DSI_INFO("Parse cmdline Panel_pcb = 0x%X\n", panel_pcb);
 
 	return 0;
 }
@@ -900,59 +938,6 @@ void oplus_panel_set_nolp_post(struct dsi_panel *panel)
 	return;
 }
 
-int oplus_panel_gpio_check(struct dsi_panel *panel)
-{
-	int rc = 0;
-	struct oplus_gpio_config *gpio_cfg = NULL;
-
-	if (!(is_project(25001) || is_project(25002) || is_project(25201))) {
-		/* Only Hongyan supports extended I/O */
-		return rc;
-	}
-
-	if (!panel) {
-		OPLUS_DSI_ERR("panel is null\n");
-		return -EINVAL;
-	}
-
-	gpio_cfg = &panel->oplus_panel.gpio_cfg;
-	if (!gpio_cfg) {
-		OPLUS_DSI_ERR("gpio_cfg is null\n");
-		return -EINVAL;
-	}
-
-	/* Check if GPIOs are valid before accessing them */
-	if (gpio_is_valid(gpio_cfg->panel_gpio1)) {
-		OPLUS_DSI_INFO("panel_gpio1 state = %d\n", gpio_get_value_cansleep(gpio_cfg->panel_gpio1));
-	} else {
-		OPLUS_DSI_ERR("panel_gpio1 is invalid\n");
-		rc = -EINVAL;
-	}
-
-	if (gpio_is_valid(gpio_cfg->panel_gpio2)) {
-		OPLUS_DSI_INFO("panel_gpio2 state = %d\n", gpio_get_value_cansleep(gpio_cfg->panel_gpio2));
-	} else {
-		OPLUS_DSI_ERR("panel_gpio2 is invalid\n");
-		rc = -EINVAL;
-	}
-
-	if (gpio_is_valid(gpio_cfg->panel_gpio3)) {
-		OPLUS_DSI_INFO("panel_gpio3 state = %d\n", gpio_get_value_cansleep(gpio_cfg->panel_gpio3));
-	} else {
-		OPLUS_DSI_ERR("panel_gpio3 is invalid\n");
-		rc = -EINVAL;
-	}
-
-	if (gpio_is_valid(panel->reset_config.reset_gpio)) {
-		OPLUS_DSI_INFO("panel_reset_gpio state = %d\n", gpio_get_value_cansleep(panel->reset_config.reset_gpio));
-	} else {
-		OPLUS_DSI_ERR("panel_reset_gpio is invalid\n");
-		rc = -EINVAL;
-	}
-
-	return rc;
-}
-
 void oplus_sde_encoder_handle_framedone_timeout_pre(struct drm_connector *conn)
 {
 	struct sde_connector *sde_conn = NULL;
@@ -978,8 +963,6 @@ void oplus_sde_encoder_handle_framedone_timeout_pre(struct drm_connector *conn)
 		OPLUS_DSI_ERR("panel is null\n");
 		return;
 	}
-
-	oplus_panel_gpio_check(panel);
 
 	return;
 }
@@ -1008,8 +991,6 @@ void oplus_sde_encoder_phys_cmd_wait_for_wr_ptr_pre(struct drm_connector *conn)
 		OPLUS_DSI_ERR("panel is null\n");
 		return;
 	}
-
-	oplus_panel_gpio_check(panel);
 
 	return;
 }
