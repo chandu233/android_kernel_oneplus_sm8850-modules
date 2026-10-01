@@ -593,6 +593,7 @@ static long touch_misc_ioctl(struct file *filp,
 		ret = touch_pen_uplink_msg_ioctl(ts, arg);
 		break;
 	case PEN_IOC_CMD_DOWNLK:
+		TPD_DEBUG("PEN_IOC_CMD_DOWNLK  start!!!!");
 		ret = touch_pen_downlink_msg_ioctl(ts, arg);
 		break;
 	default:

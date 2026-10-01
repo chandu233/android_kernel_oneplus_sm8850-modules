@@ -211,6 +211,7 @@
 #define TEST_RETVAL_AA                          0xAA
 
 #define FTS_EVENT_FOD                           0x26
+#define FTS_EARLY_EVENT_FOD                     0x28
 
 #define MAX_PACKET_SIZE                         128
 

@@ -468,6 +468,7 @@ struct kernel_grip_info {
 	/*uint16_t                edge_sliding_exit_yfsr_thd;             edge sliding exit with yfsr threshold */
 	/*uint16_t                edge_sliding_exit_distance;             edge sliding exit with distance threshold*/
 	uint16_t                  edge_swipe_makeup_optimization_support; /*edge sliding two points no speed optimization*/
+	bool                      tx_rx_num_exchange_support;             /*kernel grip tx rx num exchange support*/
 	/*add for curved_screen_v4 end*/
 	/*add for curved_screen_v4.2 begin*/
 	uint16_t                   reclining_mode_support;                 /*reclining mode support */
@@ -483,6 +484,7 @@ struct kernel_grip_info {
 	uint16_t corner_angle_max_range_thd;                              /*not used */
 	uint16_t point_edge_degree_check_support;                         /*point edge degree check  support*/
 	uint16_t corner_point_edge_percent_thd;                           /*corner point edge percent,edge small*/
+	uint16_t bottom_corner_point_edge_percent_thd;                           /*corner point edge percent,edge small*/
 	uint16_t corner_point_edge_min_channel_thd;                       /*set to 1*/
 	uint16_t top_trx_corner_point_edge_percent_thd;                   /*top trx corner point edge percent,edge small */
 	uint16_t bottom_trx_corner_point_edge_percent_thd;                /*bottom trx corner point edge percent,edge small */
@@ -521,6 +523,58 @@ struct kernel_grip_info {
 	s64  uniform_make_up_point_last_down_time[TOUCH_MAX_NUM];
 	uint16_t uniform_make_up_point_upid_status;
 	/* add for grip 4.3 end */
+	/* add for grip 4.4 start */
+	uint8_t  point_touchZ_stability_status[TOUCH_MAX_NUM];
+	uint16_t touch_point_stability_max_time;
+	uint16_t middle_bottom_long_press_time_thd;
+	uint16_t middle_bottom_long_press_width_min_thd;
+	uint16_t middle_bottom_long_press_minor_max_thd;
+	uint8_t  middle_bottom_long_press_match_times_thd;
+	uint16_t large_middle_bottom_exit_quickly_support;
+	uint8_t  middle_bottom_long_press_match_times[TOUCH_MAX_NUM];
+	uint16_t middle_bottom_small_press_width_max_thd;
+	uint16_t middle_bottom_small_press_er_min_thd;
+	uint16_t middle_bottom_small_press_peakdelta_max_thd;
+	uint16_t middle_bottom_small_press_minor_max_thd;
+	uint8_t  middle_bottom_small_press_match_times_thd;
+	uint8_t  middle_bottom_small_press_match_times[TOUCH_MAX_NUM];
+	uint16_t middle_bottom_exit_x_dis_thd;
+	uint16_t middle_bottom_exit_y_dis_thd;
+	uint16_t middle_bottom_match_exit_x_dis_percent_thd;
+	uint16_t middle_bottom_match_exit_y_dis_thd;
+	uint16_t middle_bottom_short_exit_yfsr_coupling_thd;
+	uint16_t middle_bottom_long_exit_yfsr_coupling_thd;
+	uint8_t  middle_bottom_normal_press_thd;
+	uint8_t  middle_bottom_exit_yfsr_coupling_times_thd;
+	uint8_t  middle_bottom_exit_yfsr_coupling_times[TOUCH_MAX_NUM];
+	/* add for grip 4.4 end */
+	/* add for grip 4.5 start */
+	bool     is_curved_screen_v4_5;                                   /*wether is_curved_screen_V4_5*/
+	uint16_t long_press_top_corner_point_edge_percent_thd;
+	uint16_t long_press_bottom_corner_point_edge_percent_thd;
+	uint16_t long_press_top_corner_point_edge_min_channel_thd;
+	uint16_t long_press_bottom_corner_point_edge_min_channel_thd;
+	uint16_t long_press_top_trx_corner_point_edge_percent_thd;
+	uint16_t long_press_bottom_trx_corner_point_edge_percent_thd;
+	uint16_t long_press_time_thd;
+	uint16_t long_press_point_edge_degree_check_support;
+	uint16_t center_down_top_corner_point_edge_percent_thd;
+	uint16_t center_down_bottom_corner_point_edge_percent_thd;
+	uint16_t center_down_top_corner_point_edge_min_channel_thd;
+	uint16_t center_down_bottom_corner_point_edge_min_channel_thd;
+	uint16_t center_down_top_trx_corner_point_edge_percent_thd;
+	uint16_t center_down_bottom_trx_corner_point_edge_percent_thd;
+	uint16_t center_down_point_edge_degree_check_support;
+	uint16_t soon_meet_top_corner_point_edge_percent_thd;
+	uint16_t soon_meet_bottom_corner_point_edge_percent_thd;
+	uint16_t soon_meet_top_corner_point_edge_min_channel_thd;
+	uint16_t soon_meet_bottom_corner_point_edge_min_channel_thd;
+	uint16_t soon_meet_top_trx_corner_point_edge_percent_thd;
+	uint16_t soon_meet_bottom_trx_corner_point_edge_percent_thd;
+	uint16_t soon_meet_min_level_thd;
+	uint16_t soon_meet_point_edge_degree_check_support;
+	uint16_t soon_meet_level[TOUCH_MAX_NUM];
+	/* add for grip 4.5 end */
 };
 
 struct fw_grip_operations {

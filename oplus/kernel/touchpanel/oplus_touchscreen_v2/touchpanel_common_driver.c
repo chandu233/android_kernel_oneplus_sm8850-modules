@@ -40,6 +40,7 @@
 #ifndef CONFIG_REMOVE_OPLUS_FUNCTION
 #ifdef CONFIG_TOUCHPANEL_MTK_PLATFORM
 #include<mt-plat/mtk_boot_common.h>
+#elif defined(CONFIG_TOUCHPANEL_UNISOC_PLATFORM)
 #else
 #include <soc/oplus/system/boot_mode.h>
 #endif
@@ -47,8 +48,11 @@
 
 #if IS_ENABLED(CONFIG_FB)
 #include <linux/fb.h>
+#endif
+#if IS_ENABLED(CONFIG_FB) || IS_ENABLED(CONFIG_UNISOC_DISPLAY_NOTIFIER)
 #include <linux/notifier.h>
 #endif
+
 #if IS_ENABLED(CONFIG_DRM_OPLUS_PANEL_NOTIFY)
 #include <linux/msm_drm_notify.h>
 #elif IS_ENABLED(CONFIG_QCOM_PANEL_EVENT_NOTIFIER)
@@ -60,6 +64,8 @@
 #elif IS_ENABLED(CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY)
 #include <linux/mtk_panel_ext.h>
 #include <linux/mtk_disp_notify.h>
+#elif IS_ENABLED(CONFIG_UNISOC_DISPLAY_NOTIFIER)
+#include <soc/unisoc/display_notifier.h>
 #endif
 
 #if IS_ENABLED(CONFIG_TOUCHPANEL_NOTIFY)
@@ -131,17 +137,23 @@ static void ts_panel_notifier_callback(enum panel_event_notifier_tag tag,
 #elif IS_ENABLED(CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY)
 static int ts_mtk_drm_notifier_callback(struct notifier_block *nb,
                 unsigned long event, void *data);
+#elif IS_ENABLED(CONFIG_UNISOC_DISPLAY_NOTIFIER)
+static int ts_unisoc_display_notifier_callback(struct notifier_block *nb,
+                unsigned long event, void *data);
 #endif
 
 static void tp_touch_release(struct touchpanel_data *ts);
 static void tp_btnkey_release(struct touchpanel_data *ts);
 static inline void tp_work_func(struct touchpanel_data *ts);
 static void lcd_tp_refresh_work(struct work_struct *work);
+static int tp_suspend(struct device *dev);
+static void tp_resume(struct device *dev);
 #if IS_ENABLED(CONFIG_FB) || \
 	IS_ENABLED(CONFIG_DRM_MSM) || \
 	IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY) || \
 	IS_ENABLED(CONFIG_QCOM_PANEL_EVENT_NOTIFIER) || \
-	IS_ENABLED(CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY)
+	IS_ENABLED(CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY) || \
+	IS_ENABLED(CONFIG_UNISOC_DISPLAY_NOTIFIER)
 static void tp_ftm_extra(unsigned int tp_index);
 static int tp_control_reset_gpio(bool enable, unsigned int tp_index);
 static int tp_control_irq_state(bool enable, unsigned int tp_index);
@@ -152,6 +164,7 @@ static void tp_suspend_work(struct work_struct *work);
 
 static void tp_rate_calc(struct touchpanel_data *ts, tp_rate tp_rate_type);
 static int tp_control_cs_gpio(bool enable, unsigned int tp_index);
+static int check_is_touch_on_fp_area(struct touchpanel_data *ts, unsigned int status, unsigned int x, unsigned int y);
 
 extern int preconfig_power_control(struct touchpanel_data *ts);
 extern  int reconfig_power_control(struct touchpanel_data *ts);
@@ -167,6 +180,7 @@ extern int (*tp_cs_gpio_notifier)(bool enable, unsigned int tp_index);
 #ifndef CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY
 extern enum boot_mode_t get_boot_mode(void);
 #endif
+#elif defined(CONFIG_TOUCHPANEL_UNISOC_PLATFORM)
 #else
 extern int get_boot_mode(void);
 #endif
@@ -202,6 +216,8 @@ bool inline is_ftm_boot_mode(struct touchpanel_data *ts)
 #ifdef CONFIG_TOUCHPANEL_MTK_PLATFORM
 
 	if ((ts->boot_mode == META_BOOT || ts->boot_mode == FACTORY_BOOT))
+#elif defined(CONFIG_TOUCHPANEL_UNISOC_PLATFORM)
+	return false;
 #else
 	if ((ts->boot_mode == MSM_BOOT_MODE__FACTORY
 	     || ts->boot_mode == MSM_BOOT_MODE__RF || ts->boot_mode == MSM_BOOT_MODE__WLAN))
@@ -297,6 +313,12 @@ void operate_mode_switch(struct touchpanel_data *ts)
 		if (ts->fingerprint_underscreen_support) {
 			ts->ts_ops->enable_fingerprint(ts->chip_data, !!ts->fp_enable);
 		}
+		/* Adjust the active pen enable order to the first position, before enabling other modes,
+		so that the active pen can be used quickly and normally after switching modes. */
+
+		if (ts->pen_support && ts->pen_support_opp && ts->pen_enable_first) {
+			mode_switch_health(ts, MODE_PEN_SCAN, ts->is_pen_connected);
+		}
 
 		if (ts->black_gesture_support) {
 			if (ts->incell_aod_gesture_support) {
@@ -373,7 +395,7 @@ void operate_mode_switch(struct touchpanel_data *ts)
 			ts->ts_ops->tp_refresh_switch(ts->chip_data, ts->lcd_fps);
 		}
 
-		if (ts->pen_support) {
+		if (ts->pen_support && (!ts->pen_enable_first)) {
 			mode_switch_health(ts, MODE_PEN_SCAN, ts->is_pen_connected);
 		}
 
@@ -381,8 +403,16 @@ void operate_mode_switch(struct touchpanel_data *ts)
 			mode_switch_health(ts, MODE_WATERPROOF, ts->waterproof & ~(0x1 << WATERPROOF_RUS_BIT));
 		}
 
+		if (ts->tp_scene_para_switch_support && ts->ts_ops->set_package_type) {
+			ts->ts_ops->set_package_type(ts->chip_data, ts->scene_info.set_package_type);
+		}
+
 		if (ts->tp_scene_para_switch_support && ts->ts_ops->pen_sensitive_lv_set) {
 			ts->ts_ops->pen_sensitive_lv_set(ts->chip_data, ts->scene_info.pen_sensitive_level);
+		}
+
+		if (ts->lcd_trigger_load_tp_fw_support && ts->tp_data_record_support && ts->debug_info_ops->tp_data_record_write) {
+			ts->debug_info_ops->tp_data_record_write(ts->chip_data, ts->tp_data_record_enable);
 		}
 
 		mode_switch_health(ts, MODE_NORMAL, true);
@@ -544,6 +574,11 @@ static void touch_call_notifier_fp(struct touchpanel_data *ts, struct fp_undersc
 	event_data.area_rate = fp_info->area_rate;
 	event_data.x = fp_info->x;
 	event_data.y = fp_info->y;
+	event_data.touch_early_down_flag = fp_info->touch_early_down_flag;
+	event_data.is_touch_fp_area_cnt = fp_info->is_touch_fp_area_cnt;
+	event_data.touch_fp_area_time = fp_info->touch_fp_area_time;
+	event_data.fp_down_time = fp_info->fp_down_time;
+	event_data.tp_firmware_time = fp_info->tp_firmware_time;
 
 	touchpanel_event_call_notifier(EVENT_ACTION_FOR_FINGPRINT,
 				       (void *)&event_data);
@@ -686,6 +721,7 @@ void notify_pen_state(int state, unsigned int index)
 #ifndef CONFIG_REMOVE_OPLUS_FUNCTION
 #ifdef CONFIG_TOUCHPANEL_MTK_PLATFORM
 	if ((ts->boot_mode == META_BOOT || ts->boot_mode == FACTORY_BOOT))
+#elif defined(CONFIG_TOUCHPANEL_UNISOC_PLATFORM)
 #else
 	if ((ts->boot_mode == MSM_BOOT_MODE__FACTORY ||
 		ts->boot_mode == MSM_BOOT_MODE__RF ||
@@ -728,6 +764,10 @@ static void tp_exception_handle(struct touchpanel_data *ts)
 		return;
 	}
 
+	if (ts->debug_info_ops->tp_data_debug_info_print) {
+		ts->debug_info_ops->tp_data_debug_info_print(ts->chip_data);
+	}
+
 	ts->ts_ops->reset(
 		ts->chip_data);    /* after reset, all registers set to default*/
 	operate_mode_switch(ts);
@@ -735,9 +775,16 @@ static void tp_exception_handle(struct touchpanel_data *ts)
 	tp_btnkey_release(ts);
 	tp_touch_release(ts);
 
+	if (ts->debug_info_ops->tp_data_debug_info_print) {
+		ts->debug_info_ops->tp_data_debug_info_print(ts->chip_data);
+	}
+
 	if (ts->fingerprint_underscreen_support) {
 		ts->fp_info.touch_state = 0;
 		touch_call_notifier_fp(ts, &ts->fp_info);
+	}
+	if (ts->health_monitor_support) {
+		tp_healthinfo_report(&ts->monitor_data, HEALTH_REPORT, "tp_exception_handle_report");
 	}
 	if (ts->exception_upload_support) {
 		TP_INFO(ts->tp_index, "EXCEP_TOUCH_IC_RESET upload\n");
@@ -821,6 +868,7 @@ static void tp_gesture_handle(struct touchpanel_data *ts)
 		gesture_info_temp.gesture_type == M_GESTRUE ? "(M)" :
 		gesture_info_temp.gesture_type == W_GESTURE ? "(W)" :
 		gesture_info_temp.gesture_type == FINGER_PRINTDOWN ? "(fingerprintdown)" :
+		gesture_info_temp.gesture_type == FINGERPRINT_EARLY_DOWN ? "(fingerprintdownearly)" :
 		gesture_info_temp.gesture_type == FRINGER_PRINTUP ? "(fingerprintup)" :
 		gesture_info_temp.gesture_type == SINGLE_TAP ? "single tap" :
 		gesture_info_temp.gesture_type == HEART ? "heart" :
@@ -848,6 +896,7 @@ static void tp_gesture_handle(struct touchpanel_data *ts)
 
 	if (gesture_info_temp.gesture_type != UNKOWN_GESTURE
 	    && gesture_info_temp.gesture_type != FINGER_PRINTDOWN
+	    && gesture_info_temp.gesture_type != FINGERPRINT_EARLY_DOWN
 	    && gesture_info_temp.gesture_type != FRINGER_PRINTUP) {
 		retval = tp_memcpy(&ts->gesture, sizeof(ts->gesture), \
 			  &gesture_info_temp, sizeof(struct gesture_info), \
@@ -872,7 +921,30 @@ static void tp_gesture_handle(struct touchpanel_data *ts)
 		ts->fp_info.touch_state = 1;
 		ts->fp_info.x = gesture_info_temp.Point_start.x;
 		ts->fp_info.y = gesture_info_temp.Point_start.y;
+		ts->fp_info.touch_early_down_flag = 0;
+		ts->fp_info.fp_down_time = ktime_get();
+		ts->fp_info.is_touch_fp_area_cnt = ts->is_touch_fp_area_cnt;
+		ts->fp_info.touch_fp_area_time = ts->touch_fp_area_time;
+		ts->fp_info.tp_firmware_time = gesture_info_temp.tp_firmware_time;
+		TP_INFO(ts->tp_index, "touch_state:%d, touch_early_down_flag:%d, saved_is_touch_fp_area_cnt:%ld, touch_fp_area_time:%lld\n",
+			ts->fp_info.touch_state, ts->fp_info.touch_early_down_flag, ts->fp_info.is_touch_fp_area_cnt, ts->touch_fp_area_time);
 		TP_INFO(ts->tp_index, "screen off down : (%d, %d)\n", ts->fp_info.x, ts->fp_info.y);
+		touch_call_notifier_fp(ts, &ts->fp_info);
+	} else if (gesture_info_temp.gesture_type == FINGERPRINT_EARLY_DOWN) {
+		ts->fp_info.touch_state = 1;
+		ts->fp_info.x = gesture_info_temp.Point_start.x;
+		ts->fp_info.y = gesture_info_temp.Point_start.y;
+		ts->fp_info.touch_early_down_flag = 1;
+		ts->fp_info.fp_down_time = ktime_get();
+		ts->fp_info.is_touch_fp_area_cnt = ts->is_touch_fp_area_cnt;
+		ts->fp_info.touch_fp_area_time = ts->touch_fp_area_time;
+		ts->fp_info.tp_firmware_time = gesture_info_temp.tp_firmware_time;
+		TP_INFO(ts->tp_index, "touch_state:%d, touch_early_down_flag:%d, saved_is_touch_fp_area_cnt:%ld, touch_fp_area_time:%lld\n",
+			ts->fp_info.touch_state, ts->fp_info.touch_early_down_flag, ts->is_touch_fp_area_cnt, ts->touch_fp_area_time);
+		TP_INFO(ts->tp_index, "screen off early down : (%d, %d)\n", ts->fp_info.x, ts->fp_info.y);
+		if (ts->health_monitor_support) {
+			tp_healthinfo_report(&ts->monitor_data, HEALTH_REPORT, "fingerprint_early_down");
+		}
 		touch_call_notifier_fp(ts, &ts->fp_info);
 	} else if (gesture_info_temp.gesture_type == FRINGER_PRINTUP) {
 		ts->fp_info.touch_state = 0;
@@ -1082,6 +1154,9 @@ static inline void tp_touch_handle(struct touchpanel_data *ts)
 				SET_BIT(ts->irq_slot, (1 << i));
 				finger_num++;
 
+				/*check x y is in the fp recognition area */
+				ts->is_touch_fp_area_cnt += check_is_touch_on_fp_area(ts, 1, points[i].x, points[i].y);
+
 				if (ts->face_detect_support && ts->fd_enable && \
 				    (points[i].y < ts->resolution_info.max_y / 2) && (points[i].x > 30)
 				    && (points[i].x < ts->resolution_info.max_x - 30)) {
@@ -1133,6 +1208,10 @@ static inline void tp_touch_handle(struct touchpanel_data *ts)
 				if (CHK_BIT(ts->irq_slot, (1 << i))) {
 					TP_INFO(ts->tp_index, "touch point id %d up.\n", i);
 					CLR_BIT(ts->irq_slot, (1 << i));
+					/*check x y is in the fp recognition area */
+					if (ts->last_x_y_point[i].x != 0 || ts->last_x_y_point[i].y != 0) {
+						ts->is_touch_fp_area_cnt += check_is_touch_on_fp_area(ts, 0, ts->last_x_y_point[i].x, ts->last_x_y_point[i].y);
+					}
 				}
 			}
 		}
@@ -1173,6 +1252,9 @@ static inline void tp_touch_handle(struct touchpanel_data *ts)
 			ts->last_x_y_point[i].x = 0;
 			ts->last_x_y_point[i].y = 0;
 		}
+
+		/*clear fp area count when all touch up*/
+		ts->is_touch_fp_area_cnt = 0;
 
 		tp_touch_up(ts);
 		ts->view_area_touched = 0;
@@ -1328,6 +1410,7 @@ static void tp_pen_handle(struct touchpanel_data *ts)
 	static int point_num = 0;
 	static struct pen_info last_point = {.x = 0, .y = 0};
 	static bool up_status = false;
+	u32 irq_type = IRQ_PEN;
 	if (!ts->ts_ops->get_pen_points) {
 		TP_INFO(ts->tp_index, "not support get_pen_points callback.\n");
 		return;
@@ -1360,6 +1443,9 @@ static void tp_pen_handle(struct touchpanel_data *ts)
 								pen_info.x, pen_info.y, pen_info.z, pen_info.tilt_x, pen_info.tilt_y);
 		/*strore  the last point data*/
 		memcpy(&last_point, &pen_info, sizeof(struct pen_info));
+		if (ts->health_monitor_support &&  pen_info.z) {
+			tp_healthinfo_report(&ts->monitor_data, HEALTH_IRQ_TYPE, &irq_type);
+		}
 	} else if ((pen_info.status == 0) && (up_status == false)) {
 		input_report_abs(ts->pen_input_dev, ABS_X, 0);
 		input_report_abs(ts->pen_input_dev, ABS_Y, 0);
@@ -1398,6 +1484,11 @@ static void tp_fingerprint_handle(struct touchpanel_data *ts)
 	ts->fp_info.area_rate = fp_tpinfo.area_rate;
 	ts->fp_info.x = fp_tpinfo.x;
 	ts->fp_info.y = fp_tpinfo.y;
+	ts->fp_info.touch_early_down_flag = 0;
+	ts->fp_info.is_touch_fp_area_cnt = ts->is_touch_fp_area_cnt;
+	ts->fp_info.touch_fp_area_time = ktime_get();
+	ts->fp_info.fp_down_time = ktime_get();
+	ts->fp_info.tp_firmware_time = 0;
 	if (fp_tpinfo.touch_state == FINGERPRINT_DOWN_DETECT) {
 		TP_INFO(ts->tp_index, "screen on down : (%d, %d)\n",
 			ts->fp_info.x,
@@ -1413,6 +1504,7 @@ static void tp_fingerprint_handle(struct touchpanel_data *ts)
 	} else if (fp_tpinfo.touch_state == FINGERPRINT_UP_DETECT) {
 		TP_INFO(ts->tp_index, "screen on up : (%d, %d)\n", ts->fp_info.x, ts->fp_info.y);
 		ts->fp_info.touch_state = 0;
+		ts->fp_info.touch_early_down_flag = 0;
 		touch_call_notifier_fp(ts, &ts->fp_info);
 	} else if (ts->fp_info.touch_state) {
 		touch_call_notifier_fp(ts, &ts->fp_info);
@@ -1788,11 +1880,11 @@ static irqreturn_t tp_irq_thread_fn(int irq, void *dev_id)
 
 	/*for check bus i2c/spi is ready or not*/
 	if (ts->bus_ready == false) {
-		/*TP_INFO(ts->tp_index, "Wait device resume!");*/
+		/* TP_INFO(ts->tp_index, "Wait device resume!"); */
 		wait_event_interruptible_timeout(ts->wait,
 						 ts->bus_ready,
 						 msecs_to_jiffies(ts->irq_need_dev_resume_time));
-		/*TP_INFO(ts->tp_index, "Device maybe resume!");*/
+		/* TP_INFO(ts->tp_index, "Device maybe resume!"); */
 	}
 
 	if (false == monitor_irq_bus_ready(ts)) {
@@ -2430,6 +2522,19 @@ static int init_parse_dts(struct device *dev, struct touchpanel_data *ts)
 					      "fingerprint_not_report_in_suspend");
 	ts->fingerprint_error_report_support = of_property_read_bool(np,
 					      "fingerprint_error_report_support");
+
+	/* Read fingerprint recognition area from DTS */
+	memset(ts->fp_recognition_area, 0, sizeof(ts->fp_recognition_area));
+	ts->is_touch_fp_area_cnt = 0;
+	rc = of_property_read_u32_array(np, "touchpanel,fp-recognition-area",
+					ts->fp_recognition_area, 4);
+	if (rc) {
+		TP_BOOT_INFO(ts->tp_index, "fp_recognition_area not specified, using default [0 0 0 0]\n");
+	} else {
+		TP_INFO(ts->tp_index, "fp_recognition_area: [%d %d %d %d]\n",
+			ts->fp_recognition_area[0], ts->fp_recognition_area[1],
+			ts->fp_recognition_area[2], ts->fp_recognition_area[3]);
+	}
 	ts->suspend_gesture_cfg   = of_property_read_bool(np, "suspend_gesture_cfg");
 	ts->auto_test_force_pass_support = of_property_read_bool(np,
 					   "auto_test_force_pass_support");
@@ -2504,6 +2609,7 @@ static int init_parse_dts(struct device *dev, struct touchpanel_data *ts)
 	ts->pen_support = of_property_read_bool(np, "pen_support");
 	ts->pen_support_opp = of_property_read_bool(np, "pen_support_opp");
 	ts->no_need_osctest = of_property_read_bool(np, "no_need_osctest");
+	ts->pen_enable_first = of_property_read_bool(np, "pen_enable_first");
 	ts->bus_ready_check_support = of_property_read_bool(np, "bus_ready_check_support");
 	TP_INFO(ts->tp_index, "bus_ready_check_support is %d\n", ts->bus_ready_check_support);
 	ts->aiunit_game_info_support = of_property_read_bool(np, "aiunit_game_info_support");
@@ -3786,6 +3892,18 @@ static int tp_paneldata_init(struct touchpanel_data *pdata)
 		ts->monitor_data.vendor = ts->panel_data.manufacture_info.manufacture;
 	}
 #endif
+#ifdef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
+	/* When CONFIG_REMOVE_OPLUS_FUNCTION is defined, set test_limit_name to fixed value */
+	ts->panel_data.test_limit_name = tp_devm_kzalloc(ts->dev, MAX_FW_NAME_LENGTH,
+				 GFP_KERNEL);
+	if (ts->panel_data.test_limit_name == NULL) {
+		ret = -ENOMEM;
+		TP_INFO(ts->tp_index, "panel_data.test_limit_name kzalloc error\n");
+		return ret;
+	}
+	snprintf(ts->panel_data.test_limit_name, MAX_FW_NAME_LENGTH, "tp/25031/LIMIT_NF_TD4160_HUAXING.img");
+	TP_INFO(ts->tp_index, "[TP]test_limit_name set to: %s\n", ts->panel_data.test_limit_name);
+#endif
 
 	return 0;
 }
@@ -4147,8 +4265,11 @@ int register_common_touch_device(struct touchpanel_data *pdata)
 	}
 
 #ifndef CONFIG_REMOVE_OPLUS_FUNCTION
+#ifdef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
+#else
 	    /*step10 : FTM process*/
 	    ts->boot_mode = get_boot_mode();
+#endif
 #endif
 
 #if IS_ENABLED(CONFIG_TOUCHPANEL_NOTIFY)
@@ -4268,6 +4389,13 @@ int register_common_touch_device(struct touchpanel_data *pdata)
 	}
 #endif
 
+#elif IS_ENABLED(CONFIG_UNISOC_DISPLAY_NOTIFIER)
+	ts->fb_notif.notifier_call = ts_unisoc_display_notifier_callback;
+	ret = register_unisoc_display_notifier(&ts->fb_notif);
+	if (ret) {
+		TP_INFO(ts->tp_index, "Unable to register unisoc display notifier: %d\n", ret);
+		goto err_check_functionality_failed;
+	}
 #elif IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY)
 		ts->fb_notif.notifier_call = fb_notifier_callback;
 		ret = msm_drm_register_client(&ts->fb_notif);
@@ -4328,7 +4456,8 @@ int register_common_touch_device(struct touchpanel_data *pdata)
 		IS_ENABLED(CONFIG_DRM_MSM) || \
 		IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY) || \
 		IS_ENABLED(CONFIG_QCOM_PANEL_EVENT_NOTIFIER) || \
-		IS_ENABLED(CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY)
+		IS_ENABLED(CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY) || \
+		IS_ENABLED(CONFIG_UNISOC_DISPLAY_NOTIFIER)
 	if (ts->suspend_work_support) {
 		snprintf(name, TP_NAME_SIZE_MAX, "suspend_wq%d", ts->tp_index);
 		ts->suspend_wq = create_singlethread_workqueue(name);
@@ -4563,6 +4692,13 @@ error_fb_notif:
 		mtk_disp_sub_notifier_unregister(&ts->disp_notifier);
 	}
 #endif
+#elif IS_ENABLED(CONFIG_UNISOC_DISPLAY_NOTIFIER)
+	if (ts->fb_notif.notifier_call) {
+		ret = unregister_unisoc_display_notifier(&ts->fb_notif);
+		if (ret) {
+			TP_INFO(ts->tp_index, "Unable to unregister unisoc display notifier: %d\n", ret);
+		}
+	}
 #elif IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY)
 	msm_drm_unregister_client(&ts->fb_notif);
 #elif IS_ENABLED(CONFIG_FB)
@@ -4589,7 +4725,7 @@ EXPORT_SYMBOL(register_common_touch_device);
 void unregister_common_touch_device(struct touchpanel_data *pdata)
 {
 	struct touchpanel_data *ts = pdata;
-#if IS_ENABLED(CONFIG_FB) || IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY)
+#if IS_ENABLED(CONFIG_FB) || IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY) || IS_ENABLED(CONFIG_UNISOC_DISPLAY_NOTIFIER)
 	int ret;
 #endif
 
@@ -4648,7 +4784,8 @@ void unregister_common_touch_device(struct touchpanel_data *pdata)
 		IS_ENABLED(CONFIG_DRM_MSM) || \
 		IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY) || \
 		IS_ENABLED(CONFIG_QCOM_PANEL_EVENT_NOTIFIER) || \
-		IS_ENABLED(CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY)
+		IS_ENABLED(CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY) || \
+		IS_ENABLED(CONFIG_UNISOC_DISPLAY_NOTIFIER)
 	if (ts->suspend_work_support) {
 		if (ts->suspend_wq) {
 			cancel_work_sync(&ts->suspend_work);
@@ -4690,6 +4827,13 @@ void unregister_common_touch_device(struct touchpanel_data *pdata)
 		}
 	}
 #endif
+#elif IS_ENABLED(CONFIG_UNISOC_DISPLAY_NOTIFIER)
+	if (ts->fb_notif.notifier_call) {
+		ret = unregister_unisoc_display_notifier(&ts->fb_notif);
+		if (ret) {
+			TP_INFO(ts->tp_index, "Unable to unregister unisoc display notifier: %d\n", ret);
+		}
+	}
 #elif IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY)
 
 	if (ts->fb_notif.notifier_call) {
@@ -4757,7 +4901,8 @@ EXPORT_SYMBOL(common_touch_data_free);
 	IS_ENABLED(CONFIG_DRM_MSM) || \
 	IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY) || \
 	IS_ENABLED(CONFIG_QCOM_PANEL_EVENT_NOTIFIER) || \
-	IS_ENABLED(CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY)
+	IS_ENABLED(CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY) || \
+	IS_ENABLED(CONFIG_UNISOC_DISPLAY_NOTIFIER)
 /**
  * touchpanel_ts_suspend - touchpanel suspend function
  * @dev: i2c_client->dev using to get touchpanel_data resource
@@ -4823,6 +4968,16 @@ static void tp_suspend_direct(struct touchpanel_data *ts)
 	}
 	if ((ts->temperature_detect_support && ts->skin_therm_chan) || ts->temperature_detect_shellback_support)
 		hrtimer_cancel(&ts->temp_timer);
+
+	/*step3:Record fp info before suspend (screen off)*/
+	if (ts->fingerprint_underscreen_support) {
+		ts->touch_fp_area_time = ktime_get();
+		ts->touch_early_down_flag = ts->fp_info.touch_early_down_flag;
+		ts->saved_is_touch_fp_area_cnt = ts->is_touch_fp_area_cnt;
+		TP_INFO(ts->tp_index, "touch_state:%d, x:%d, y:%d, touch_early_down_flag:%d, saved_is_touch_fp_area_cnt:%ld, touch_fp_area_time:%lld\n",
+			ts->fp_info.touch_state, ts->fp_info.x, ts->fp_info.y,
+			ts->touch_early_down_flag, ts->saved_is_touch_fp_area_cnt, ts->touch_fp_area_time);
+	}
 
 	/*step3:Release key && touch event before suspend*/
 	tp_btnkey_release(ts);
@@ -5045,6 +5200,9 @@ static void speedup_resume(struct work_struct *work)
 	tp_btnkey_release(ts);
 	tp_touch_release(ts);
 
+	/*clear fp area count when screen on*/
+	ts->is_touch_fp_area_cnt = 0;
+
 	if (ts->force_bus_ready_support && (false == ts->bus_ready)) {
 		TP_INFO(ts->tp_index, "%s force bus_ready to true\n", __func__);
 		ts->bus_ready = true;
@@ -5054,7 +5212,7 @@ static void speedup_resume(struct work_struct *work)
 	}
 
 	if (!(ts->tp_ic_type == TYPE_TDDI_TCM && ts->is_noflash_ic)) {
-		if (ts->int_mode == UNBANNABLE) {
+		if (ts->int_mode == UNBANNABLE || (ts->pen_support && ts->pen_support_opp)) {
 			tp_register_irq_func(ts);
 		}
 	}
@@ -5101,11 +5259,10 @@ static void speedup_resume(struct work_struct *work)
 
 	/*step6:Request irq again*/
 	if (!(ts->tp_ic_type == TYPE_TDDI_TCM && ts->is_noflash_ic)) {
-		if (ts->int_mode == BANNABLE) {
+		if (ts->int_mode == BANNABLE || !(ts->pen_support && ts->pen_support_opp)) {
 			tp_register_irq_func(ts);
 		}
 	}
-
 EXIT:
 	ts->suspend_state = TP_SPEEDUP_RESUME_COMPLETE;
 	if ((ts->temperature_detect_support && ts->skin_therm_chan) || ts->temperature_detect_shellback_support)
@@ -5136,7 +5293,8 @@ EXIT:
 	IS_ENABLED(CONFIG_DRM_MSM) || \
 	IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY) || \
 	IS_ENABLED(CONFIG_QCOM_PANEL_EVENT_NOTIFIER) || \
-	IS_ENABLED(CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY)
+	IS_ENABLED(CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY) || \
+	IS_ENABLED(CONFIG_UNISOC_DISPLAY_NOTIFIER)
 static void lcd_off_early_event(struct touchpanel_data *ts)
 {
 	ts->suspend_state = TP_SUSPEND_EARLY_EVENT;      /*set suspend_resume_state*/
@@ -5371,6 +5529,100 @@ static int ts_mtk_drm_notifier_callback(struct notifier_block *nb,
 	return 0;
 }
 
+#elif IS_ENABLED(CONFIG_UNISOC_DISPLAY_NOTIFIER)
+static int ts_unisoc_display_notifier_callback(struct notifier_block *nb,
+		unsigned long event, void *data)
+{
+	struct touchpanel_data *ts = container_of(nb, struct touchpanel_data,
+		fb_notif);
+	struct unisoc_display_notification *notification = data;
+
+	if (!ts) {
+		return 0;
+	}
+
+	touchpanel_trusted_touch_completion(ts);
+
+	if (!notification) {
+		TP_INFO(ts->tp_index, "Invalid notification data\n");
+		return 0;
+	}
+
+
+	if (notification->event_type <= UNISOC_DISPLAY_EVENT_FOR_TOUCH) {
+		TP_INFO(ts->tp_index, "Notification type:%d, early_trigger:%d\n",
+			notification->event_type, notification->early_trigger);
+	}
+
+	if (ts->bus_ready == false) {
+		if (ts->health_monitor_support) {
+			ts->monitor_data.bus_not_ready_notify_count++;
+		}
+		if (ts->bus_ready_check_support == true) {
+			TP_INFO(ts->tp_index, "bus_ready not ready, tp exit\n");
+			return 0;
+		}
+	}
+
+
+	switch (notification->event_type) {
+	case UNISOC_DISPLAY_EVENT_UNBLANK:
+		if (notification->early_trigger) {
+			if ((ts->suspend_work_support) && (ts->suspend_wq)) {
+				flush_workqueue(ts->suspend_wq);        /*wait suspend_wq done*/
+			}
+			lcd_on_early_event(ts);
+		} else {
+			lcd_on_event(ts);
+		}
+		break;
+	case UNISOC_DISPLAY_EVENT_BLANK:
+		if (notification->early_trigger) {
+			if (ts->speedup_resume_wq) {
+				flush_workqueue(ts->speedup_resume_wq);        /*wait speedup_resume_wq done*/
+			}
+			lcd_off_early_event(ts);
+		} else {
+			lcd_off_event(ts);
+		}
+		break;
+	case UNISOC_DISPLAY_EVENT_BLANK_LP:
+		TP_INFO(ts->tp_index, "received lp event\n");
+		if (!notification->early_trigger) {
+			lcd_off_event(ts);
+		} else if (ts->tp_lcd_suspend_in_lp_support == true) {
+			TP_INFO(ts->tp_index, "tp suspend before lcd set lp mode\n");
+			if (ts->speedup_resume_wq) {
+				flush_workqueue(ts->speedup_resume_wq);       /*wait speedup_resume_wq done*/
+			}
+			lcd_off_early_event(ts);
+		}
+		break;
+	case UNISOC_DISPLAY_EVENT_FPS_CHANGE:
+		TP_INFO(ts->tp_index, "Received fps change old fps:%d new fps:%d\n",
+				notification->event_data.fps_data.old_fps,
+				notification->event_data.fps_data.new_fps);
+
+		if (ts->lcd_tp_refresh_support) {
+			lcd_tp_refresh_switch(ts->tp_index,
+					notification->event_data.fps_data.new_fps);
+		}
+		break;
+	case UNISOC_DISPLAY_EVENT_FOR_TOUCH:
+
+		lcd_other_event(&notification->event_data.lcd_ctl_blank, ts);
+		break;
+	default:
+		if (notification->event_type <= UNISOC_DISPLAY_EVENT_FOR_TOUCH) {
+			TP_INFO(ts->tp_index, "notification serviced :%d\n",
+				notification->event_type);
+		}
+		break;
+	}
+
+	return NOTIFY_OK;
+}
+
 #else
 static int fb_notifier_callback(struct notifier_block *self, unsigned long event, void *data)
 {
@@ -5496,6 +5748,12 @@ void tp_shutdown(struct touchpanel_data *ts)
 	TP_INFO(ts->tp_index, "qcom gki2.0 need to unregister notifier");
 	if (ts->active_panel && ts->notifier_cookie) {
 		panel_event_notifier_unregister(ts->notifier_cookie);
+	}
+#endif
+#ifdef CONFIG_UNISOC_DISPLAY_NOTIFIER
+	TP_INFO(ts->tp_index, "unisoc display notifier need to unregister");
+	if (ts->fb_notif.notifier_call) {
+		unregister_unisoc_display_notifier(&ts->fb_notif);
 	}
 #endif
 	/*step0 :close esd*/
@@ -5629,7 +5887,7 @@ bool is_oem_unlocked(void)
 	return (oem_verifiedbootstate == OEM_VERIFIED_BOOT_STATE_UNLOCKED);
 }
 EXPORT_SYMBOL(is_oem_unlocked);
-
+#ifndef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
 #ifndef CONFIG_REMOVE_OPLUS_FUNCTION
 #if IS_MODULE(CONFIG_TOUCHPANEL_OPLUS)
 extern char verified_bootstate[];
@@ -5653,7 +5911,7 @@ int get_oem_verified_boot_state(void)
 }
 EXPORT_SYMBOL(get_oem_verified_boot_state);
 #endif
-
+#endif
 /*******Part4:Extern Function  Area********************************/
 static void lcd_trigger_load_tp_fw(struct work_struct *work)
 {
@@ -5690,7 +5948,8 @@ static void lcd_trigger_load_tp_fw(struct work_struct *work)
 	IS_ENABLED(CONFIG_DRM_MSM) || \
 	IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY) || \
 	IS_ENABLED(CONFIG_QCOM_PANEL_EVENT_NOTIFIER) || \
-	IS_ENABLED(CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY)
+	IS_ENABLED(CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY) || \
+	IS_ENABLED(CONFIG_UNISOC_DISPLAY_NOTIFIER)
 static void lcd_tp_load_fw(unsigned int tp_index)
 {
 	struct touchpanel_data *ts = NULL;
@@ -5883,6 +6142,7 @@ static int tp_control_cs_gpio(bool enable, unsigned int tp_index)
 static int tp_gesture_enable_flag(unsigned int tp_index)
 {
 	struct touchpanel_data *ts = NULL;
+	int ret = 0;
 
 	if (tp_index >= TP_SUPPORT_MAX) {
 		return LCD_POWER_OFF;
@@ -5894,9 +6154,15 @@ static int tp_gesture_enable_flag(unsigned int tp_index)
 		return LCD_POWER_OFF;
 	}
 
-	TP_INFO(ts->tp_index, "gesture_enable is %d\n", ts->gesture_enable);
+	ret = (ts->gesture_enable > 0) ? LCD_POWER_ON : LCD_POWER_OFF;
 
-	return (ts->gesture_enable > 0) ? LCD_POWER_ON : LCD_POWER_OFF;
+	if (ts->is_noflash_ic && ts->pen_support_opp && ts->loading_fw == true) {
+		ret = LCD_POWER_ON;
+		TP_INFO(ts->tp_index, "%s:update fw work when suspending,not disable lcd power,ret:%d\n", __func__, ret);
+	}
+
+	TP_INFO(ts->tp_index, "%s: ret:%d\n", __func__, ret);
+	return ret;
 }
 #endif
 
@@ -5916,5 +6182,61 @@ static void lcd_tp_refresh_work(struct work_struct *work)
 		mutex_unlock(&ts->mutex);
 	}
 }
+
+/**
+ * is_fp_recognition_area - Check if coordinates are in fingerprint recognition area
+ * @ts: touchpanel data
+ * @x: x coordinate
+ * @y: y coordinate
+ *
+ * Return: true if coordinates are in fp recognition area, false otherwise
+ */
+static bool is_fp_recognition_area(struct touchpanel_data *ts, unsigned int x, unsigned int y)
+{
+	unsigned int para[4] = {0};
+
+	if (!ts) {
+		return false;
+	}
+
+	memcpy(para, ts->fp_recognition_area, sizeof(para));
+
+	/* Check if x and y are within the recognition area */
+	if (((x >= (para[0] - para[2])) && x <= (para[0] + para[2])) &&
+	    ((y >= (para[1] - para[3])) && y <= (para[1] + para[3]))) {
+		return true;
+	}
+
+	return false;
+}
+
+/**
+ * check_is_touch_on_fp_area - Check if touch is on fingerprint area and update count
+ * @ts: touchpanel data
+ * @status: touch status (1 = down, 0 = up)
+ * @x: x coordinate
+ * @y: y coordinate
+ *
+ * Return: 1 if touch is on fp area (status=1), 0 otherwise
+ */
+static int check_is_touch_on_fp_area(struct touchpanel_data *ts, unsigned int status, unsigned int x, unsigned int y)
+{
+	int is_touch_fp_area_cnt = 0;
+
+	if (!ts) {
+		return 0;
+	}
+
+	if (status == 1) {
+		if (is_fp_recognition_area(ts, x, y)) {
+			is_touch_fp_area_cnt = 1;
+		}
+	} else if (status == 0) {
+		is_touch_fp_area_cnt = 0;
+	}
+
+	return is_touch_fp_area_cnt;
+}
+
 MODULE_DESCRIPTION("Touchscreen common Driver");
 MODULE_LICENSE("GPL");

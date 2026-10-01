@@ -75,6 +75,7 @@
 /* gesture type for fingerprint start */
 #define FP_GESTURE_HOLD     19
 #define FP_GESTURE_RELEASE  20
+#define FINGERPRINT_EARLY_DOWN 21
 /* gesture type for fingerprint end */
 
 #define WATERPROOF_RUS_BIT	7
@@ -422,6 +423,7 @@ struct gesture_info {
 	struct Coordinate Point_3rd;
 	struct Coordinate Point_4th;
 	uint8_t gesture_panel_id;
+	int tp_firmware_time;
 };
 
 struct pen_info {
@@ -441,6 +443,8 @@ struct pen_info {
 	uint16_t    min_y;
 	uint16_t    max_x;
 	uint16_t    max_y;
+	uint16_t    diff;
+	uint16_t    velocity;
 };
 
 enum tp_state_in_pen {
@@ -486,6 +490,11 @@ struct fp_underscreen_info {
 	uint8_t area_rate;
 	uint16_t x;
 	uint16_t y;
+	int touch_early_down_flag;
+	long is_touch_fp_area_cnt;
+	ktime_t touch_fp_area_time;
+	ktime_t fp_down_time;
+	int tp_firmware_time;
 };
 
 struct specific_resume_data {
@@ -689,6 +698,7 @@ typedef enum {
 	TYPE_PENCIL_MAXEYE_2ND = 3,
 	TYPE_PENCIL_SUNWODA = 4,
 	TYPE_PENCIL_MAXEYE_3RD = 5,
+	TYPE_PENCIL_MAXEYE_4TH = 6,
 } pencil_type;
 
 typedef enum {
@@ -784,6 +794,7 @@ struct irq_type_count{
 	u64 in_resume_irq_fingerprint_cnt;
 	u64 in_suspend_irq_pen_cnt;
 	u64 in_resume_irq_pen_cnt;
+	u64 in_resume_irq_pen_in_game_cnt;
 	u64 in_resume_irq_palm_cnt;
 	u64 in_suspend_irq_pen_report_cnt;
 	u64 in_resume_irq_pen_report_cnt;
@@ -811,6 +822,7 @@ struct monitor_data {
 
 	bool health_monitor_support;
 	bool kernel_grip_support;
+	bool tx_rx_num_exchange_support;
 	int max_finger_support;
 	int tx_num;
 	int rx_num;
@@ -1123,6 +1135,7 @@ struct touchpanel_data {
 	bool touchz_to_pressure_support;                    /*feature used to report touchZ to Pressure */
 	bool palm_to_sleep_support;                         /*feature used to sleep when device trigger palm gesture in screen lock*/
 	bool tp_data_record_support;                        /*feature used to data record when get tp log*/
+	int tp_data_record_enable;                          /*value used to check data record enable or not*/
 	bool suspend_work_support;                          /*feature used to support suspend work queue*/
 	int glove_enable;                                   /*control state of glove gesture*/
 	int rainstorm_enable;                               /*control state of rainstorm mode*/
@@ -1209,6 +1222,13 @@ struct touchpanel_data {
 	int fp_up_cnt;
 	bool fp_unlock_status_support;
 	u8  fp_unlock_status;
+	/* fp recognition area */
+	unsigned int fp_recognition_area[4];                 /*fingerprint recognition area: [center_x, center_y, width_range, height_range]*/
+	long is_touch_fp_area_cnt;                          /*count of touch on fp area for all fingers*/
+	/* fp info saved when screen off */
+	ktime_t touch_fp_area_time;                         /*touch fp area time saved when screen off*/
+	int touch_early_down_flag;                          /*touch early down flag saved when screen off*/
+	long saved_is_touch_fp_area_cnt;                    /*saved is_touch_fp_area_cnt when screen off*/
 
 	/******For pm suspend and resume area********/
 	bool bus_ready;                                     /*spi or i2c resume status*/
@@ -1318,6 +1338,7 @@ struct touchpanel_data {
 	bool pen_support;                                   /*support pen control*/
 	bool pen_support_opp;                               /*support pen private protocol*/
 	bool no_need_osctest;
+	bool pen_enable_first;
 	bool tp_scene_para_switch_support;
 	bool bus_ready_check_support;                       /*not transfer if bus_ready false*/
 	bool tp_lcd_suspend_in_lp_support;                  /*tp suspend before lcd set lp(aod) mode*/
@@ -1353,7 +1374,7 @@ struct touchpanel_data {
 	void *notifier_cookie;
 #elif IS_ENABLED(CONFIG_OPLUS_MTK_DRM_GKI_NOTIFY)
 	struct notifier_block disp_notifier;
-#elif IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY) || IS_ENABLED(CONFIG_FB)
+#elif IS_ENABLED(CONFIG_DRM_MSM) || IS_ENABLED(CONFIG_DRM_OPLUS_NOTIFY) || IS_ENABLED(CONFIG_FB) || IS_ENABLED(CONFIG_UNISOC_DISPLAY_NOTIFIER)
 	struct notifier_block fb_notif;	/*register to control suspend/resume*/
 #endif
 	notify_state notify_state;	/*detail notify state*/
@@ -1463,6 +1484,7 @@ struct touchpanel_data {
 #endif
 	struct task_struct *suspend_task;
 	int supspend_task_error_cnt;
+	bool supplier_tool_in_use; /* for nova test apk */
 };
 
 #ifdef CONFIG_OPLUS_TP_APK
@@ -1611,6 +1633,7 @@ struct debug_info_proc_operations {
 	void (*get_delta_data)(void *chip_data, int32_t *deltadata);
 	void (*delta_snr_read)(struct seq_file *s, void *chip_data, uint32_t count);
 	void (*tp_data_record_write)(void *chip_data, int32_t count);
+	void (*tp_data_debug_info_print)(void *chip_data);
 };
 
 /*********PART3:function or variables for other files**********************/
