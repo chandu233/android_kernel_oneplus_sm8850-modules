@@ -3,6 +3,7 @@
 //-----------------------------------------------------------------------------
 #include "dio4480.h"
 #include "dio4483.h"
+#include "dio4485.h"
 #include "common_reg.h"
 
 //-----------------------------------------------------------------------------
@@ -41,6 +42,7 @@ enum TYPEC_SWITCH_CHIP {
 	DIO_CHIP_4480 		= 0xF1,
 	DIO_CHIP_4483 		= 0xF3,
 	DIO_CHIP_4483_2 	= 0xF5,
+	DIO_CHIP_4485 		= 0xF6,
 	WAS_CHIP_4783		= 0x31,
 	TYPEC_SWITCH_CHIP_MAX 	= 0xFF,
 };
@@ -48,6 +50,7 @@ enum TYPEC_SWITCH_CHIP {
 enum typec_switch_vendor {
 	DIO4480,
 	DIO4483,
+	DIO4485,
 	WAS4783,
 	DIO_MAX
 };

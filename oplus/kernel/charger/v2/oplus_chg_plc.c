@@ -51,7 +51,6 @@ struct plc_data {
 	int init_ui_soc;
 	int sm_soc;
 	int avg_ibat;
-	int avg_curr;
 	int avg_ibus;
 	int ibat_low;
 	int ibus_over;
@@ -142,6 +141,7 @@ struct oplus_chg_plc {
 	int ui_soc;
 	int sm_soc;
 	int plc_status;
+	int plc_pre_status;
 	int plc_buck;
 	int plc_soc;
 	bool plc_support_timeout;
@@ -151,17 +151,45 @@ struct oplus_chg_plc {
 	int track_count;
 };
 
+static int plc_voter_check_func(struct votable *votable, void *data,
+	const char *client_str, bool enabled, int val, bool step)
+{
+	struct oplus_chg_plc *chip = data;
+
+	if (chip == NULL) {
+		chg_err("data is NULL\n");
+		return -EINVAL;
+	}
+	if (!enabled)
+		return 0;
+
+	if (chip->plc_status != PLC_STATUS_ENABLE && chip->plc_pre_status != PLC_STATUS_ENABLE)
+		return -EINVAL;
+
+	return 0;
+}
+
 static bool is_output_suspend_votable_available(struct oplus_chg_plc *chip)
 {
-	if (!chip->output_suspend_votable)
+	if (!chip->output_suspend_votable) {
 		chip->output_suspend_votable = find_votable("WIRED_CHARGING_DISABLE");
+		if (!chip->output_suspend_votable)
+			return false;
+		votable_add_client_check_func(chip->output_suspend_votable,
+			PLC_VOTER, chip, plc_voter_check_func);
+	}
 	return !!chip->output_suspend_votable;
 }
 
 static bool is_wired_suspend_votable_available(struct oplus_chg_plc *chip)
 {
-	if (!chip->wired_suspend_votable)
+	if (!chip->wired_suspend_votable) {
 		chip->wired_suspend_votable = find_votable("WIRED_CHARGE_SUSPEND");
+		if (!chip->wired_suspend_votable)
+			return false;
+		votable_add_client_check_func(chip->wired_suspend_votable,
+			PLC_VOTER, chip, plc_voter_check_func);
+	}
 	return !!chip->wired_suspend_votable;
 }
 
@@ -1672,6 +1700,7 @@ static void oplus_plc_set_status(struct oplus_chg_plc *chip, enum plc_enable_sta
 	if (chip->plc_status == status)
 		return;
 	chip->plc_status = status;
+	chip->plc_pre_status = chip->plc_status;
 	chg_info("plc_status=%s\n", plc_enable_status_str(status));
 
 	msg = oplus_mms_alloc_msg(MSG_TYPE_ITEM, MSG_PRIO_MEDIUM,
@@ -1903,9 +1932,9 @@ static void oplus_plc_wired_online_work(struct work_struct *work)
 			schedule_delayed_work(&chip->plc_disable_wait_work, 0);
 		} else {
 			mutex_lock(&chip->status_control_lock);
-			oplus_plc_set_status(chip, PLC_STATUS_NOT_ALLOW);
 			vote(chip->output_suspend_votable, PLC_VOTER, false, 0, false);
 			vote(chip->wired_suspend_votable, PLC_VOTER, false, 0, false);
+			oplus_plc_set_status(chip, PLC_STATUS_NOT_ALLOW);
 			mutex_unlock(&chip->status_control_lock);
 		}
 	}
@@ -2508,6 +2537,11 @@ static int oplus_chg_plc_remove(struct platform_device *pdev)
 {
 	struct oplus_chg_plc *chip = platform_get_drvdata(pdev);
 
+	if (chip->output_suspend_votable != NULL)
+		votable_remove_client_check_func(chip->output_suspend_votable, PLC_VOTER);
+	if (chip->wired_suspend_votable != NULL)
+		votable_remove_client_check_func(chip->wired_suspend_votable, PLC_VOTER);
+
 	oplus_plc_release_protocol(chip->plc_topic, chip->buck_opp);
 	if (!IS_ERR_OR_NULL(chip->comm_subs))
 		oplus_mms_unsubscribe(chip->comm_subs);
@@ -2987,6 +3021,7 @@ static int oplus_chg_plc_enable_action(struct oplus_chg_plc *chip, bool enable)
 		goto out;
 	}
 
+	chip->plc_pre_status = PLC_STATUS_ENABLE;
 	rc = __oplus_chg_plc_enable(chip);
 	if (rc == -ENOTSUPP) {
 		oplus_plc_set_status(chip, PLC_STATUS_NOT_ALLOW);

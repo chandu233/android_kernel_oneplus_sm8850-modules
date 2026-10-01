@@ -4129,12 +4129,12 @@ static int oplus_sc6607_get_charger_type(void)
 	if (!g_chip || !chg_chip || !probe_done)
 		return POWER_SUPPLY_TYPE_UNKNOWN;
 
-	if (g_chip->pd_sdp_port && chg_chip->usb_psy) {
+	if (g_chip->pd_sdp_port && chg_chip->usb_psy && g_chip->bc12_done) {
 		power_supply_changed(chg_chip->usb_psy);
 		return POWER_SUPPLY_TYPE_USB_PD_SDP;
 	}
 
-	if (oplus_check_pd_usb_type() == PORT_PD_WITH_USB)
+	if (oplus_check_pd_usb_type() == PORT_PD_WITH_USB && g_chip->bc12_done)
 		return POWER_SUPPLY_TYPE_USB_PD_SDP;
 
 	if (g_chip->oplus_chg_type != chg_chip->charger_type && chg_chip->usb_psy)
@@ -6047,10 +6047,6 @@ struct tsbus_charger_temp {
 	struct thermal_zone_device *tzd;
 };
 
-struct tsbat_charger_temp {
-	struct thermal_zone_device *tzd_tsbat;
-};
-
 static int sc6607_voocphy_get_tsbus_temp(struct thermal_zone_device *tz,
 		int *temp)
 {
@@ -6063,24 +6059,8 @@ static int sc6607_voocphy_get_tsbus_temp(struct thermal_zone_device *tz,
 	return 0;
 }
 
-static int sc6607_voocphy_get_tsbat_temp(struct thermal_zone_device *tz,
-		int *temp)
-{
-	struct tsbat_charger_temp *hst;
-	if (!temp || !tz)
-		return -EINVAL;
-	hst = tz->devdata;
-	*temp = sc6607_voocphy_get_tsbat();
-
-	return 0;
-}
-
 static struct thermal_zone_device_ops charger_temp_ops = {
 	.get_temp = sc6607_voocphy_get_tsbus_temp,
-};
-
-static struct thermal_zone_device_ops charger_temp_tsbat_ops = {
-	.get_temp = sc6607_voocphy_get_tsbat_temp,
 };
 
 static int register_charger_thermal(struct sc6607 *info)
@@ -6097,22 +6077,6 @@ static int register_charger_thermal(struct sc6607 *info)
 #endif
 	if (IS_ERR(tz_dev)) {
 		chg_err("charger_temp register fail");
-		ret = -ENODEV;
-	}
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0))
-	ret = thermal_zone_device_enable(tz_dev);
-	if (ret)
-		thermal_zone_device_unregister(tz_dev);
-#endif
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
-	tz_dev = thermal_tripless_zone_device_register("charger_temp_tsbat",
-					NULL, &charger_temp_tsbat_ops, NULL);
-#else
-	tz_dev = thermal_zone_device_register("charger_temp_tsbat",
-					0, 0, NULL, &charger_temp_tsbat_ops, NULL, 0, 0);
-#endif
-	if (IS_ERR(tz_dev)) {
-		chg_err("charger_temp_tsbat register fail");
 		ret = -ENODEV;
 	}
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0))

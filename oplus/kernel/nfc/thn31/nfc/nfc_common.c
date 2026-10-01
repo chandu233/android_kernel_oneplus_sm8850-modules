@@ -47,6 +47,24 @@ void nfc_hard_reset(struct nfc_info *nfc)
     nfc->tms->set_gpio(nfc->hw_res.ven_gpio, ON, WAIT_TIME_NONE, WAIT_TIME_20000US);
 }
 
+void nfc_set_ven_off(struct nfc_info *nfc)
+{
+    if (!nfc->tms->set_gpio) {
+        TMS_ERR("nfc->tms->set_gpio is NULL");
+        return;
+    }
+    nfc->tms->set_gpio(nfc->hw_res.ven_gpio, OFF, WAIT_TIME_20000US, WAIT_TIME_20000US);
+}
+
+void nfc_set_ven_on(struct nfc_info *nfc)
+{
+    if (!nfc->tms->set_gpio) {
+        TMS_ERR("nfc->tms->set_gpio is NULL");
+        return;
+    }
+    nfc->tms->set_gpio(nfc->hw_res.ven_gpio, ON, WAIT_TIME_20000US, WAIT_TIME_20000US);
+}
+
 void nfc_read_flush(struct nfc_info *nfc)
 {
     /*

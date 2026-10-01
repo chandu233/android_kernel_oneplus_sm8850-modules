@@ -25,12 +25,16 @@ def define_oplus_local_modules():
         qmi_ko_deps = [
             soc_label("{}/drivers/soc/qcom/qmi_helpers").format(kernel_build_variant),
         ]
+        oplus_trace_sensor_err_header_deps = [
+            modules_label("oplus/sensor/kernel:oplus_trace_sensor_err_headers"),
+        ]
     else :
         oplus_bsp_boot_projectinfo_ko_deps = []
         oplus_bsp_kfb_ko_deps = []
         smem_ko_deps = []
         panel_event_notifier_ko_deps = []
         qmi_ko_deps = []
+        oplus_trace_sensor_err_header_deps = []
 
     define_oplus_ddk_module(
         name = "oplus_sensor_ir_core",
@@ -95,6 +99,7 @@ def define_oplus_local_modules():
         includes = ["."],
         local_defines = ["CFG_OPLUS_ARCH_IS_QCOM",
                          "CONFIG_OPLUS_SENSOR_DRM_PANEL_NOTIFY"],
+        header_deps = oplus_trace_sensor_err_header_deps,
         ko_deps = smem_ko_deps + oplus_bsp_kfb_ko_deps,
     )
 
@@ -112,6 +117,17 @@ def define_oplus_local_modules():
         ko_deps = smem_ko_deps + qmi_ko_deps,
     )
 
+    define_oplus_ddk_module(
+        name = "oplus_data_record",
+        srcs = native.glob([
+            "oplus_data_record/*.h",
+            "oplus_data_record/*.c",
+        ]),
+        includes = ["oplus_data_record"],
+        local_defines = ["CFG_OPLUS_ARCH_IS_QCOM"],
+        ko_deps = smem_ko_deps + oplus_bsp_kfb_ko_deps,
+    )
+
     ddk_copy_to_dist_dir(
         name = "oplus_bsp_sensor",
         module_list = [
@@ -121,6 +137,7 @@ def define_oplus_local_modules():
             "oplus_sensor_interact",
             "oplus_sensor_feedback",
             "pseudo_sensor",
+            "oplus_data_record",
         ],
         conditional_builds = {
             "pseudo_sensor": {

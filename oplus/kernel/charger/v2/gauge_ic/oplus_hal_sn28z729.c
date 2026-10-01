@@ -5,7 +5,13 @@
 
 #ifdef CONFIG_OPLUS_CHARGER_MTK
 #include <asm/atomic.h>
+#include <linux/version.h>
+#include <linux/string.h>
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+#include <linux/unaligned.h>
+#else
 #include <asm/unaligned.h>
+#endif
 #include <linux/init.h>
 #include <linux/input.h>
 #include <linux/irq.h>
@@ -45,7 +51,6 @@
 #include <linux/proc_fs.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
-#include <linux/version.h>
 #include <oplus_chg_comm.h>
 #include <oplus_chg_ic.h>
 #include <oplus_chg_module.h>
@@ -1474,6 +1479,76 @@ err:
 	mutex_unlock(&chip->extended_cmd_access);
 	return false;
 }
+
+#ifdef CONFIG_OPLUS_CHARGER_MTK
+#define AUTH_MESSAGE_LEN 20
+#define AUTH_TAG "ogauge_auth="
+#define AUTH_PROP "ogauge_auth"
+static const char *oplus_chg_get_cmdline(const char *target_str);
+#ifdef MODULE
+static char __oplus_chg_cmdline[COMMAND_LINE_SIZE];
+static char *oplus_chg_cmdline = __oplus_chg_cmdline;
+
+const char *oplus_chg_get_cmdline(const char *target_str)
+{
+	struct device_node * of_chosen = NULL;
+	char *ogauge_auth = NULL;
+
+	if (!target_str)
+		return oplus_chg_cmdline;
+
+	if (__oplus_chg_cmdline[0] != 0)
+		return oplus_chg_cmdline;
+
+	of_chosen = of_find_node_by_path("/chosen");
+	if (of_chosen) {
+		ogauge_auth = (char *)of_get_property(
+					of_chosen, target_str, NULL);
+		if (!ogauge_auth)
+			pr_err("%s: failed to get %s\n", __func__, target_str);
+		else {
+			strscpy(__oplus_chg_cmdline, ogauge_auth, sizeof(__oplus_chg_cmdline));
+			pr_err("%s: %s: %s\n", __func__, target_str, ogauge_auth);
+		}
+	} else {
+		pr_err("%s: failed to get /chosen \n", __func__);
+	}
+
+	return oplus_chg_cmdline;
+}
+#else
+const char *oplus_chg_get_cmdline(const char *target_str)
+{
+	if (!target_str)
+		pr_err("%s: args set error\n", __func__);
+
+	return saved_command_line;
+}
+#endif
+static int get_auth_msg(u8 *source, u8 *rst)
+{
+	char *str = NULL;
+	int i;
+
+	str = strstr(oplus_chg_get_cmdline(AUTH_PROP), AUTH_TAG);
+	if (str == NULL) {
+		pr_err("Asynchronous authentication is not supported!!!\n");
+		return -1;
+	}
+	pr_info("%s\n", str);
+	str += strlen(AUTH_TAG);
+	for (i = 0; i < AUTH_MESSAGE_LEN; i++) {
+		source[i] = (str[2 * i] - 64) | ((str[2 * i + 1] - 64) << 4);
+		pr_info("source index %d = %x\n", i, source[i]);
+	}
+	str += AUTH_MESSAGE_LEN * 2;
+	for (i = 0; i < AUTH_MESSAGE_LEN; i++) {
+		rst[i] = (str[2 * i] - 64) | ((str[2 * i + 1] - 64) << 4);
+		pr_info("expected index %d = %x\n", i, rst[i]);
+	}
+	return 0;
+}
+#endif
 
 static bool sn28z729_get_smem_batt_info(oplus_gauge_auth_result *auth, int kk)
 {
@@ -3735,9 +3810,6 @@ static int oplus_set_ui_soh(struct oplus_chg_ic_dev *ic_dev, u8 ui_soh)
 	if (!chip)
 		return -EINVAL;
 
-	if (!chip->support_eco_design)
-		return -ENOTSUPP;
-
 	check_sum = 0xFF - (ui_soh & 0xFF);
 	data = ui_soh << 8 | check_sum;
 	ret = sn28z729_set_batt_ui_soh(chip, data);
@@ -3784,9 +3856,6 @@ static int oplus_get_ui_soh(struct oplus_chg_ic_dev *ic_dev, u8 *ui_soh)
 
 	if (!chip || !ui_soh)
 		return -EINVAL;
-
-	if (!chip->support_eco_design)
-		return -ENOTSUPP;
 
 	ret = sn28z729_get_batt_ui_soh(chip, ui_soh);
 	if (ret < 0)

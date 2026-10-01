@@ -81,6 +81,7 @@ enum ufcs_data_msg_type {
 	DATA_MSG_TEST_REQUEST = 0xff,
 };
 
+#define UFCS_OUTPUT_MODE_LEN			3
 #define UFCS_OUTPUT_MODE_MAX			7
 #define UFCS_OUTPUT_MODE_INDEX(mode)		(((mode) >> 60) & 0xf)
 #define UFCS_OUTPUT_MODE_CURR_STEP(mode)	(((((mode) >> 57) & 0x7) + 1) * 10)
@@ -139,6 +140,16 @@ struct ufcs_data_msg_sink_info {
 	u64 info;
 } __attribute__((packed));
 
+#include "../ufcs_cable_info.h"
+#define UFCS_CABLE_CURR_SIZE			4
+#define UFCS_CABLE_INFO_STEP			10
+#define UFCS_CABLE_INFO_EXT_IMP(cable_info) \
+	((((cable_info)[4]) | ((cable_info)[5] << 8)) * UFCS_CABLE_INFO_STEP)
+#define UFCS_CABLE_INFO_EXT_CURR_MAX(cable_info) \
+	((((cable_info)[0]) | ((cable_info)[1] << 8)) * UFCS_CABLE_INFO_STEP)
+#define UFCS_CABLE_INFO_EXT_VOL_MAX(cable_info) \
+	((((cable_info)[2]) | ((cable_info)[3] << 8)) * UFCS_CABLE_INFO_STEP)
+
 #define UFCS_CABLE_INFO_RESERVE0(info)		(((info) >> 48) & 0xffff)
 #define UFCS_CABLE_INFO_RESERVE1(info)		(((info) >> 32) & 0xffff)
 #define UFCS_CABLE_INFO_IMP(info)		(((info) >> 16) & 0xffff)	/* mΩ */
@@ -148,8 +159,11 @@ struct ufcs_data_msg_sink_info {
 	((((u64)(imp) & 0xffff) << 16) | (((u64)(vol_max / 1000) & 0xff) << 8) |	\
 	 ((u64)(curr_max / 1000) & 0xff))
 struct ufcs_data_msg_cable_info {
-	u64 info;
+	u8 info[UFCS_CABLE_INFO_SIZE];
+	u64 legacy;
+	int legacy_rc;
 } __attribute__((packed));
+
 
 #define UFCS_DEVICE_INFO_DEV_VENDOR(info)	(((info) >> 48) & 0xffff)
 #define UFCS_DEVICE_INFO_IC_VENDOR(info)	(((info) >> 32) & 0xffff)
@@ -247,6 +261,8 @@ struct ufcs_data_msg_refuse {
 #define UFCS_VERIFY_RANDOM_DATA_SIZE		16
 #define UFCS_VERIFY_ENCRYPTED_DATA_SIZE		32
 #define UFCS_VERIFY_AUTH_DATA_SIZE		16
+#define UFCS_USER_ENCRYPT_RANDOM_DATA_SIZE	32
+#define UFCS_USER_ENCRYPT_AUTH_DATA_SIZE	32
 struct ufcs_data_msg_verify_request {
 	u8 index;
 	u8 random_data[UFCS_VERIFY_RANDOM_DATA_SIZE];
@@ -260,10 +276,12 @@ struct ufcs_data_msg_verify_response {
 #define UFCS_POWER_CHANGE_INDEX(data)		(((data) >> 20) & 0xf)
 #define UFCS_POWER_CHANGE_RESERVE(data)		(((data) >> 16) & 0xf)
 #define UFCS_POWER_CHANGE_CURR_MAX(data)	(((data) & 0xffff) * 10)
-#define UFCS_POWER_CHANGE_DATA(index, curr_max)	\
-	((((u32)(index) & 0xf) << 20) | ((u32)(curr_max) & 0xffff))
+#define UFCS_PWR_CHANGE_DATA(data)	\
+	((((u32)((data)[0])) << 16) | (((u32)((data)[1])) << 8) | ((u32)((data)[2])))
+
 struct ufcs_data_msg_power_change {
-	u32 data[UFCS_OUTPUT_MODE_MAX];
+	u8 data[UFCS_OUTPUT_MODE_MAX][3];
+	u8 length;
 } __attribute__((packed));
 
 #define UFCS_TEST_REQUEST_ENABLE_TEST_MODE(data)		(((data) >> 15) & 0x1)

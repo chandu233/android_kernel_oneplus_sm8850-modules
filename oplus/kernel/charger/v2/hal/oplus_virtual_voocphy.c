@@ -33,7 +33,6 @@ struct oplus_virtual_vphy_gpio {
 	int vphy_switch1_gpio;
 	int vphy_switch2_gpio;
 	int vphy_id_gpio;
-	int data_irq;
 
 	struct pinctrl *pinctrl;
 	struct mutex pinctrl_mutex;
@@ -42,9 +41,6 @@ struct oplus_virtual_vphy_gpio {
 	struct pinctrl_state *vphy_switch_vooc;
 	struct pinctrl_state *gpio_switch_ctrl_ap;
 	struct pinctrl_state *gpio_switch_ctrl_vphy;
-
-	struct pinctrl_state *vphy_id_active;
-	struct pinctrl_state *vphy_id_sleep;
 };
 
 struct oplus_virtual_vphy_child {
@@ -344,7 +340,6 @@ static int oplus_chg_vphy_set_switch_mode(struct oplus_chg_ic_dev *ic_dev,
 			}
 			chg_info("switch to vooc mode\n");
 			break;
-			usleep_range(5000, 5000);
 		} while (--retry > 0);
 		break;
 	case VOOC_SWITCH_MODE_HEADPHONE:

@@ -13,7 +13,17 @@ def define_oplus_local_modules():
         includes = ["."],
         conditional_defines = {
             "mtk":  ["CONFIG_MTK_PLATFORM", "CONFIG_OPLUS_DEVICE_INFO_MTK_PLATFORM"],
+            "unisoc": ["CONFIG_UNISOC_PLATFORM"],
         },
+    )
+
+    ddk_headers(
+        name = "config_headers",
+        hdrs = native.glob([
+            "*.h",
+            "soc/oplus/*.h",
+        ]),
+        includes = [".", "soc/oplus"],
     )
 
     ddk_copy_to_dist_dir(

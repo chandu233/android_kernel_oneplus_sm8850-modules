@@ -63,6 +63,7 @@ endif
 ifeq ($(call is-board-platform-in-list,canoe), true)
 PRODUCT_PACKAGES += $(KERNEL_MODULES_OUT)/oplus_audio_extend.ko
 PRODUCT_PACKAGES += $(KERNEL_MODULES_OUT)/oplus_audio_tfa98xx_v6.ko
+PRODUCT_PACKAGES += $(KERNEL_MODULES_OUT)/oplus_audio_tfa98xx.ko
 PRODUCT_PACKAGES += $(KERNEL_MODULES_OUT)/oplus_audio_aw882xx.ko
 PRODUCT_PACKAGES += $(KERNEL_MODULES_OUT)/oplus_audio_daemon.ko
 PRODUCT_PACKAGES += $(KERNEL_MODULES_OUT)/oplus_audio_netlink.ko

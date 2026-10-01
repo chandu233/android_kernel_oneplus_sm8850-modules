@@ -23,6 +23,7 @@ static int ufcs_pe_test_ctrl_request_handle(struct ufcs_class *class, enum ufcs_
 	u64 pdo[UFCS_OUTPUT_MODE_MAX];
 	u64 tmp_data;
 	int rc;
+	u8 info[UFCS_CABLE_INFO_SIZE];
 
 	switch (type) {
 	case CTRL_MSG_GET_OUTPUT_CAPABILITIES:
@@ -36,7 +37,7 @@ static int ufcs_pe_test_ctrl_request_handle(struct ufcs_class *class, enum ufcs_
 			ufcs_err("test mode get src info error, rc=%d\n", rc);
 		break;
 	case CTRL_MSG_GET_CABLE_INFO:
-		rc = ufcs_get_cable_info(class, &tmp_data);
+		rc = ufcs_get_cable_info_ext(class, info, sizeof(info));
 		if (rc < 0)
 			ufcs_err("test mode get cable info error, rc=%d\n", rc);
 		break;

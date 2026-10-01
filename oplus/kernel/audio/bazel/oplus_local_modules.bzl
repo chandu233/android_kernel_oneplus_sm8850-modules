@@ -1,3 +1,4 @@
+load(":repo_paths.bzl", "modules_label")
 load("//build/kernel/kleaf:kernel.bzl", "ddk_headers")
 load(":oplus_modules_define.bzl", "define_oplus_ddk_module", "bazel_support_platform", "oplus_ddk_get_kernel_version")
 
@@ -14,9 +15,9 @@ def define_oplus_local_modules():
         ]
     else :
         tfa98xx_ko_deps = [
+            modules_label("oplus/kernel/multimedia/feedback/bazel:oplus_mm_kevent_fb"),
         ]
-        tfa98xx_header_deps = [
-        ]
+        tfa98xx_header_deps = []
 
     define_oplus_ddk_module(
         name = "snd-soc-tfa98xx",
@@ -36,6 +37,8 @@ def define_oplus_local_modules():
             "CONFIG_OPLUS_FEATURE_MM_FEEDBACK",
             "OPLUS_ARCH_EXTENDS",
             "TFA98XX_GIT_VERSIONS=v6",
+            "TFA_NON_DSP_SOLUTION",
+            "OPLUS_TFA98XX_DRV_NEED_COMPAT",
             "OPLUS_FEATURE_SPEAKER_MUTE"
         ],
         copts = [

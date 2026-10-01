@@ -44,8 +44,9 @@
 #include <oplus_chg_module.h>
 #include "oplus_hal_sc6607_ufcs.h"
 #include "../voocphy/oplus_voocphy.h"
+#include "../charger_ic/oplus_hal_sc6607.h"
 
-struct sc6607 {
+struct sc6607_ufcs {
 	struct device *dev;
 	struct i2c_client *client;
 	struct regmap *regmap;
@@ -64,11 +65,14 @@ struct sc6607 {
 	struct oplus_voocphy_manager *voocphy;
 	struct delayed_work get_voocphy_client_work;
 	int found_voocphy_client_count;
+	struct sc6607 *sc6607_buck;
+	struct delayed_work get_buck_info_work;
+	int found_buck_client_count;
 };
 
 #define ERR_MSG_BUF	PAGE_SIZE
 __printf(3, 4)
-static int sc6607_publish_ic_err_msg(struct sc6607 *chip, int sub_type, const char *format, ...)
+static int sc6607_publish_ic_err_msg(struct sc6607_ufcs *chip, int sub_type, const char *format, ...)
 {
 	struct mms_msg *topic_msg;
 	va_list args;
@@ -102,7 +106,7 @@ static int sc6607_publish_ic_err_msg(struct sc6607 *chip, int sub_type, const ch
 	return rc;
 }
 
-static void sc6607_i2c_error(struct sc6607 *chip, bool happen, bool read)
+static void sc6607_i2c_error(struct sc6607_ufcs *chip, bool happen, bool read)
 {
 	if (!chip || chip->error_reported)
 		return;
@@ -122,7 +126,7 @@ static void sc6607_i2c_error(struct sc6607 *chip, bool happen, bool read)
 	}
 }
 
-static int sc6607_read_byte(struct sc6607 *chip, u8 addr, u8 *data)
+static int sc6607_read_byte(struct sc6607_ufcs *chip, u8 addr, u8 *data)
 {
 	int rc = 0;
 
@@ -147,7 +151,7 @@ error:
 }
 
 #define I2C_MSG_LEN	2
-static int sc6607_read_data(struct sc6607 *chip, u8 addr, u8 *buf, int len)
+static int sc6607_read_data(struct sc6607_ufcs *chip, u8 addr, u8 *buf, int len)
 {
 	int rc = 0;
 	struct i2c_msg msg[I2C_MSG_LEN] = {0};
@@ -181,7 +185,7 @@ error:
 	return rc;
 }
 
-static int sc6607_write_byte(struct sc6607 *chip, u8 addr, u8 data)
+static int sc6607_write_byte(struct sc6607_ufcs *chip, u8 addr, u8 data)
 {
 	int rc = 0;
 	u8 buf[2] = {addr & 0xff, data};
@@ -202,7 +206,7 @@ static int sc6607_write_byte(struct sc6607 *chip, u8 addr, u8 data)
 	return 0;
 }
 
-static int sc6607_write_data(struct sc6607 *chip, u8 addr, u16 length, u8 *data)
+static int sc6607_write_data(struct sc6607_ufcs *chip, u8 addr, u16 length, u8 *data)
 {
 	u8 *buf;
 	int rc = 0;
@@ -234,7 +238,7 @@ static int sc6607_write_data(struct sc6607 *chip, u8 addr, u16 length, u8 *data)
 	return 0;
 }
 
-static int sc6607_write_bit_mask(struct sc6607 *chip, u8 addr, u8 mask, u8 data)
+static int sc6607_write_bit_mask(struct sc6607_ufcs *chip, u8 addr, u8 mask, u8 data)
 {
 	u8 temp = 0;
 	int rc = 0;
@@ -279,30 +283,38 @@ static int sc6607_ufcs_get_adc_value(struct sc6607_ufcs *chip)
 static int sc6607_ufcs_write_msg(struct ufcs_dev *ufcs, unsigned char *buf, int len)
 {
 	int rc;
-	struct sc6607 *chip;
+	struct sc6607_ufcs *chip;
 
 	if (!ufcs || !ufcs->drv_data)
 		return -EINVAL;
 
 	chip = ufcs->drv_data;
+	if (!chip)
+		return -EINVAL;
 
+	if (chip->sc6607_buck)
+		mutex_lock(&chip->sc6607_buck->adc_read_lock);
 	rc = sc6607_write_byte(chip, SC6607_ADDR_TX_LENGTH, len);
 	if (rc < 0) {
 		chg_err("write tx buf len error, rc=%d\n", rc);
-		return rc;
+		goto err;
 	}
 	rc = sc6607_write_data(chip, SC6607_ADDR_TX_BUFFER0, len, buf);
 	if (rc < 0) {
 		chg_err("write tx buf error, rc=%d\n", rc);
-		return rc;
+		goto err;
 	}
 	rc = sc6607_write_bit_mask(chip, SC6607_ADDR_UFCS_CTRL0, SC6607_MASK_SND_CMP, SC6607_CMD_SND_CMP);
 	if (rc < 0) {
 		chg_err("write tx buf send cmd error, rc=%d\n", rc);
-		return rc;
+		goto err;
 	}
 	usleep_range(4000, 4000);
-	sc6607_ufcs_get_adc_value(chip);
+err:
+	if (chip->sc6607_buck)
+		mutex_unlock(&chip->sc6607_buck->adc_read_lock);
+	if (!rc)
+		sc6607_ufcs_get_adc_value(chip);
 	return rc;
 }
 
@@ -310,7 +322,7 @@ static int sc6607_ufcs_read_msg(struct ufcs_dev *ufcs, unsigned char *buf, int l
 {
 	u8 rx_buf_len;
 	int rc;
-	struct sc6607 *chip;
+	struct sc6607_ufcs *chip;
 
 	if (!ufcs || !ufcs->drv_data)
 		return -EINVAL;
@@ -337,7 +349,7 @@ static int sc6607_ufcs_read_msg(struct ufcs_dev *ufcs, unsigned char *buf, int l
 static int sc6607_ufcs_handshake(struct ufcs_dev *ufcs)
 {
 	int rc;
-	struct sc6607 *chip;
+	struct sc6607_ufcs *chip;
 
 	if (!ufcs || !ufcs->drv_data)
 		return -EINVAL;
@@ -354,7 +366,7 @@ static int sc6607_ufcs_source_hard_reset(struct ufcs_dev *ufcs)
 {
 	int rc;
 	int retry_count = 0;
-	struct sc6607 *chip;
+	struct sc6607_ufcs *chip;
 
 	if (!ufcs || !ufcs->drv_data)
 		return -EINVAL;
@@ -380,13 +392,26 @@ retry:
 
 static int sc6607_ufcs_cable_hard_reset(struct ufcs_dev *ufcs)
 {
-	return 0;
+	int rc;
+	struct sc6607_ufcs *chip;
+
+	if (!ufcs || !ufcs->drv_data)
+		return -EINVAL;
+
+	chip = ufcs->drv_data;
+
+	rc = sc6607_write_bit_mask(chip, SC6607_ADDR_UFCS_CTRL0, SC6607_SEND_CABLE_HARDRESET,
+		SC6607_SEND_CABLE_HARDRESET);
+	if (rc < 0)
+		chg_err("set cable reset error, rc=%d\n", rc);
+
+	return rc;
 }
 
 static int sc6607_ufcs_set_baud_rate(struct ufcs_dev *ufcs, enum ufcs_baud_rate baud)
 {
 	int rc;
-	struct sc6607 *chip;
+	struct sc6607_ufcs *chip;
 
 	if (!ufcs || !ufcs->drv_data)
 		return -EINVAL;
@@ -430,7 +455,7 @@ static int sc6607_ufcs_enable(struct ufcs_dev *ufcs)
 				SC6607_CMD_MASK_ACK_TIMEOUT,
 				SC6607_MASK_TRANING_BYTE_ERROR };
 	int i, rc;
-	struct sc6607 *chip;
+	struct sc6607_ufcs *chip;
 
 	if (!ufcs || !ufcs->drv_data)
 		return -EINVAL;
@@ -438,6 +463,9 @@ static int sc6607_ufcs_enable(struct ufcs_dev *ufcs)
 	chip = ufcs->drv_data;
 
 	sc6607_set_ufcs_enable(chip, true);
+
+	if (chip->sc6607_buck && chip->sc6607_buck->is_sc6607a)
+		sc6607a_set_dpdm_ctrl(chip->sc6607_buck, true);
 
 	for (i = 0; i < SC6607_ENABLE_REG_NUM; i++) {
 		rc = sc6607_write_byte(chip, addr_buf[i], cmd_buf[i]);
@@ -461,7 +489,7 @@ static int sc6607_ufcs_enable(struct ufcs_dev *ufcs)
 static int sc6607_ufcs_disable(struct ufcs_dev *ufcs)
 {
 	int rc;
-	struct sc6607 *chip;
+	struct sc6607_ufcs *chip;
 
 	if (!ufcs || !ufcs->drv_data)
 		return -EINVAL;
@@ -478,11 +506,14 @@ static int sc6607_ufcs_disable(struct ufcs_dev *ufcs)
 
 	sc6607_set_ufcs_enable(chip, false);
 
+	if (chip->sc6607_buck && chip->sc6607_buck->is_sc6607a)
+		sc6607a_set_dpdm_ctrl(chip->sc6607_buck, false);
+
 	return 0;
 }
 
 
-static int sc6607_retrieve_reg_flags(struct sc6607 *chip)
+static int sc6607_retrieve_reg_flags(struct sc6607_ufcs *chip)
 {
 	unsigned int err_flag = 0;
 	int rc = 0;
@@ -502,6 +533,8 @@ static int sc6607_retrieve_reg_flags(struct sc6607 *chip)
 		err_flag |= BIT(UFCS_COMM_ERR_RX_OVERFLOW);
 	if (flag_buf[0] & SC6607_FLAG_MSG_TRANS_FAIL)
 		err_flag |= BIT(UFCS_RECV_ERR_TRANS_FAIL);
+	if (flag_buf[0] & SC6607_FLAG_RX_BUFFER_BUSY)
+		err_flag |= BIT(UFCS_RECV_ERR_BUFF_BUSY);
 	if (flag_buf[0] & SC6607_FLAG_ACK_RECEIVE_TIMEOUT)
 		err_flag |= BIT(UFCS_RECV_ERR_ACK_TIMEOUT);
 	if (flag_buf[1] & SC6607_FLAG_BAUD_RATE_ERROR)
@@ -539,7 +572,7 @@ static int sc6607_retrieve_reg_flags(struct sc6607 *chip)
 static int sc6607_ufcs_event_handler(struct ufcs_dev *ufcs)
 {
 	int rc;
-	struct sc6607 *chip;
+	struct sc6607_ufcs *chip;
 
 	if (!ufcs || !ufcs->drv_data)
 		return -EINVAL;
@@ -578,9 +611,41 @@ static int sc6607_retrieve_flags(struct ufcs_dev *ufcs)
 	return rc;
 }
 
+static int sc6607_ufcs_hiz_enable(struct ufcs_dev *ufcs, bool en)
+{
+	struct sc6607_ufcs *chip;
+	int rc = 0;
+	u8 data = 0;
+
+	if (!ufcs || !ufcs->drv_data)
+		return -EINVAL;
+
+	chip = ufcs->drv_data;
+	if (en)
+		data = SC6607_SEND_ENABLE_HIZ;
+	else
+		data = 0;
+	rc = sc6607_write_bit_mask(chip, SC6607_ADDR_UFCS_CTRL1, SC6607_SEND_ENABLE_HIZ, data);
+	if (rc < 0)
+		chg_err("set ufcs hiz %d error, rc=%d\n", en, rc);
+
+	return rc;
+}
+
+static int sc6607_ufcs_clr_rx_buf(struct ufcs_dev *ufcs)
+{
+	struct sc6607_ufcs *chip = ufcs->drv_data;
+	int rc;
+
+	rc = sc6607_write_bit_mask(chip, SC6607_ADDR_UFCS_CTRL1, SC6607_SEND_CLR_RX_BUF, SC6607_SEND_CLR_RX_BUF);
+	if (rc < 0)
+		chg_err("clear rx buf error, rc=%d\n", rc);
+	return rc;
+}
+
 static void sc6607_ufcs_regdump_work(struct work_struct *work)
 {
-	struct sc6607 *chip = container_of(work, struct sc6607, ufcs_regdump_work);
+	struct sc6607_ufcs *chip = container_of(work, struct sc6607_ufcs, ufcs_regdump_work);
 	struct mms_msg *topic_msg;
 	char *buf;
 	int rc;
@@ -617,7 +682,7 @@ static void sc6607_ufcs_regdump_work(struct work_struct *work)
 
 static void sc6607_err_subs_callback(struct mms_subscribe *subs, enum mms_msg_type type, u32 id, bool sync)
 {
-	struct sc6607 *chip = subs->priv_data;
+	struct sc6607_ufcs *chip = subs->priv_data;
 
 	switch (type) {
 	case MSG_TYPE_ITEM:
@@ -636,7 +701,7 @@ static void sc6607_err_subs_callback(struct mms_subscribe *subs, enum mms_msg_ty
 
 static void sc6607_subscribe_error_topic(struct oplus_mms *topic, void *prv_data)
 {
-	struct sc6607 *chip = prv_data;
+	struct sc6607_ufcs *chip = prv_data;
 
 	chip->err_topic = topic;
 	chip->err_subs = oplus_mms_subscribe(chip->err_topic, chip, sc6607_err_subs_callback, "sc6607");
@@ -666,9 +731,11 @@ static struct ufcs_dev_ops ufcs_ops = {
 	.disable = sc6607_ufcs_disable,
 	.irq_event_handler = sc6607_ufcs_event_handler,
 	.retrieve_flags = sc6607_retrieve_flags,
+	.hiz_enable = sc6607_ufcs_hiz_enable,
+	.clr_rx_buf = sc6607_ufcs_clr_rx_buf,
 };
 
-static int sc6607_charger_choose(struct sc6607 *chip)
+static int sc6607_charger_choose(struct sc6607_ufcs *chip)
 {
 	int rc = 0;
 	u16 addr = 0x0;
@@ -683,7 +750,7 @@ static int sc6607_charger_choose(struct sc6607 *chip)
 	}
 }
 
-static int sc6607_dump_registers(struct sc6607 *chip)
+static int sc6607_dump_registers(struct sc6607_ufcs *chip)
 {
 	int rc = 0;
 	u16 addr = 0x0;
@@ -711,7 +778,7 @@ static int sc6607_dump_registers(struct sc6607 *chip)
 	return 0;
 }
 
-static int sc6607_hardware_init(struct sc6607 *chip)
+static int sc6607_hardware_init(struct sc6607_ufcs *chip)
 {
 	int rc = 0;
 
@@ -737,6 +804,33 @@ static struct regmap_config sc6607_regmap_config = {
 	.volatile_reg = sc6607_is_volatile_reg,
 };
 
+static int find_buck_i2c_clients(struct device *dev, void *data)
+{
+	struct i2c_client *client = i2c_verify_client(dev);
+	struct sc6607_ufcs *chip = data;
+	if (client) {
+		chg_info("addr=0x%x name:%s\n", client->addr, client->name);
+		if (strncmp(client->name, SC6607_BUCK_NAME, strlen(SC6607_BUCK_NAME)) == 0) {
+			chip->sc6607_buck = i2c_get_clientdata(client);
+			chg_info("found\n");
+		}
+	}
+	return 0;
+}
+
+static void sc6607_get_buck_info_work(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct sc6607_ufcs *chip = container_of(dwork, struct sc6607_ufcs, get_buck_info_work);
+	struct i2c_adapter *adap;
+
+	adap = chip->client->adapter;
+	device_for_each_child(&adap->dev, chip, find_buck_i2c_clients);
+	chip->found_buck_client_count++;
+	if (!chip->sc6607_buck && chip->found_buck_client_count < FOUND_BUCK_ADDR_MAX_COUNT)
+		schedule_delayed_work(&chip->get_buck_info_work, msecs_to_jiffies(FOUND_BUCK_ADDR_MAX_DELAY));
+}
+
 static void sc6607_get_voocphy_client_work(struct work_struct *work)
 {
 	struct delayed_work *dwork = to_delayed_work(work);
@@ -753,21 +847,22 @@ static void sc6607_cp_init_work_queues(struct sc6607_ufcs *chip)
 {
 	INIT_WORK(&chip->ufcs_regdump_work, sc6607_ufcs_regdump_work);
 	INIT_DELAYED_WORK(&chip->get_voocphy_client_work, sc6607_get_voocphy_client_work);
-	oplus_mms_wait_topic("error", sc6607_subscribe_error_topic, chip);
-	schedule_delayed_work(&chip->get_voocphy_client_work, msecs_to_jiffies(FOUND_VOOCPHY_CLIENT_MAX_DELAY));
+	INIT_DELAYED_WORK(&chip->get_buck_info_work, sc6607_get_buck_info_work);
+
 }
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
 static int sc6607_ufcs_probe(struct i2c_client *client)
 #else
 static int sc6607_ufcs_probe(struct i2c_client *client, const struct i2c_device_id *id)
+#endif
 {
-	struct sc6607 *chip;
+	struct sc6607_ufcs *chip;
 
 	int rc;
 	chg_info("start!\n");
 
-	chip = devm_kzalloc(&client->dev, sizeof(struct sc6607), GFP_KERNEL);
+	chip = devm_kzalloc(&client->dev, sizeof(struct sc6607_ufcs), GFP_KERNEL);
 	if (!chip) {
 		chg_err("failed to allocate memory\n");
 		return -ENOMEM;
@@ -790,13 +885,16 @@ static int sc6607_ufcs_probe(struct i2c_client *client, const struct i2c_device_
 		goto regmap_init_err;
 	}
 
+	sc6607_cp_init_work_queues(chip);
 	chip->ufcs = ufcs_device_register(chip->dev, &ufcs_ops, chip, &sc6607_ufcs_config);
 	if (IS_ERR_OR_NULL(chip->ufcs)) {
 		chg_err("ufcs device register error\n");
 		rc = -ENODEV;
 		goto regmap_init_err;
 	}
-	sc6607_cp_init_work_queues(chip);
+	oplus_mms_wait_topic("error", sc6607_subscribe_error_topic, chip);
+	schedule_delayed_work(&chip->get_voocphy_client_work, msecs_to_jiffies(FOUND_VOOCPHY_CLIENT_MAX_DELAY));
+	schedule_delayed_work(&chip->get_buck_info_work, msecs_to_jiffies(FOUND_BUCK_ADDR_MAX_DELAY));
 	chg_info("end!\n");
 	return 0;
 
@@ -809,7 +907,7 @@ regmap_init_err:
 static int sc6607_pm_resume(struct device *dev_chip)
 {
 	struct i2c_client *client = container_of(dev_chip, struct i2c_client, dev);
-	struct sc6607 *chip = i2c_get_clientdata(client);
+	struct sc6607_ufcs *chip = i2c_get_clientdata(client);
 
 	if (!chip)
 		return 0;
@@ -821,7 +919,7 @@ static int sc6607_pm_resume(struct device *dev_chip)
 static int sc6607_pm_suspend(struct device *dev_chip)
 {
 	struct i2c_client *client = container_of(dev_chip, struct i2c_client, dev);
-	struct sc6607 *chip = i2c_get_clientdata(client);
+	struct sc6607_ufcs *chip = i2c_get_clientdata(client);
 
 	if (!chip)
 		return 0;
@@ -841,13 +939,23 @@ static void sc6607_ufcs_remove(struct i2c_client *client)
 static int sc6607_ufcs_remove(struct i2c_client *client)
 #endif
 {
-	struct sc6607 *chip = i2c_get_clientdata(client);
-	if (!chip)
+	struct sc6607_ufcs *chip = i2c_get_clientdata(client);
+	if (!chip) {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+		return;
+#else
 		return 0;
+#endif
+	}
 
-	mutex_destroy(&chip->i2c_rw_lock);
+	if (!IS_ERR_OR_NULL(chip->err_subs))
+		oplus_mms_unsubscribe(chip->err_subs);
 	if (chip->ufcs)
 		ufcs_device_unregister(chip->ufcs);
+	cancel_delayed_work_sync(&chip->get_buck_info_work);
+	cancel_delayed_work_sync(&chip->get_voocphy_client_work);
+	cancel_work_sync(&chip->ufcs_regdump_work);
+	mutex_destroy(&chip->i2c_rw_lock);
 	devm_kfree(&client->dev, chip);
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
 	return;

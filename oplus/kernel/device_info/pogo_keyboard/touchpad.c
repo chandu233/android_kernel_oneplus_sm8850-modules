@@ -1,6 +1,141 @@
 #include "pogo_keyboard.h"
+#include "pogo_healthinfo.h"
 #include <linux/input/mt.h>
 
+
+static int validate_touchpad_input(char *buf)
+{
+    int len = 0;
+    if (!pogo_keyboard_client) {
+        kb_err("pogo_keyboard_client is NULL\n");
+        return -EINVAL;
+    }
+
+    if (!pogo_keyboard_client->input_touchpad) {
+        kb_err("pogo_keyboard_client->input_touchpad is NULL\n");
+        return -EINVAL;
+    }
+
+    if (!buf) {
+        kb_err("buf is NULL\n");
+        return -EINVAL;
+    }
+
+    len = buf[0];
+    if (len > sizeof(pogo_keyboard_client->touchpad_data)) {
+        kb_err("data overflow\n");
+        return -EINVAL;
+    }
+
+    return len;
+}
+
+static bool is_data_unchanged(char *buf, int len, int fingers)
+{
+    char *data = pogo_keyboard_client->touchpad_data;
+    return (!memcmp(data, &buf[1], fingers * 5)) &&
+           (!memcmp(&data[len - 1], &buf[len], 1));
+}
+
+static int extract_pt_value(char *buf, int len, int fingers)
+{
+    int val = 0;
+    if (pogo_keyboard_client->pogopin_triple_ota && (len >= 3) && (len == (5 * fingers + 4))) {
+        val = buf[len - 2] << 8 | buf[len - 3];
+    } else {
+        val = 0;
+    }
+    return val;
+}
+
+static void parse_touch_event(char *data, int offset, struct touch_event *temp)
+{
+    unsigned int xarea;
+
+    temp->id = data[offset + 0] >> 4 & 0xf;
+    temp->is_down = data[offset + 0] >> 1 & 0x01;
+    temp->palm = data[offset + 0] & 0x03;
+    temp->x = data[offset + 1] | data[offset + 2] << 8;
+    temp->y = data[offset + 3] | data[offset + 4] << 8;
+    xarea = pogo_keyboard_client->touchpad_x_max / 3;
+    temp->area = (temp->x > xarea && temp->x < 2 * xarea) ? 1 : 0;
+
+    kb_debug("id:%d, down:%d, left:%d, right:%d, x:%d, y:%d, palm:%d, %s, pt_val:%d\n",
+        temp->id, temp->is_down, temp->is_left, temp->is_right,
+        temp->x, temp->y, temp->palm, (temp->area == 1) ? "B" : "A", temp->pt_val);
+}
+
+static void report_finger_down(struct input_dev *input_dev, struct touch_event *temp)
+{
+    input_mt_slot(input_dev, temp->id);
+    input_mt_report_slot_state(input_dev, MT_TOOL_FINGER, true);
+    input_report_key(input_dev, BTN_TOUCH, 1);
+    pogo_keyboard_client->touch_down |= BIT(temp->id);
+    pogo_keyboard_client->touch_temp |= BIT(temp->id);
+    input_report_abs(input_dev, ABS_MT_POSITION_X, temp->x);
+    input_report_abs(input_dev, ABS_MT_POSITION_Y, temp->y);
+
+    if (temp->palm == 0x02) {
+        input_report_abs(input_dev, ABS_MT_TOUCH_MINOR, 255);
+        input_report_abs(input_dev, ABS_MT_TOUCH_MAJOR, 255);
+    }
+}
+
+static void handle_finger_changes(struct input_dev *input_dev)
+{
+    int i;
+    uint32_t changed_fingers = pogo_keyboard_client->touch_down ^ pogo_keyboard_client->touch_temp;
+
+    if (unlikely(changed_fingers)) {
+        for (i = 0; i < TOUCH_FINGER_MAX; i++) {
+            if (BIT(i) & changed_fingers) {
+                input_mt_slot(input_dev, i);
+                input_mt_report_slot_state(input_dev, MT_TOOL_FINGER, false);
+                kb_debug("finger change id:%d\n", i);
+            }
+        }
+    }
+}
+
+static void reset_all_fingers(struct input_dev *input_dev)
+{
+    int i;
+    for (i = 0; i < TOUCH_FINGER_MAX; i++) {
+        input_mt_slot(input_dev, i);
+        input_report_abs(input_dev, ABS_MT_TOUCH_MINOR, 0);
+        input_report_abs(input_dev, ABS_MT_TOUCH_MAJOR, 0);
+        input_mt_report_slot_state(input_dev, MT_TOOL_FINGER, false);
+    }
+}
+
+static void report_finger_up(struct input_dev *input_dev, struct touch_event *temp, int *should_skip_update)
+{
+    input_mt_slot(input_dev, temp->id);
+    input_mt_report_slot_state(input_dev, MT_TOOL_FINGER, false);
+    pogo_keyboard_client->touch_down &= ~BIT(temp->id);
+
+    handle_finger_changes(input_dev);
+
+    if (!pogo_keyboard_client->touch_down) {
+        reset_all_fingers(input_dev);
+        input_report_key(input_dev, BTN_TOUCH, 0);
+        reset_tool_buttons(input_dev);
+        pogo_keyboard_client->touch_temp = 0;
+        pogo_keyboard_client->touch_down = 0;
+        pogo_keyboard_client->prev_finger_count = 0;
+        kb_info("finger all up, finger%d\n", temp->id);
+        *should_skip_update = 1;
+    }
+}
+
+static void process_single_finger(struct input_dev *input_dev, struct touch_event *temp, int *should_skip_update)
+{
+    if (temp->is_down) {
+        report_finger_down(input_dev, temp);
+    } else {
+        report_finger_up(input_dev, temp, should_skip_update);
+    }
+}
 
 void reset_tool_buttons(struct input_dev *input_dev)
 {
@@ -39,6 +174,15 @@ static void report_tool_button(struct input_dev *input_dev, int finger_count)
     }
 }
 
+static void update_finger_count(struct input_dev *input_dev, int finger_count)
+{
+    if (pogo_keyboard_client->prev_finger_count != finger_count) {
+        reset_tool_buttons(input_dev);
+        pogo_keyboard_client->prev_finger_count = finger_count;
+        report_tool_button(input_dev, pogo_keyboard_client->prev_finger_count);
+    }
+}
+
 static void process_button_events(struct input_dev *input_dev,
                                struct touch_event *event,
                                struct touch_event *temp)
@@ -56,33 +200,39 @@ static void process_button_events(struct input_dev *input_dev,
     }
 }
 
+static void sync_and_report(struct input_dev *input_dev, struct touch_event *event,
+                           struct touch_event *temp, int fingers)
+{
+    if (fingers > 0) {
+        process_button_events(input_dev, event, temp);
+    }
+    input_sync(input_dev);
+}
+
 int touchpad_input_report(char *buf)
 {
-    struct input_dev *input_dev = pogo_keyboard_client->input_touchpad;
-    struct touch_event *event = &pogo_keyboard_client->event;
+    struct input_dev *input_dev;
+    struct touch_event *event;
     struct touch_event temp;
-    char *data = pogo_keyboard_client->touchpad_data;
-    int i = 0, j = 0;
+    char *data;
+    int i = 0;
     int fingers = 0;
     int len = 0;
     int offset = 0;
-    unsigned char palm = 0;
-    unsigned int xarea = 0;
-
     int finger_count = 0;
+    int should_skip_update = 0;
 
-    if (!buf || !input_dev) {
-        return -EINVAL;
+    len = validate_touchpad_input(buf);
+    if (len < 0) {
+        return len;
     }
 
-    len = buf[0];
+    input_dev = pogo_keyboard_client->input_touchpad;
+    event = &pogo_keyboard_client->event;
+    data = pogo_keyboard_client->touchpad_data;
     fingers = buf[len - 1];
 
-    if(len > sizeof(pogo_keyboard_client->touchpad_data)) {
-        kb_err("data overflow\n");
-        return 0;
-    }
-    if ((!memcmp(data, &buf[1], fingers * 5)) && (!memcmp(&data[len - 1], &buf[len], 1))) {
+    if (is_data_unchanged(buf, len, fingers)) {
         return 0;
     }
 
@@ -90,76 +240,22 @@ int touchpad_input_report(char *buf)
     memcpy(data, &buf[1], len);
     temp.is_left = data[len - 1] & 0x01;
     temp.is_right = (data[len - 1] >> 1) & 0x01;
+    temp.pt_val = extract_pt_value(buf, len, fingers);
 
-    for (j = 0; j < fingers; j++) {
-        offset = 5 * j;
-        temp.id = data[offset + 0] >> 4 & 0xf;
-        temp.is_down = data[offset + 0] >> 1 & 0x01;
-        palm = data[offset + 0] & 0x03;
-        temp.x = data[offset + 1] | data[offset + 2] << 8;
-        temp.y = data[offset + 3] | data[offset + 4] << 8;
-        xarea = pogo_keyboard_client->touchpad_x_max / 3;
-        temp.area = (temp.x > xarea && temp.x < 2 * xarea) ? 1 : 0;
-
-        kb_debug("id:%d, down:%d, left:%d, right:%d, x:%d, y:%d, palm:%d, %s\n",
-            temp.id, temp.is_down, temp.is_left, temp.is_right,
-            temp.x, temp.y, palm, (temp.area == 1) ? "B" : "A");
-
-        input_mt_slot(input_dev, temp.id);
+    for (i = 0; i < fingers; i++) {
+        offset = 5 * i;
+        parse_touch_event(data, offset, &temp);
+        process_single_finger(input_dev, &temp, &should_skip_update);
         if (temp.is_down) {
-            input_mt_report_slot_state(input_dev, MT_TOOL_FINGER, true);
-            input_report_key(input_dev, BTN_TOUCH, 1);
-            pogo_keyboard_client->touch_down |= BIT(temp.id);
-            pogo_keyboard_client->touch_temp |= BIT(temp.id);
-            input_report_abs(input_dev, ABS_MT_POSITION_X, temp.x);
-            input_report_abs(input_dev, ABS_MT_POSITION_Y, temp.y);
-            if (palm == 0x02) {
-                input_report_abs(input_dev, ABS_MT_TOUCH_MINOR, 255);
-                input_report_abs(input_dev, ABS_MT_TOUCH_MAJOR, 255);
-            }
             finger_count++;
-        } else {
-            input_mt_report_slot_state(input_dev, MT_TOOL_FINGER, false);
-            pogo_keyboard_client->touch_down &= ~BIT(temp.id);
-            if (unlikely(pogo_keyboard_client->touch_down ^ pogo_keyboard_client->touch_temp)) {
-                for (i = 0; i < TOUCH_FINGER_MAX; i++) {
-                    if (BIT(i) & (pogo_keyboard_client->touch_down ^ pogo_keyboard_client->touch_temp)) {  //finger change
-                        input_mt_slot(input_dev, i);
-                        input_mt_report_slot_state(input_dev, MT_TOOL_FINGER, false);
-                        kb_debug("finger change id:%d\n", i);
-                    }
-                }
-            }
-
-            if (!pogo_keyboard_client->touch_down) {    //finger all up
-                for (i = 0; i < TOUCH_FINGER_MAX; i++) {
-                    input_mt_slot(input_dev, i);
-                    input_report_abs(input_dev, ABS_MT_TOUCH_MINOR, 0);
-                    input_report_abs(input_dev, ABS_MT_TOUCH_MAJOR, 0);
-                    input_mt_report_slot_state(input_dev, MT_TOOL_FINGER, false);
-                }
-                input_report_key(input_dev, BTN_TOUCH, 0);
-                reset_tool_buttons(input_dev);
-                pogo_keyboard_client->touch_temp = 0;
-                pogo_keyboard_client->touch_down = 0;
-                pogo_keyboard_client->prev_finger_count = 0;
-                kb_info("finger all up, finger%d\n", j);
-                goto sync_report;
-            }
+        }
+        if (should_skip_update) {
+            sync_and_report(input_dev, event, &temp, fingers);
+            return 0;
         }
     }
-    if (pogo_keyboard_client->prev_finger_count != finger_count) {
-        reset_tool_buttons(input_dev);
-        pogo_keyboard_client->prev_finger_count = finger_count;
-        report_tool_button(input_dev, pogo_keyboard_client->prev_finger_count);
-    }
-
-sync_report:
-    if (fingers > 0) {
-        process_button_events(input_dev, event, &temp);
-    }
-    input_sync(input_dev);
-
+    update_finger_count(input_dev, finger_count);
+    sync_and_report(input_dev, event, &temp, fingers);
     return 0;
 }
 
@@ -175,6 +271,7 @@ int touchpad_input_init(void)
 
     if (!input_dev) {
         kb_err("input_allocate_device err\n");
+        POGO_HEALTH_REPORT(POGO_HEALTH_REPORT_ALLOC_FAIL);
         return -ENOMEM;
     }
     input_dev->name = TOUCHPAD_NAME;
@@ -233,6 +330,7 @@ int touchpad_input_init(void)
     if (ret) {
         input_free_device(input_dev);
         kb_err("input_register_device err\n");
+        POGO_HEALTH_REPORT(POGO_HEALTH_REPORT_TP_INIT_FAIL);
         return ret;
     }
     pogo_keyboard_client->input_touchpad = input_dev;

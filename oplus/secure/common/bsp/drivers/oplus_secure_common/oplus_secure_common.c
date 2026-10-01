@@ -692,7 +692,11 @@ exit:
 
 static void oplus_secure_common_remove(struct platform_device *pdev)
 {
-        return;
+        if (oplus_secure_common_dir) {
+                proc_remove(oplus_secure_common_dir);
+                oplus_secure_common_dir = NULL;
+        }
+        secure_data_ptr = NULL;
 }
 
 static struct of_device_id oplus_secure_common_match_table[] = {

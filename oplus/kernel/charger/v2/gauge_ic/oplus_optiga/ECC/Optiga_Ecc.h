@@ -53,7 +53,6 @@ typedef enum Ecc_KeyID
 
 void Ecc_Rng128( dwordvec_t gf2n_RandomValue );
 void Ecc_Fixed( uint32_t * gf2n_RandomValue );
-BOOL Ecc_DoAuthentication( void );
 BOOL Ecc_DoAuthenticationEnhanced(uint8_t *gf2nUid );
 BOOL Ecc_GenerateChallenge( dwordvec_t gf2n_Challenge, dwordvec_t gf2n_RandomValue, uint8_t bEccMode );
 BOOL Ecc_GenerateCheckValue( dwordvec_t gf2n_CheckValue, dwordvec_t gf2n_RandomValue, dwordvec_t gf2n_PublicKey, uint8_t bEccMode );

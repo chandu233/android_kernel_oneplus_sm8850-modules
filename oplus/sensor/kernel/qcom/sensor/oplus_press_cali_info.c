@@ -34,7 +34,7 @@ static ssize_t press_offset_read_proc(struct file *file, char __user *buf,
         return -ENOMEM;
     }
 
-    len = sprintf(page, "%d", gdata->offset);
+    len = snprintf(page, sizeof(page), "%d", gdata->offset);
 
     if (len > *off) {
         len -= *off;
@@ -165,7 +165,5 @@ void oplus_press_cali_data_clean(void)
 
 //call init api in oplus_sensor_devinfo.c
 //due to kernel module only permit one module_init entrance in one .ko
-//module_init(oplus_press_cali_data_init);
-//module_exit(oplus_press_cali_data_clean);
 MODULE_DESCRIPTION("custom version");
 MODULE_LICENSE("GPL v2");

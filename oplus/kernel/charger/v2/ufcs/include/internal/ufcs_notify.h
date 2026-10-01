@@ -20,6 +20,7 @@ enum ufcs_notify_state {
 	UFCS_NOTIFY_ERR_FLAG,
 	UFCS_NOTIFY_FIFO_OVERFLOW,
 	UFCS_NOTIFY_RESTART,
+	UFCS_NOTIFY_USER_ENCRYPT,
 };
 
 enum ufcs_notify_state_value {

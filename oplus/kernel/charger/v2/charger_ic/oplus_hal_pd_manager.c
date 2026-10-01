@@ -96,7 +96,6 @@ struct pd_manager_chip {
 	bool start_peripheral;
 	bool first_check;
 	bool pd_svooc;
-	bool svid_completed;
 	bool cpa_support;
 	bool enable_tcpc_irq;
 	struct power_supply *batt_psy;
@@ -2564,6 +2563,33 @@ static int mtk_chg_get_source_pdo(struct oplus_chg_ic_dev *ic_dev, u32 *data, in
 	return 0;
 }
 
+static int pd_manager_get_cc_state(struct oplus_chg_ic_dev *ic_dev,
+				     uint8_t *cc1, uint8_t *cc2)
+{
+	struct pd_manager_chip *chip;
+	int rc = 0;
+	uint8_t cc1_temp = 0, cc2_temp = 0;
+
+	if (ic_dev == NULL) {
+		chg_err("ic_dev is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_chg_ic_get_drvdata(ic_dev);
+
+	if (!chip || !chip->tcpc)
+		return -ENODEV;
+
+	rc = tcpm_inquire_remote_cc(chip->tcpc, &cc1_temp, &cc2_temp, true);
+	if (rc == 0) {
+		*cc1 = cc1_temp;
+		*cc2 = cc2_temp;
+	} else {
+		chg_err("failed to get cc state, rc = %d\n", rc);
+	}
+
+	return rc;
+}
+
 static void *oplus_chg_get_func(struct oplus_chg_ic_dev *ic_dev,
 				enum oplus_chg_ic_func func_id)
 {
@@ -2641,6 +2667,9 @@ static void *oplus_chg_get_func(struct oplus_chg_ic_dev *ic_dev,
 		break;
 	case OPLUS_IC_FUNC_PPS_GET_PDO_INFO:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_PPS_GET_PDO_INFO, oplus_get_pps_info);
+		break;
+	case OPLUS_IC_FUNC_BUCK_GET_CC_STATE:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BUCK_GET_CC_STATE, pd_manager_get_cc_state);
 		break;
 	default:
 		chg_err("this func(=%d) is not supported\n", func_id);

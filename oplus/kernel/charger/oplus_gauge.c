@@ -767,7 +767,7 @@ int oplus_gauge_update_soc_smooth_parameter(void)
 
 int oplus_gauge_get_battery_cb_status(void)
 {
-	if (!g_gauge_chip)
+	if (!g_gauge_chip || !g_gauge_chip->gauge_ops || !g_gauge_chip->gauge_ops->get_battery_cb_status)
 		return 0;
 	else
 		return g_gauge_chip->gauge_ops->get_battery_cb_status();

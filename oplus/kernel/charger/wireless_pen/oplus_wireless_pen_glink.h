@@ -28,6 +28,13 @@ struct wireless_pen_set_hboost_vout_resp {
 };
 #endif /*CONFIG_OPLUS_CHARGER_MTK*/
 
+enum HBOOST_STATUS {
+	HBOOST_UNKNOWN,
+	HBOOST_SET_FAIL,
+	HBOOST_SET_SUCCESS,
+	HBOOST_IS_SETTING_BOOST,
+};
+
 int wireless_pen_send_hboost_volt_req(uint8_t value);
 void wireless_pen_glink_init(void);
 void wireless_pen_glink_exit(void);

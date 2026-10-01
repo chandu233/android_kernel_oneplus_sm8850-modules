@@ -11,6 +11,7 @@
 #define _OPLUS_SC83107_H_
 
 #include <oplus_chg_mutual.h>
+#include "oplus_sc83107_bcl.h"
 
 /* reg 0x09*/
 #define SC83107_POR_FLAG_BIT	BIT(1)
@@ -201,7 +202,6 @@ struct sc83107_chip {
 	struct oplus_chg_mutual_notifier dischg_boost_err_flag_mutual;
 	char dischg_boost_err_flag_data[128];
 	struct delayed_work get_dischg_boost_err_flag_work;
-
 	/* Work queue for uploading dischg boost err flag from mutual notifier (atomic context) */
 	struct work_struct dischg_boost_err_flag_upload_work;
 	unsigned int dischg_boost_err_flag; /* Error flag to be uploaded in process context */
@@ -209,14 +209,35 @@ struct sc83107_chip {
 	u8 dischg_boost_err_reg09_val; /* Register 0x09 value to be uploaded */
 	u8 dischg_boost_err_reg0a_val; /* Register 0x0A value to be uploaded */
 
+	/* Dynamic BCL configuration */
+	bool support_dynamic_bcl;
+	struct sc83107_dynamic_bcl_data *dynamic_bcl_config;		/* Default config (max values) */
+	int dynamic_bcl_config_count;
+	struct sc83107_dynamic_bcl_data *dynamic_bcl_data_backup;	/* Backup config for restore */
+	int dynamic_bcl_data_backup_count;
+	bool support_dynamic_bcl_compensation;
+	struct sc83107_dynamic_bcl_compensation *dynamic_bcl_compensation_config;
+	int dynamic_bcl_compensation_config_count;
+	struct proc_dir_entry *dynamic_bcl_proc_entry;
+	struct delayed_work dynamic_bcl_manual_restore_work;
+	struct delayed_work dynamic_bcl_auto_restore_work;
+	bool dynamic_bcl_manual_restore_triggered;
+	bool dynamic_bcl_auto_restore_triggered;
+	int dynamic_bcl_manual_restore_delay_ms;
+	int dynamic_bcl_auto_restore_delay_ms;
+	struct mutex dynamic_bcl_lock;
+	int dynamic_bcl_pre_range;
+	int prev_temp_compensation_range;
+	int prev_cycle_compensation_range;
+	struct notifier_block psy_nb;
+	struct work_struct bcl_check_work;
+
 	/* Wakelock for critical I2C operations */
 	struct wakeup_source *i2c_wake_lock;
 
 	/* Suspend/Resume CV configuration */
 	int suspend_cv_mv;
 	int resume_cv_mv;
-
-	/* I2C bus reset feature control */
 	bool i2c_bus_reset_enable;
 };
 

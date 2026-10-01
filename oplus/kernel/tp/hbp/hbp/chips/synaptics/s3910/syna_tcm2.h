@@ -40,6 +40,7 @@ struct syna_tcm {
     /* IOCTL-related variables */
     pid_t proc_pid;
     struct task_struct *proc_task;
+    wait_queue_head_t probe_waitq;
 
     /* flags */
     bool probe_done;

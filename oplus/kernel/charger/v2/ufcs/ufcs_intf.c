@@ -35,7 +35,6 @@ static int ufcs_pdo_select(struct ufcs_class *class, int vol_mv, int curr_ma)
 {
 	int i;
 	u64 pdo;
-	u32 max_curr;
 
 	if (class->test_mode)
 		return 1;
@@ -54,17 +53,33 @@ static int ufcs_pdo_select(struct ufcs_class *class, int vol_mv, int curr_ma)
 			continue;
 		if (curr_ma < UFCS_OUTPUT_MODE_CURR_MIN(pdo))
 			continue;
-		max_curr = 0;
-		if (class->power_changed)
-			max_curr = UFCS_POWER_CHANGE_CURR_MAX(class->pwr_change_info[i]);
-		if (max_curr == 0 || max_curr > UFCS_OUTPUT_MODE_CURR_MAX(pdo))
-			max_curr = UFCS_OUTPUT_MODE_CURR_MAX(pdo);
-		if (curr_ma > max_curr)
+		if (curr_ma > UFCS_OUTPUT_MODE_CURR_MAX(pdo))
 			continue;
 		return ++i;
 	}
 
 	return -ENODATA;
+}
+
+static int ufcs_pwr_chg(struct ufcs_class *class, int index, int curr_ma)
+{
+	u32 max_curr = 0;
+	u32 pwr_change_val = 0;
+
+	if (!class->power_changed)
+		return curr_ma;
+
+	if (index <= 0 || index > class->pdo.num) {
+		ufcs_err("invalid pdo index:%d\n", index);
+		return -EINVAL;
+	}
+
+	pwr_change_val = UFCS_PWR_CHANGE_DATA(class->pwr_change_info.data[index - 1]);
+	max_curr = UFCS_POWER_CHANGE_CURR_MAX(pwr_change_val);
+	if (max_curr > 0 && curr_ma > max_curr)
+		curr_ma = max_curr;
+
+	return curr_ma;
 }
 
 static int __ufcs_pdo_set(struct ufcs_class *class, int index, int vol_mv, int curr_ma)
@@ -123,6 +138,7 @@ err:
 int ufcs_pdo_set(struct ufcs_class *class, int vol_mv, int curr_ma)
 {
 	int rc;
+	int set_ma = curr_ma;
 
 	if (class == NULL) {
 		ufcs_err("ufcs class is NULL\n");
@@ -136,7 +152,10 @@ int ufcs_pdo_set(struct ufcs_class *class, int vol_mv, int curr_ma)
 	rc = ufcs_pdo_select(class, vol_mv, curr_ma);
 	if (rc < 0)
 		return rc;
-	rc = __ufcs_pdo_set(class, rc, vol_mv, curr_ma);
+	set_ma = ufcs_pwr_chg(class, rc, curr_ma);
+	if (set_ma < 0)
+		return set_ma;
+	rc = __ufcs_pdo_set(class, rc, vol_mv, set_ma);
 
 	return rc;
 }
@@ -145,6 +164,7 @@ int ufcs_intf_pdo_set(struct ufcs_dev *ufcs, int vol_mv, int curr_ma)
 {
 	struct ufcs_class *class;
 	int rc;
+	int set_ma = curr_ma;
 
 	if (ufcs == NULL) {
 		ufcs_err("ufcs is NULL\n");
@@ -156,10 +176,13 @@ int ufcs_intf_pdo_set(struct ufcs_dev *ufcs, int vol_mv, int curr_ma)
 		return -EINVAL;
 	}
 
-	rc = ufcs_pdo_select(class, vol_mv, curr_ma);
+	rc = ufcs_pdo_select(class, vol_mv, set_ma);
 	if (rc < 0)
 		return rc;
-	rc = __ufcs_pdo_set(class, rc, vol_mv, curr_ma);
+	set_ma = ufcs_pwr_chg(class, rc, curr_ma);
+	if (set_ma < 0)
+		return set_ma;
+	rc = __ufcs_pdo_set(class, rc, vol_mv, set_ma);
 
 	return rc;
 }
@@ -179,6 +202,7 @@ int ufcs_handshake(struct ufcs_dev *ufcs)
 	ufcs_info("start handshake\n");
 
 	class->start_cable_detect = false;
+	class->cable_accpet = false;
 	class->exit_ufcs_ack_received = false;
 	event = devm_kzalloc(&class->ufcs->dev, sizeof(struct ufcs_event), GFP_KERNEL);
 	if (event == NULL) {
@@ -819,16 +843,18 @@ int ufcs_intf_get_source_info(struct ufcs_dev *ufcs, u64 *src_info)
 }
 EXPORT_SYMBOL(ufcs_intf_get_source_info);
 
-int ufcs_get_cable_info(struct ufcs_class *class, u64 *cable_info)
+static int ufcs_get_cable_info_common(struct ufcs_class *class,
+	u8 *cable_info, int size, u64 *legacy)
 {
 	int rc;
+	int cable_size;
 	struct ufcs_event *event;
 
 	if (class == NULL) {
 		ufcs_err("ufcs class is NULL\n");
 		return -EINVAL;
 	}
-	if (cable_info == NULL) {
+	if (!legacy && (!cable_info || size <= 0)) {
 		ufcs_err("cable_info buf is NULL\n");
 		return -EINVAL;
 	}
@@ -864,16 +890,22 @@ int ufcs_get_cable_info(struct ufcs_class *class, u64 *cable_info)
 	mutex_unlock(&class->pe_lock);
 	wait_for_completion(&class->request_ack);
 	rc = READ_ONCE(class->state.err);
-	mutex_unlock(&class->ext_req_lock);
 
 	if (rc < 0) {
+		mutex_unlock(&class->ext_req_lock);
 		ufcs_err("get cable info error, rc=%d\n", rc);
 		return rc;
 	}
-
-	*cable_info = class->cable_info;
-
-	return 0;
+	if (legacy) {
+		rc = class->cable_info_legacy_rc;
+		if (!rc)
+			*legacy = class->cable_info_legacy;
+	} else {
+		cable_size = min(size, UFCS_CABLE_INFO_SIZE);
+		memcpy(cable_info, class->cable_info, cable_size);
+	}
+	mutex_unlock(&class->ext_req_lock);
+	return rc;
 
 err:
 	mutex_unlock(&class->pe_lock);
@@ -882,7 +914,29 @@ err:
 	return rc;
 }
 
+int ufcs_get_cable_info_ext(struct ufcs_class *class, u8 *cable_info, int size)
+{
+	return ufcs_get_cable_info_common(class, cable_info, size, NULL);
+}
+
+int ufcs_get_cable_info(struct ufcs_class *class, u64 *cable_info)
+{
+	if (!cable_info)
+		return -EINVAL;
+	return ufcs_get_cable_info_common(class, NULL, 0, cable_info);
+}
+
 int ufcs_intf_get_cable_info(struct ufcs_dev *ufcs, u64 *cable_info)
+{
+	if (!ufcs || !ufcs->class || !cable_info)
+		return -EINVAL;
+	if (ufcs->class->test_mode)
+		return -EBUSY;
+	return ufcs_get_cable_info(ufcs->class, cable_info);
+}
+EXPORT_SYMBOL(ufcs_intf_get_cable_info);
+
+int ufcs_intf_get_cable_info_ext(struct ufcs_dev *ufcs, u8 *cable_info, int size)
 {
 	struct ufcs_class *class;
 
@@ -891,7 +945,7 @@ int ufcs_intf_get_cable_info(struct ufcs_dev *ufcs, u64 *cable_info)
 		return -EINVAL;
 	}
 	class = ufcs->class;
-	if (cable_info == NULL) {
+	if (!class || !cable_info || size <= 0) {
 		ufcs_err("cable_info buf is NULL\n");
 		return -EINVAL;
 	}
@@ -901,9 +955,9 @@ int ufcs_intf_get_cable_info(struct ufcs_dev *ufcs, u64 *cable_info)
 		return -EBUSY;
 	}
 
-	return ufcs_get_cable_info(class, cable_info);
+	return ufcs_get_cable_info_ext(class, cable_info, size);
 }
-EXPORT_SYMBOL(ufcs_intf_get_cable_info);
+EXPORT_SYMBOL(ufcs_intf_get_cable_info_ext);
 
 int ufcs_get_pdo_info(struct ufcs_class *class, u64 *pdo, int num)
 {
@@ -1095,10 +1149,35 @@ int ufcs_intf_verify_adapter(struct ufcs_dev *ufcs, u8 key_index, u8 *auth_data,
 }
 EXPORT_SYMBOL(ufcs_intf_verify_adapter);
 
+int ufcs_intf_set_user_encrypt_data(struct ufcs_dev *ufcs, u8 *encrypt_data, u8 data_len)
+{
+	struct ufcs_class *class;
+
+	if (ufcs == NULL) {
+		ufcs_err("ufcs is NULL\n");
+		return -EINVAL;
+	}
+	class = ufcs->class;
+	if (encrypt_data == NULL) {
+		ufcs_err("auth_data is NULL\n");
+		return -EINVAL;
+	}
+
+	if (data_len != sizeof(class->verify_info.user_encrypt_auth_data)) {
+		ufcs_err("auth_data len:%d error\n", data_len);
+		return -EINVAL;
+	}
+
+	memmove(class->verify_info.user_encrypt_auth_data, encrypt_data, data_len);
+	complete(&class->user_encrypt_data_ack);
+
+	return 0;
+}
+EXPORT_SYMBOL(ufcs_intf_set_user_encrypt_data);
+
 int ufcs_get_power_change_info(struct ufcs_class *class, u32 *pwr_change_info, int num)
 {
 	int i;
-
 	if (class == NULL) {
 		ufcs_err("ufcs class is NULL\n");
 		return -EINVAL;
@@ -1121,10 +1200,11 @@ int ufcs_get_power_change_info(struct ufcs_class *class, u32 *pwr_change_info, i
 		ufcs_err("pwr_change_info buf too short\n");
 	else
 		num = class->pdo.num;
+	pwr_change_info[0] = class->pwr_change_info.length;
 	for (i = 0; i < num; i++)
-		pwr_change_info[i] = class->pwr_change_info[i];
+		pwr_change_info[i + 1] = UFCS_PWR_CHANGE_DATA(class->pwr_change_info.data[i]);
 
-	return num;
+	return class->power_changed;
 }
 
 int ufcs_intf_get_power_change_info(struct ufcs_dev *ufcs, u32 *pwr_change_info, int num)
@@ -1139,11 +1219,6 @@ int ufcs_intf_get_power_change_info(struct ufcs_dev *ufcs, u32 *pwr_change_info,
 	if (pwr_change_info == NULL) {
 		ufcs_err("pwr_change_info buf is NULL\n");
 		return -EINVAL;
-	}
-
-	if (class->test_mode) {
-		ufcs_err("test mode, unable to process external request\n");
-		return -EBUSY;
 	}
 
 	return ufcs_get_power_change_info(class, pwr_change_info, num);

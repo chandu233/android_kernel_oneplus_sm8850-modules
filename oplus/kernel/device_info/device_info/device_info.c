@@ -12,7 +12,9 @@
 #include <linux/fs.h>
 #include <linux/of_gpio.h>
 #include <linux/platform_device.h>
+#if !(defined(CONFIG_OPLUS_DEVICE_INFO_UNISOC_PLATFORM))
 #include "../../../../fs/proc/internal.h"
+#endif
 #include <linux/gpio.h>
 #include <asm/uaccess.h>
 #include <linux/delay.h>
@@ -23,10 +25,11 @@
 #include <linux/mmc/host.h>
 #include <linux/libfdt.h>
 #include <linux/pinctrl/consumer.h>
-#if !(defined(CONFIG_MTK_PLATFORM) || defined(CONFIG_OPLUS_DEVICE_INFO_MTK_PLATFORM))
+#if !(defined(CONFIG_MTK_PLATFORM) || defined(CONFIG_OPLUS_DEVICE_INFO_MTK_PLATFORM) || defined(CONFIG_OPLUS_DEVICE_INFO_UNISOC_PLATFORM))
 #include <soc/qcom/of_common.h>
 #endif
 #include <linux/string.h>
+
 #define DDR_MR_SIZE_COUNT 5 /* MR5|MR6|MR7|MR8|DDR_Size */
 #define DDR_INFO_LEN 32
 #define DDR_MR5 5
@@ -1182,8 +1185,9 @@ seccess:
 	} else {
 		info->manufacture = "rf-notmatch";
 	}
-
-#if defined(CONFIG_MTK_PLATFORM) || defined(CONFIG_OPLUS_DEVICE_INFO_MTK_PLATFORM)
+#if defined(CONFIG_OPLUS_DEVICE_INFO_UNISOC_PLATFORM)
+	info->version = "UNISOC";
+#elif defined(CONFIG_MTK_PLATFORM) || defined(CONFIG_OPLUS_DEVICE_INFO_MTK_PLATFORM)
 	info->version = "MTK";
 #else
 	info->version = "QCOM";
@@ -1191,6 +1195,7 @@ seccess:
 
 	return ret;
 }
+#if !(defined(CONFIG_OPLUS_DEVICE_INFO_UNISOC_PLATFORM))
 static uint32_t get_mr_value(unsigned int mr_index) {
 	unsigned int ret_value = 0;
 #if (defined(CONFIG_MTK_PLATFORM) || defined(CONFIG_OPLUS_DEVICE_INFO_MTK_PLATFORM)) /* MTK */
@@ -1370,6 +1375,7 @@ static int get_process_name(char *process_name) {
 	snprintf(process_name, INFO_LEN, "%s%d", "Unknown", process_id_tmp);
 	return 0;
 }
+#endif   /*(if !(defined(CONFIG_MTK_PLATFORM))*/
 #if (defined(CONFIG_MTK_PLATFORM) || defined(CONFIG_OPLUS_DEVICE_INFO_MTK_PLATFORM))
 static int __attribute__((__unused__)) init_ddr_vendor_size(struct device_info *dev_info)
 {
@@ -1496,7 +1502,7 @@ out:
 }
 #endif
 
-#if !(defined(CONFIG_MTK_PLATFORM) || defined(CONFIG_OPLUS_DEVICE_INFO_MTK_PLATFORM))
+#if !(defined(CONFIG_MTK_PLATFORM) || defined(CONFIG_OPLUS_DEVICE_INFO_MTK_PLATFORM) ||defined(CONFIG_OPLUS_DEVICE_INFO_UNISOC_PLATFORM))
 static int __attribute__((__unused__)) init_ddr_type(struct device_info *dev_info)
 {
 	uint32_t ddr_type = DDR_TYPE_LPDDR5;
@@ -1616,7 +1622,7 @@ devinfo_probe(struct platform_device *pdev)
 	set_gpios_sleep(dev_info);
 
 ddr_init:
-#if !(defined(CONFIG_MTK_PLATFORM) || defined(CONFIG_OPLUS_DEVICE_INFO_MTK_PLATFORM))
+#if !(defined(CONFIG_MTK_PLATFORM) || defined(CONFIG_OPLUS_DEVICE_INFO_MTK_PLATFORM) || defined(CONFIG_OPLUS_DEVICE_INFO_UNISOC_PLATFORM))
 	/*register oplus special node*/
 	init_ddr_type(dev_info);
 	init_ddr_vendor_size(dev_info);

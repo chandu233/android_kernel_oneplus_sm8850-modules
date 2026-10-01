@@ -88,8 +88,9 @@ int tp_judge_ic_match_commandline(struct panel_info *panel_data)
 	int i = 0;
 	struct touch_custom_data *p_touch_custom_data = NULL;
 
+#ifndef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
 	prj_id = get_project();
-
+#endif
 	p_touch_custom_data = kzalloc(sizeof(struct touch_custom_data), GFP_KERNEL|GFP_DMA);
 	if (p_touch_custom_data == NULL) {
 		pr_err("[TP]panel_data.touch_custom_data kzalloc error\n");
@@ -161,6 +162,13 @@ int tp_util_get_vendor(struct hw_resource *hw_res, struct panel_info *panel_data
 		p_touch_custom_data->chip_name = panel_data->chip_name[0];
 	}
 	strcpy(panel_data->manufacture_info.manufacture, vendor);
+#ifdef CONFIG_TOUCHPANEL_UNISOC_PLATFORM
+	snprintf(panel_data->fw_name, MAX_FW_NAME_LENGTH, "tp/25031/FW_NF_TD4160_HUAXING.img");
+	if (panel_data->test_limit_name) {
+		snprintf(panel_data->test_limit_name, MAX_LIMIT_DATA_LENGTH, "tp/25031/LIMIT_NF_TD4160_HUAXING.img");
+		pr_info("[TP]test_limit_name set to: %s\n", panel_data->test_limit_name);
+	}
+#else
 	snprintf(panel_data->fw_name, MAX_FW_NAME_LENGTH,
 		"tp/%d/FW_%s_%s.img",
 		p_touch_custom_data->g_tp_prj_id, p_touch_custom_data->chip_name, vendor);
@@ -170,7 +178,7 @@ int tp_util_get_vendor(struct hw_resource *hw_res, struct panel_info *panel_data
 			"tp/%d/LIMIT_%s_%s.img",
 			p_touch_custom_data->g_tp_prj_id, p_touch_custom_data->chip_name, vendor);
 	}
-
+#endif
 	panel_data->manufacture_info.fw_path = panel_data->fw_name;
 
 	pr_info("[TP]vendor:%s fw:%s limit:%s\n",

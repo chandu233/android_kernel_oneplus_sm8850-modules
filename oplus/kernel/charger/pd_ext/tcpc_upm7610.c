@@ -1085,6 +1085,8 @@ static struct tcpc_ops upm7610_tcpc_ops = {
 	.set_vconn = upm7610_set_vconn,
 	.deinit = upm7610_tcpc_deinit,
 	.init_alert_mask = upm7610_init_alert_mask,
+	.is_low_power_mode = upm7610_is_low_power_mode,
+	.set_low_power_mode = upm7610_set_low_power_mode,
 
 #ifdef CONFIG_TCPC_LOW_POWER_MODE
 	.is_low_power_mode = upm7610_is_low_power_mode,

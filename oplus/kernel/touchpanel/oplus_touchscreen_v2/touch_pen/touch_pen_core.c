@@ -110,8 +110,10 @@ long touch_pen_downlink_msg_ioctl(struct touchpanel_data *ts, unsigned long arg)
     }
 
     if (ts->is_suspended) {
-        TPD_DEBUG("tp is suspended, device id %d\n", ts->tp_index);
-        return 0;
+        if (!(ts->is_pen_connected && (ts->gesture_enable_indep & (1 << PENDETECT)))) {
+            TPD_DEBUG("tp is suspended, device id %d\n", ts->tp_index);
+            return 0;
+        }
     }
 
     if (copy_from_user(&pen_msg, (struct pen_ioc_downlk_msg *)arg, sizeof(struct pen_ioc_downlk_msg))) {

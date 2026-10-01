@@ -16,13 +16,22 @@
 #include "ufcs_event.h"
 #include "ufcs_msg.h"
 
-#define INIT_CTRL_MSG_HEAD(__head, __index)	\
+#define INIT_SOURCE_CTRL_MSG_HEAD(__head, __index)	\
 do {						\
 	(__head)->addr = UFCS_DEVICE_SOURCE;	\
 	(__head)->version = UFCS_VER_CURR;	\
 	(__head)->type = UFCS_CTRL_MSG;		\
 	(__head)->index = __index;		\
 } while (0)
+
+#define INIT_CABLE_CTRL_MSG_HEAD(__head, __index)	\
+do {                        \
+	(__head)->addr = UFCS_DEVICE_CABLE;	\
+	(__head)->version = UFCS_VER_CURR;	\
+	(__head)->type = UFCS_CTRL_MSG;		\
+	(__head)->index = __index;		\
+} while (0)
+
 
 static const char *const ctrl_msg_name[] = {
 	[CTRL_MSG_PING]				= "ping",
@@ -50,6 +59,26 @@ const char *ufcs_get_ctrl_msg_name(enum ufcs_ctrl_msg_type type)
 	return ctrl_msg_name[type];
 }
 
+int ufcs_init_ctrl_msg(struct ufcs_class *class, enum ufcs_ctrl_msg_type type, struct ufcs_msg *msg)
+{
+	if (class == NULL) {
+		ufcs_err("class is NULL\n");
+		return -EINVAL;
+	}
+	if (msg == NULL) {
+		ufcs_err("msg is NULL\n");
+		return -EINVAL;
+	}
+	msg->magic = UFCS_MSG_MAGIC;
+	if (class->cable_accpet)
+		INIT_CABLE_CTRL_MSG_HEAD(&msg->head, class->sender.msg_number_counter);
+	else
+		INIT_SOURCE_CTRL_MSG_HEAD(&msg->head, class->sender.msg_number_counter);
+	msg->ctrl_msg.command = type;
+
+	return 0;
+}
+
 int ufcs_send_ctrl_msg(struct ufcs_class *class, enum ufcs_ctrl_msg_type type, bool retry)
 {
 	struct ufcs_msg *msg;
@@ -61,9 +90,11 @@ int ufcs_send_ctrl_msg(struct ufcs_class *class, enum ufcs_ctrl_msg_type type, b
 		return -ENOMEM;
 	}
 
-	msg->magic = UFCS_MSG_MAGIC;
-	INIT_CTRL_MSG_HEAD(&msg->head, class->sender.msg_number_counter);
-	msg->ctrl_msg.command = type;
+	rc = ufcs_init_ctrl_msg(class, type, msg);
+	if (rc < 0) {
+		ufcs_err("init %s ctrl msg error, rc=%d\n", ufcs_get_ctrl_msg_name(type), rc);
+		return -EINVAL;
+	}
 
 	rc = ufcs_send_msg(class, msg, retry);
 	if (rc < 0)

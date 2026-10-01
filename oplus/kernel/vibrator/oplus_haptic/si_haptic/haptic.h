@@ -68,7 +68,14 @@ typedef struct led_classdev cdev_t;
 #define SIH_ENTER_RTP_MODE_MAX_TRY          200
 #define SIH_PROTECTION_TIME                 30000
 #define SIH_LRA_NAME_LEN                    10
+#define SIH_LP_INDEX							4
+#define HAPTIC_CONFIG_MAX_REG_NUM				256
 #define SIH_OSC_PLAY_FILE_INDEX             0
+
+#define SIH688X_F0_VAL_MAX                          1800
+#define SIH688X_F0_VAL_MIN                          1600
+#define SIH688X_F0_VAL_MAX_1419                     2150
+#define SIH688X_F0_VAL_MIN_1419                     1950
 
 /*********************************************************
  *
@@ -117,6 +124,11 @@ typedef enum sih_haptic_rtp_play_mode {
 	SIH_RTP_POLAR_PLAY = 2,
 } sih_haptic_rtp_play_mode_e;
 
+typedef enum reg_func_type {
+	REG_FUNC_CONT = 0,
+	REG_FUNC_RL = 1,
+	REG_FUNC_VBAT = 2,
+} reg_func_type_e;
 /*********************************************************
  *
  * Common vibrator mode
@@ -220,6 +232,18 @@ typedef struct sih_chip_attr {
 	int reset_gpio;
 	int irq_gpio;
 	char lra_name[SIH_LRA_NAME_LEN];
+	int lp_pvdds[SIH_LP_INDEX];		/**
+									 * pvdd in low power status
+									 * lp_pvdds[0]: vbat < 2.8v
+									 * lp_pvdds[1]: 2.8v <= vbat < 3.0v
+									 * lp_pvdds[2]: 3.0v <= vbat < 3.2v
+									 * lp_pvdds[3]: vbat >= 3.2v */
+	int lp_ipeaks[SIH_LP_INDEX];	/**
+									 * ipeak in low power status
+									 * lp_ipeaks[0]: vbat < 2.8v
+									 * lp_ipeaks[1]: 2.8v <= vbat < 3.0v
+									 * lp_ipeaks[2]: 3.0v <= vbat < 3.2v
+									 * lp_ipeaks[3]: vbat >= 3.2v */
 } sih_chip_attr_t;
 
 typedef struct sih_osc_para {

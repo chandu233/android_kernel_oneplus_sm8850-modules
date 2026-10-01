@@ -4,6 +4,7 @@
 #include <oplus_mms.h>
 #include "oplus_sili.h"
 #include <oplus_sec.h>
+#include "oplus_chg_dual_cells_protection.h"
 
 #define GAUGE_IC_NUM_MAX 2
 #define CALIB_TIME_STR_LEN 32
@@ -198,6 +199,11 @@ struct oplus_mms_gauge {
 #ifdef CONFIG_THERMAL
 	struct thermal_zone_device *main_batt_temp_tzd;
 #endif
+
+	/* dual cells batt protection */
+	struct oplus_dual_cells_protection dcb_protect;
+	struct delayed_work dcb_protect_check_work;
+	struct delayed_work dcb_protect_track_work;
 };
 
 #endif /* __OPLUS_GAUGE_COMMON_H__ */

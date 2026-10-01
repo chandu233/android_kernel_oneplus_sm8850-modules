@@ -98,34 +98,6 @@ error:
 	return rc;
 }
 
-__maybe_unused static int hl7227_read_data(struct oplus_hl7227 *chip, u8 addr, u8 *buf, int len)
-{
-	int rc;
-
-	mutex_lock(&chip->i2c_lock);
-	rc = i2c_master_send(chip->client, &addr, 1);
-	if (rc < 1) {
-		chg_err("read 0x%04x error, rc=%d\n", addr, rc);
-		rc = rc < 0 ? rc : -EIO;
-		goto error;
-	}
-
-	rc = i2c_master_recv(chip->client, buf, len);
-	if (rc < len) {
-		chg_err("read 0x%04x error, rc=%d\n", addr, rc);
-		rc = rc < 0 ? rc : -EIO;
-		goto error;
-	}
-
-	mutex_unlock(&chip->i2c_lock);
-	hl7227_i2c_err_clr(chip);
-	return 0;
-
-error:
-	mutex_unlock(&chip->i2c_lock);
-	hl7227_i2c_err_inc(chip);
-	return rc;
-}
 
 static int hl7227_write_byte(struct oplus_hl7227 *chip, u8 addr, u8 data)
 {
@@ -147,66 +119,8 @@ static int hl7227_write_byte(struct oplus_hl7227 *chip, u8 addr, u8 data)
 	return 0;
 }
 
-__maybe_unused static int hl7227_write_data(struct oplus_hl7227 *chip, u8 addr, u8 *buf, int len)
-{
-	u8 *buf_temp;
-	int i;
-	int rc;
 
-	buf_temp = kzalloc(len + 1, GFP_KERNEL);
-	if (!buf_temp) {
-		chg_err("alloc memary error\n");
-		return -ENOMEM;
-	}
 
-	buf_temp[0] = addr;
-	for (i = 0; i < len; i++)
-		buf_temp[i + 1] = buf[i];
-
-	mutex_lock(&chip->i2c_lock);
-	rc = i2c_master_send(chip->client, buf_temp, len + 1);
-	if (rc < 3) {
-		chg_err("write 0x%04x error, rc=%d\n", addr, rc);
-		mutex_unlock(&chip->i2c_lock);
-		kfree(buf_temp);
-		rc = rc < 0 ? rc : -EIO;
-		return rc;
-	}
-	mutex_unlock(&chip->i2c_lock);
-	kfree(buf_temp);
-
-	return 0;
-}
-
-__maybe_unused static int hl7227_read_byte_mask(struct oplus_hl7227 *chip, u8 addr, u8 mask, u8 *data)
-{
-	u8 temp;
-	int rc;
-
-	rc = hl7227_read_byte(chip, addr, &temp);
-	if (rc < 0)
-		return rc;
-
-	*data = mask & temp;
-
-	return 0;
-}
-
-__maybe_unused static int hl7227_write_byte_mask(struct oplus_hl7227 *chip, u8 addr, u8 mask, u8 data)
-{
-	u8 temp;
-	int rc;
-
-	rc = hl7227_read_byte(chip, addr, &temp);
-	if (rc < 0)
-		return rc;
-	temp = (data & mask) | (temp & (~mask));
-	rc = hl7227_write_byte(chip, addr, temp);
-	if (rc < 0)
-		return rc;
-
-	return 0;
-}
 
 static int hl7227_hardware_init(struct oplus_hl7227 *chip)
 {

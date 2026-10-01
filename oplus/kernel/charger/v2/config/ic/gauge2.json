@@ -9,7 +9,9 @@
                 "zh": "设置电池SOH历史数据"
             },
             "auto_debug_code": false,
-            "parameter_list": ["const int *"],
+            "parameter_list": [
+                "const int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "字符串",
@@ -31,7 +33,10 @@
                 "zh": "获取电池SOH历史数据"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *", "int"],
+            "parameter_list": [
+                "int *",
+                "int"
+            ],
             "parameter_desc": [
                 {
                     "range": "字符串",
@@ -70,7 +75,9 @@
                 "zh": "设置电池电量计重置"
             },
             "auto_debug_code": false,
-            "parameter_list": ["const int *"],
+            "parameter_list": [
+                "const int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "字符串",
@@ -92,7 +99,10 @@
                 "zh": "获取电池SN"
             },
             "auto_debug_code": true,
-            "parameter_list": ["char *", "int"],
+            "parameter_list": [
+                "char *",
+                "int"
+            ],
             "parameter_desc": [
                 {
                     "range": "字符串",
@@ -131,7 +141,10 @@
                 "zh": "获取电量计三级截止电压相关的参数"
             },
             "auto_debug_code": false,
-            "parameter_list": ["char *", "int"],
+            "parameter_list": [
+                "char *",
+                "int"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -165,7 +178,10 @@
                 "zh": "设置电量计三级截止电压参数"
             },
             "auto_debug_code": false,
-            "parameter_list": ["char *", "int"],
+            "parameter_list": [
+                "char *",
+                "int"
+            ],
             "parameter_desc": [
                 {
                     "range": "*",
@@ -194,7 +210,9 @@
                 "zh": "获取FCL电压"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *"],
+            "parameter_list": [
+                "int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-*",
@@ -221,7 +239,9 @@
                 "zh": "获取当前电池电量(2位小数)"
             },
             "auto_debug_code": true,
-            "parameter_list": ["int *"],
+            "parameter_list": [
+                "int *"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-10000",
@@ -272,7 +292,9 @@
                 "zh": "获取SN是否匹配"
             },
             "auto_debug_code": true,
-            "parameter_list": ["bool *"],
+            "parameter_list": [
+                "bool *"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-1",
@@ -323,7 +345,9 @@
                 "zh": "设置电量计电压电流等参数快速采样功能使能与否"
             },
             "auto_debug_code": true,
-            "parameter_list": ["bool"],
+            "parameter_list": [
+                "bool"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-1",
@@ -374,7 +398,9 @@
                 "zh": "通知电量计, check delta volt"
             },
             "auto_debug_code": true,
-            "parameter_list": ["bool"],
+            "parameter_list": [
+                "bool"
+            ],
             "parameter_desc": [
                 {
                     "range": "0-1",
@@ -437,8 +463,41 @@
                 },
                 "overwrite": false
             }
+        },
+        {
+            "lable": "OPLUS_IC_FUNC_GAUGE_GET_C_SOC",
+            "desc": {
+                "zh": "获取电量计c_soc"
+            },
+            "auto_debug_code": true,
+            "parameter_list": [
+                "int *"
+            ],
+            "parameter_desc": [
+                {
+                    "range": "0-*",
+                    "type": "out",
+                    "desc": {
+                        "zh": "电量计c_soc"
+                    }
+                }
+            ],
+            "vict": {
+                "read": {
+                    "cmd": "vict -f {id} -G vic-*",
+                    "desc": {
+                        "zh": "N/A"
+                    }
+                },
+                "write": false,
+                "overwrite": {
+                    "cmd": "vict -f {id} -O {val} vic-*",
+                    "desc": {
+                        "zh": "N/A"
+                    }
+                }
+            }
         }
     ],
-
-    "version": "V6.4:16:a4afdb37e034f45b36dcf72f7793a307fb02305fd37b41550ba17f8c6ff7fda3"
+    "version": "V6.5:17:cdc4208e96ef1d161c7575ed4bbc793b27060361662775454ad8fd485e631bdc"
 }

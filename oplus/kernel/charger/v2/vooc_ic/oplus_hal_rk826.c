@@ -158,14 +158,6 @@ typedef struct {
 } struct_req, *pstruct_req;
 
 struct rk826_bat {
-	int uv_bat;
-	int current_bat;
-	int temp_bat;
-	int soc_bat;
-	int pre_uv_bat;
-	int pre_current_bat;
-	int pre_temp_bat;
-	int pre_soc_bat;
 	int reset_status;
 };
 

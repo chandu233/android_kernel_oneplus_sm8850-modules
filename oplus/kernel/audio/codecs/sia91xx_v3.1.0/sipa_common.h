@@ -36,7 +36,7 @@
 #include <linux/version.h>
 
 
-#define SIPA_DRIVER_VERSION					("3.1.0d-0506")
+#define SIPA_DRIVER_VERSION					("3.1.0e-1031")
 #define SIPA_MAX_CHANNEL_SUPPORT			(8)
 
 struct sipa_err {
@@ -136,6 +136,7 @@ typedef struct sipa_dev_s {
 	struct proc_dir_entry *dbg_dir;
 #endif/*CONFIG_DEBUG_FS*/
 //endif
+	struct regulator *sipa_vdd;
 } sipa_dev_t;
 
 struct sipa_chip_compat {
@@ -185,33 +186,48 @@ enum {
 	CHIP_TYPE_SIA8157,
 	CHIP_TYPE_SIA8001,
 	CHIP_TYPE_SIA8102,
+	CHIP_TYPE_SIA8150,
+	CHIP_TYPE_SIA8168,
+	CHIP_TYPE_SIA9189 = 19,
 	// add compatible chip type here
 	CHIP_TYPE_UNKNOWN,
 	CHIP_TYPE_INVALID
 };
 
 #define IS_DIGITAL_PA_TYPE(type) \
-			(type == CHIP_TYPE_SIA9195 || \
+			((type == CHIP_TYPE_SIA9195 || \
 			 type == CHIP_TYPE_SIA9175 || \
 			 type == CHIP_TYPE_SIA9196 || \
 			 type == CHIP_TYPE_SIA9177 || \
-			 type == CHIP_TYPE_SIA917X) \
+			 type == CHIP_TYPE_SIA917X || \
+			 type == CHIP_TYPE_SIA9189) \
 			 ? true \
-			 : false
+			 : false)
 
 #define IS_SUPPORT_OWI_TYPE(type) \
-			(type == CHIP_TYPE_SIA8001  || \
+			((type == CHIP_TYPE_SIA8001  || \
 			 type == CHIP_TYPE_SIA8102  || \
 			 type == CHIP_TYPE_SIA8100X )  \
 			 ? true \
-			 : false
+			 : false)
 
 #define IS_NEED_PULL_RST_TYPE(type) \
-			(type == CHIP_TYPE_SIA81X9  || \
+			((type == CHIP_TYPE_SIA81X9  || \
 			 type == CHIP_TYPE_SIA8109  || \
-			 type == CHIP_TYPE_SIA8157)    \
+			 type == CHIP_TYPE_SIA8157  || \
+			 type == CHIP_TYPE_SIA9189)    \
 			 ? true \
-			 : false
+			 : false)
+
+#define IS_DIGITAL_PA_PULL_RST_TYPE(type)  \
+			((type == CHIP_TYPE_SIA9189)   \
+			? true \
+			: false)
+
+#define IS_NEED_SIPA_SRAM_TYPE(type)  \
+			((type == CHIP_TYPE_SIA9189)   \
+			? true \
+			: false)
 
 #define SIPA_MAX_REG_ADDR					(0xFF)
 
@@ -229,11 +245,6 @@ enum {
 #define EOUTR								(103)
 
 sipa_dev_t *find_sipa_dev(struct device_node *of_node);
-
-int sipa_multi_channel_power_on_and_set_scene(uint32_t scene, uint8_t pa_idx);
-int sipa_multi_channel_power_off(uint8_t pa_idx);
-int sipa_multi_channel_load_fw(char *fwname);
-int sipa_get_channels(void);
-int sipa_multi_channel_reg_dump(void);
+int sipa_digital_rst_suspend(struct sipa_dev_s *si_pa);
 
 #endif /* _SIPA_COMMOMN_H */

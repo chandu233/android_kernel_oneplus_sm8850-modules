@@ -611,6 +611,7 @@ int nfc_i2c_dev_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	i2c_set_clientdata(client, nfc_dev);
 	i2c_dev->irq_wake_up = false;
 
+#ifndef CONFIG_UNISOC_PLATFORM
 	dev_err(&client->dev,"%s: get boot mode = %d\n", __func__, get_boot_mode());
 #ifdef CONFIG_OPLUS_SYSTEM_KERNEL_QCOM
 	if(get_boot_mode() == MSM_BOOT_MODE__FACTORY) {
@@ -620,6 +621,7 @@ int nfc_i2c_dev_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		dev_err(&client->dev,"%s: enter ftm mode, set ven = 0\n", __func__);
 		gpio_set_ven(nfc_dev, 0);
 	}
+#endif
 
 	pr_info("%s: probing nfc i2c successfully\n", __func__);
 	return 0;

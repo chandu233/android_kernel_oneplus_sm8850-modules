@@ -528,7 +528,7 @@ enum {
 #define SC6607_HK_VBUS_OVP_DATA		0x02
 
 /* Register 0Fh */
-#define SC6607_HK_CTRL3		0x07
+#define SC6607_HK_CTRL3		0x05
 
 /* Register 10h */
 #define SC6607_ADC_FUNC_DIS		0x79

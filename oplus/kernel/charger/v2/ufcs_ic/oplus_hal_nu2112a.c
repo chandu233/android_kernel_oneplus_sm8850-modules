@@ -1241,6 +1241,8 @@ static int nu2112a_retrieve_reg_flags(struct nu2112a_device *chip)
 		err_flag |= BIT(UFCS_RECV_ERR_ACK_TIMEOUT);
 	if (flag_buf[1] & NU2112A_FLAG_MSG_TRANS_FAIL)
 		err_flag |= BIT(UFCS_RECV_ERR_TRANS_FAIL);
+	if (flag_buf[1] & NU2112A_FLAG_RX_BUFFER_BUSY)
+		err_flag |= BIT(UFCS_RECV_ERR_BUFF_BUSY);
 	if (flag_buf[1] & NU2112A_FLAG_RX_OVERFLOW)
 		err_flag |= BIT(UFCS_COMM_ERR_RX_OVERFLOW);
 	if (flag_buf[1] & NU2112A_FLAG_DATA_READY)
@@ -1619,23 +1621,6 @@ desc = irq_to_desc(voocphy->irq);
 	return 0;
 }
 
-int nu2112a_clk_err_clean(void)
-{
-	if (!oplus_voocphy_mg)
-		return 0;
-
-	nu2112a_write_byte(oplus_voocphy_mg->client, NU2112A_REG_2B, 0x02); /*reset vooc*/
-	nu2112a_write_word(oplus_voocphy_mg->client, NU2112A_REG_31, 0x0);
-	nu2112a_write_byte(oplus_voocphy_mg->client, NU2112A_REG_35, 0x20); /*dpdm */
-	nu2112a_write_byte(oplus_voocphy_mg->client, NU2112A_REG_33, 0xD1);
-	/*vooc */
-	nu2112a_write_byte(oplus_voocphy_mg->client, NU2112A_REG_30, 0x05);
-	msleep(15);
-	nu2112a_write_byte(oplus_voocphy_mg->client, NU2112A_REG_2B, 0x80); /*enable phy*/
-
-	pr_err("nu2112a_clk_err_clean done");
-	return 0;
-}
 
 static int nu2112a_svooc_hw_setting(struct nu2112a_device *chip)
 {
@@ -1965,7 +1950,16 @@ retry:
 
 static int nu2112a_ufcs_cable_hard_reset(struct ufcs_dev *ufcs)
 {
-	return 0;
+	struct nu2112a_device *chip = ufcs->drv_data;
+	int rc;
+
+	rc = nu2112a_write_bit_mask(chip, NU2112A_ADDR_UFCS_CTRL0,
+		SEND_CABLE_HARDRESET, SEND_CABLE_HARDRESET);
+
+	if (rc < 0)
+		chg_err("set cable reset error, rc=%d\n", rc);
+
+	return rc;
 }
 
 static int nu2112a_ufcs_set_baud_rate(struct ufcs_dev *ufcs, enum ufcs_baud_rate baud)
@@ -2128,6 +2122,36 @@ static int nu2112a_ufcs_baudrate_end_check_config(struct ufcs_dev *ufcs)
 	return 0;
 }
 
+static int nu2112a_ufcs_hiz_enable(struct ufcs_dev *ufcs, bool en)
+{
+	struct nu2112a_device *chip = ufcs->drv_data;
+	int rc = 0;
+	u8 data = 0;
+
+	if (en)
+		 data = NU2112A_SEND_ENABLE_HIZ;
+	else
+		data = 0;
+	rc = nu2112a_write_bit_mask(chip, NU2112A_ADDR_GENERAL_INT_FLAG1,
+		NU2112A_SEND_ENABLE_HIZ, data);
+	if (rc < 0)
+		chg_err("set ufcs hiz %d error, rc=%d\n", en, rc);
+
+	return rc;
+}
+
+static int nu2112a_ufcs_clr_rx_buf(struct ufcs_dev *ufcs)
+{
+	struct nu2112a_device *chip = ufcs->drv_data;
+	int rc;
+
+	rc = nu2112a_write_bit_mask(chip, NU2112A_ADDR_GENERAL_INT_FLAG1,
+		NU2112A_SEND_CLR_RX_BUF, NU2112A_SEND_CLR_RX_BUF);
+	if (rc < 0)
+		chg_err("clear rx buf error, rc=%d\n", rc);
+	return rc;
+}
+
 static struct ufcs_dev_ops ufcs_ops = {
 	.init = nu2112a_ufcs_init,
 	.write_msg = nu2112a_ufcs_write_msg,
@@ -2140,6 +2164,8 @@ static struct ufcs_dev_ops ufcs_ops = {
 	.disable = nu2112a_ufcs_disable,
 	.watchdog_config = nu2112a_ufcs_watchdog_config,
 	.baudrate_end_check_config = nu2112a_ufcs_baudrate_end_check_config,
+	.hiz_enable = nu2112a_ufcs_hiz_enable,
+	.clr_rx_buf = nu2112a_ufcs_clr_rx_buf,
 };
 
 static int nu2112a_charger_choose(struct nu2112a_device *chip)

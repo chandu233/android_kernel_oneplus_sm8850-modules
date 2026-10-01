@@ -336,6 +336,7 @@ static int gt_chip_get_gesture(void *priv, struct gesture_info *gesture)
 	goodix_spi_read(gt, ges_addr, temp_data, sizeof(temp_data));
 	if (temp_data[0] == 0) {
 		hbp_err("invalid gesture head\n");
+		hbp_dev_healthinfo_report(gt, CHIPS_REPORT_GOODIX_GESTURE_INVALID_HEAD);
 		//goto re_send_ges_cmd;
 		return -1;
 	}
@@ -433,22 +434,22 @@ static int gt_chip_get_gesture(void *priv, struct gesture_info *gesture)
 		break;
 	case GOODIX_COMPLEX_SMALL_AREA:
 		hbp_info("get gesture event: fp_grip_small_area_cnt\n");
-		hbp_dev_healthinfo_report(gt, "fp_grip_small_area_cnt");
+		hbp_dev_healthinfo_report(gt, FP_GRIP_SMALL_AREA_CNT);
 		gesture->type = FP_GESTURE_HOLD;
 		break;
 	case GOODIX_SIMPLE_AREA:
 		hbp_info("get gesture event: fp_grip_big_area_cnt\n");
-		hbp_dev_healthinfo_report(gt, "fp_grip_big_area_cnt");
+		hbp_dev_healthinfo_report(gt, FP_GRIP_BIG_AREA_CNT);
 		gesture->type = FP_GESTURE_HOLD;
 		break;
 	case GOODIX_RELEASE_HOLD:
 		hbp_info("get gesture event: fp_grip_release_cnt\n");
-		hbp_dev_healthinfo_report(gt, "fp_grip_release_cnt");
+		hbp_dev_healthinfo_report(gt, FP_GRIP_RELEASE_CNT);
 		gesture->type = FP_GESTURE_RELEASE;
 		break;
 	case GOODIX_TOUCH_HOLD_EARLY_DOWN:
 		hbp_info("get gesture event: fp_grip_early_down\n");
-		hbp_dev_healthinfo_report(gt, "fp_grip_early_down");
+		hbp_dev_healthinfo_report(gt, FP_GRIP_RELEASE_CNT);
 		gesture->type = FingerprintEarlyDown;
 		break;
 	case GOODIX_FINGERPRINT_ERR_REPORT:
@@ -461,6 +462,7 @@ static int gt_chip_get_gesture(void *priv, struct gesture_info *gesture)
 		break;
 	default:
 		hbp_err("not support gesture type 0x%02x\n", temp_data[4]);
+		hbp_dev_healthinfo_report(gt, CHIPS_REPORT_GOODIX_GESTURE_UNKNOWN_TYPE);
 		break;
 	}
 
@@ -671,7 +673,7 @@ static int gt_dev_probe(struct platform_device *pdev)
 
 	hbp_info("probe start, ko_version %s.\n", KO_VERSION);
 	if (!match_from_cmdline(&pdev->dev, &info)) {
-		return 0;
+		return -ENODEV;
 	}
 
 	gt = kzalloc(sizeof(struct gt_core), GFP_KERNEL);
@@ -692,6 +694,7 @@ static int gt_dev_probe(struct platform_device *pdev)
 	ret = hbp_register_devices(gt, &pdev->dev, &gt_ops, &info, &gt->bus_ops);
 	if (ret < 0) {
 		hbp_err("failed to register device:%s %d\n", info.vendor, ret);
+		hbp_dev_healthinfo_report(gt, CHIPS_REPORT_GOODIX_PROBE_REGISTER_FAIL);
 		goto err_exit;
 	}
 

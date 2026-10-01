@@ -19,13 +19,20 @@
 typedef struct sih_match_funclist {
 	haptic_func_t *haptic_func;
 	const struct regmap_config *haptic_regmap_config;
+	int (*config_load)(sih_haptic_t *sih_haptic);
 } sih_match_funclist_t;
 
 sih_match_funclist_t sih_match_if[] = {
 	{
 		.haptic_func = &sih_688x_func_list,
 		.haptic_regmap_config = &sih688x_regmap_config,
-	}
+		.config_load = sih688x_config_load,
+	},
+	{
+		.haptic_func = &sih_6889_func_list,
+		.haptic_regmap_config = &sih6889_regmap_config,
+		.config_load = sih6889_config_load,
+	},
 };
 
 /*********************************************************
@@ -111,6 +118,11 @@ int sih_register_func(sih_haptic_t *sih_haptic)
 	for (i = 0; i < array_len; ++i) {
 		ret = sih_match_if[i].haptic_func->probe(sih_haptic);
 		if (!ret) {
+			ret = sih_match_if[i].config_load(sih_haptic);
+			if (ret) {
+				hp_err("%s:config load failed, ret=%d\n", __func__, ret);
+				continue;
+			}
 			sih_haptic->hp_func = sih_match_if[i].haptic_func;
 			sih_haptic->regmapp.config = sih_match_if[i].haptic_regmap_config;
 			hp_info("%s:match sequence number is %d\n", __func__, i);

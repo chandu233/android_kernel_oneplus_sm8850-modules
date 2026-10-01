@@ -779,10 +779,6 @@ static int vibrator_chip_init(sih_haptic_t *sih_haptic)
 		return ret;
 	sih_haptic->hp_func->init(sih_haptic);
 	sih_haptic->hp_func->stop(sih_haptic);
-	/* load lra reg config */
-	ret = sih_lra_config_load(sih_haptic);
-	if (ret < 0)
-		return ret;
 	if (sih_haptic->auto_break_mode_support) {
 		sih_auto_break_config_regs(sih_haptic);
 		sih_haptic->hp_func->set_brk_state(sih_haptic, SIH_RAM_MODE, true);
