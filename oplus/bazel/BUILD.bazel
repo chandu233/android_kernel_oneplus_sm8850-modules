@@ -3,3 +3,16 @@ package(
         "//visibility:public",
     ],
 )
+
+load("//build/kernel/kleaf:hermetic_tools.bzl", "hermetic_genrule")
+
+hermetic_genrule(
+    name = "kconfig.oplus.generated",
+    srcs = [
+        "Kconfig",
+        "Kconfig.device_info",
+        "Kconfig.sensor_err",
+    ],
+    outs = ["Kconfig.ext"],
+    cmd = "cat $(SRCS) >$@",
+)
