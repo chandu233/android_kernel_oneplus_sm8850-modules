@@ -37,6 +37,7 @@ uint32_t AK7316_PARKLENS_DOWN[ACTUATOR_REGISTER_SIZE][2] = {
 	{0x00, 0xF0},
 	{0x00, 0xF8},
 	{0x00, 0xFE},
+	{0x02, 0x40},
 	{0xff, 0xff},
 };
 
@@ -752,6 +753,7 @@ void cam_actuator_poll_setting_apply(struct cam_actuator_ctrl_t *a_ctrl) {
 int actuator_power_down_thread(void *arg)
 {
 	int rc = 0;
+	bool power_down_locked = false;
 	int i;
 	uint32_t read_val = 0;
 	struct cam_actuator_ctrl_t *a_ctrl = (struct cam_actuator_ctrl_t *)arg;
@@ -760,7 +762,6 @@ int actuator_power_down_thread(void *arg)
 	msleep(5);
 	if (!a_ctrl) {
 		CAM_EXT_ERR(CAM_EXT_ACTUATOR, "failed: a_ctrl %pK", a_ctrl);
-		complete(&(a_ctrl->actuator_parklens_thread_completion));
 		return -EINVAL;
 	}
 
@@ -788,18 +789,35 @@ int actuator_power_down_thread(void *arg)
 		mutex_unlock(&(a_ctrl->af_power_down_mutex));
 	}
 
-	oplus_cam_monitor_state(a_ctrl,
-		a_ctrl->v4l2_dev_str.ent_function,
-		CAM_ACTUATOR_NORMAL_POWER_UP_TYPE,
-		false);
-	oplus_cam_monitor_state(a_ctrl,
-		a_ctrl->v4l2_dev_str.ent_function,
-		CAM_ACTUATOR_DELAY_POWER_DOWN_TYPE,
-		true);
+	if (power_info && power_info->power_setting && power_info->power_down_setting) {
+		oplus_cam_monitor_state(a_ctrl,
+			a_ctrl->v4l2_dev_str.ent_function,
+			CAM_ACTUATOR_NORMAL_POWER_UP_TYPE,
+			false);
+		oplus_cam_monitor_state(a_ctrl,
+			a_ctrl->v4l2_dev_str.ent_function,
+			CAM_ACTUATOR_DELAY_POWER_DOWN_TYPE,
+			true);
+	} else {
+		CAM_EXT_DBG(CAM_EXT_ACTUATOR, "power_setting is null, skip monitor state update, may be in shutdown");
+	}
 
 	CAM_EXT_INFO(CAM_EXT_ACTUATOR, "actuator_power_down_thread start ");
-	cam_ext_io_dev_read(a_ctrl->io_master_info.cci_client, AK7316_DAC_ADDR, &read_val,
+
+	if (!a_ctrl->io_master_info.cci_client ||
+	    a_ctrl->cam_act_state == CAM_ACTUATOR_INIT) {
+		CAM_EXT_ERR(CAM_EXT_ACTUATOR, "CCI invalid or actuator already shutdown, skip parklens");
+		rc = -ENODEV;
+		goto skip_parklens;
+	}
+
+	rc = cam_ext_io_dev_read(a_ctrl->io_master_info.cci_client, AK7316_DAC_ADDR, &read_val,
 			CAMERA_SENSOR_I2C_TYPE_BYTE, CAMERA_SENSOR_I2C_TYPE_WORD,false);
+
+	if (rc < 0) {
+		CAM_EXT_ERR(CAM_EXT_ACTUATOR, "CCI read failed, rc=%d, CCI may be released, skip parklens", rc);
+		goto skip_parklens;
+	}
 
 	for (i = 0; i < ACTUATOR_REGISTER_SIZE; i++) {
 		if ((AK7316_PARKLENS_DOWN[i][0] != 0xff) && (AK7316_PARKLENS_DOWN[i][1] != 0xff)) {
@@ -854,23 +872,47 @@ int actuator_power_down_thread(void *arg)
 free_power_settings:
 	if (a_ctrl->is_need_read_current) {
 		mutex_lock(&(a_ctrl->af_power_down_mutex));
+		power_down_locked = true;
 		if (a_ctrl->af_power_down_thread_state == CAM_AF_POWER_DOWN_THREAD_STOPPED)
 		{
 			CAM_EXT_INFO(CAM_EXT_ACTUATOR, "Actuator:%s has start power up, not need power down", a_ctrl->actuator_name);
 			mutex_unlock(&(a_ctrl->af_power_down_mutex));
-			oplus_cam_monitor_state(a_ctrl,
-				a_ctrl->v4l2_dev_str.ent_function,
-				CAM_ACTUATOR_DELAY_POWER_DOWN_TYPE,
-				false);
+
+			if (power_info && power_info->power_setting && power_info->power_down_setting) {
+				oplus_cam_monitor_state(a_ctrl,
+					a_ctrl->v4l2_dev_str.ent_function,
+					CAM_ACTUATOR_DELAY_POWER_DOWN_TYPE,
+					false);
+			}
 
 			complete(&(a_ctrl->actuator_parklens_thread_completion));
 			return rc;
 		}
 	}
-	oplus_cam_monitor_state(a_ctrl,
-		a_ctrl->v4l2_dev_str.ent_function,
-		CAM_ACTUATOR_DELAY_POWER_DOWN_TYPE,
-		false);
+
+skip_parklens:
+	if (rc < 0) {
+		if (power_info && power_info->power_setting && power_info->power_down_setting) {
+			oplus_cam_monitor_state(a_ctrl,
+				a_ctrl->v4l2_dev_str.ent_function,
+				CAM_ACTUATOR_DELAY_POWER_DOWN_TYPE,
+				false);
+		}
+		if (a_ctrl->io_master_info.cci_client &&
+		    a_ctrl->cam_act_state != CAM_ACTUATOR_INIT) {
+			camera_io_release(&a_ctrl->io_master_info);
+		}
+		goto thread_exit;
+	}
+
+	if (power_info && power_info->power_setting && power_info->power_down_setting) {
+		oplus_cam_monitor_state(a_ctrl,
+			a_ctrl->v4l2_dev_str.ent_function,
+			CAM_ACTUATOR_DELAY_POWER_DOWN_TYPE,
+			false);
+	} else {
+		CAM_EXT_DBG(CAM_EXT_ACTUATOR, "power_setting is null, skip monitor state update, may be in shutdown");
+	}
 	// rc = cam_actuator_power_down(a_ctrl);
 
 	// The logic of this block code should be same as cam_actuator_power_down,
@@ -916,8 +958,11 @@ free_power_settings:
 		power_info->power_down_setting_size = 0;
 		mutex_unlock(&(a_ctrl->actuator_power_mutex));
 	}
+thread_exit:
 	CAM_EXT_INFO(CAM_EXT_ACTUATOR, "actuator_power_down_thread exit");
 	if (a_ctrl->is_need_read_current) {
+		if (!power_down_locked)
+			mutex_lock(&a_ctrl->af_power_down_mutex);
 		a_ctrl->af_power_down_thread_state = CAM_AF_POWER_DOWN_THREAD_STOPPED;
 		mutex_unlock(&(a_ctrl->af_power_down_mutex));
 	}
@@ -935,10 +980,24 @@ void oplus_cam_actuator_parklens_power_down(struct cam_actuator_ctrl_t *a_ctrl)
 	struct cam_sensor_power_ctrl_t *power_info =
 		&soc_private->power_info;
 
+	if (a_ctrl->cam_act_state == CAM_ACTUATOR_INIT) {
+		CAM_EXT_DBG(CAM_EXT_ACTUATOR, "Actuator already shutdown, skip parklens power down");
+		return;
+	}
+
+	if (a_ctrl->actuator_parklens_thread) {
+		CAM_EXT_INFO(CAM_EXT_ACTUATOR, "actuator_parklens_thread already running, wait for completion");
+		wait_for_completion_timeout(
+			&(a_ctrl->actuator_parklens_thread_completion),
+			msecs_to_jiffies(3000));
+		return;
+	}
+
 	reinit_completion(&(a_ctrl->actuator_parklens_thread_completion));
 	a_ctrl->actuator_parklens_thread = kthread_run(actuator_power_down_thread, a_ctrl, "actuator_power_down_thread");
 
 	if (IS_ERR(a_ctrl->actuator_parklens_thread)) {
+		a_ctrl->actuator_parklens_thread = NULL;
 		//down(&a_ctrl->actuator_sem);
 		CAM_EXT_ERR(CAM_EXT_ACTUATOR, "create actuator_power_down_thread failed");
 		rc = cam_actuator_power_down(a_ctrl);
@@ -957,6 +1016,7 @@ void oplus_cam_actuator_parklens_power_down(struct cam_actuator_ctrl_t *a_ctrl)
 			power_info->power_setting_size = 0;
 			power_info->power_down_setting_size = 0;
 		}
+		complete_all(&a_ctrl->actuator_parklens_thread_completion);
 		//up(&a_ctrl->actuator_sem);
 	}
 }

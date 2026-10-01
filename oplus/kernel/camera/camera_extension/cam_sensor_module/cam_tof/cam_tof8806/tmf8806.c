@@ -222,8 +222,8 @@ const tmf8806MeasureCmd defaultConfig =
 					}
 		, .algo = { .reserved0 = 0
 					, .distanceEnabled = 1
-					, .vcselClkDiv2 = 0
-					, .distanceMode = 0                             // 0=2.5m
+					, .vcselClkDiv2 = 1
+					, .distanceMode = 1                             // 0=2.5m
 					, .immediateInterrupt = 0
 					, .reserved = 0
 					, .algKeepReady = 0                             // 0 = power saving on
@@ -235,8 +235,8 @@ const tmf8806MeasureCmd defaultConfig =
 		, .snr = { .threshold = 6
 					, .vcselClkSpreadSpecAmplitude = 0
 					}
-		, .repetitionPeriodMs = 33
-		, .kIters  = 400
+		, .repetitionPeriodMs = 66
+		, .kIters  = 900
 		, .command = TMF8806_COM_CMD_STAT__cmd_measure
 		}
 };
@@ -1240,7 +1240,7 @@ void tmf8806SerializeFactoryCalibration ( const tmf8806FactoryCalibData * factor
 
 	a = factoryCalib->crosstalkTdc4Ch1BinPosDeltaQ6Msb;         // 3 bit
 	b = factoryCalib->reserved;                                 // 5 bit
-	buffer[12] = (a & 0x03 ) | ((b << 3) & 0xFC);
+	buffer[12] = (a & 0x07 ) | ((b << 3) & 0xF8);
 	buffer[13] = factoryCalib->opticalOffsetQ3;
 }
 
