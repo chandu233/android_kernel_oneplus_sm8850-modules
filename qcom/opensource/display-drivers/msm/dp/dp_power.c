@@ -15,6 +15,7 @@
 #include "dp_catalog.h"
 #include "dp_debug.h"
 #include "dp_pll.h"
+#include <linux/pm_domain.h>
 
 #define DP_CLIENT_NAME_SIZE	20
 #define XO_CLK_KHZ	19200
@@ -92,6 +93,7 @@ static void dp_power_regulator_deinit(struct dp_power_private *power)
 static void dp_power_phy_gdsc(struct dp_power *dp_power, bool on)
 {
 	int rc = 0;
+	struct generic_pm_domain *genpd;
 
 	if (IS_ERR_OR_NULL(dp_power->dp_phy_gdsc) && IS_ERR_OR_NULL(dp_power->pd_dp_phy_gdsc))
 		return;
@@ -105,17 +107,25 @@ static void dp_power_phy_gdsc(struct dp_power *dp_power, bool on)
 		if (rc)
 			DP_ERR("Fail to %s dp_phy_gdsc regulator ret = %d\n",
 					on ? "enable" : "disable", rc);
-	} else if (dp_power->pd_dp_phy_gdsc) {
-		if (on)
+	} else if (dp_power->pd_dp_phy_gdsc && dp_power->pd_dp_phy_gdsc->pm_domain) {
+		genpd = pd_to_genpd(dp_power->pd_dp_phy_gdsc->pm_domain);
+
+		if (on) {
+			genpd->flags |= GENPD_FLAG_ACTIVE_WAKEUP;
+			genpd->flags |= GENPD_FLAG_ALWAYS_ON;
+			DP_DEBUG("GDSC flags ON\n");
 			rc = pm_runtime_get_sync(dp_power->pd_dp_phy_gdsc);
-		else
+		} else {
+			genpd->flags &= ~GENPD_FLAG_ACTIVE_WAKEUP;
+			genpd->flags &= ~GENPD_FLAG_ALWAYS_ON;
+			DP_DEBUG("GDSC flags OFF\n");
 			rc = pm_runtime_put_sync(dp_power->pd_dp_phy_gdsc);
+		}
 
 		if (rc < 0)
 			DP_ERR("Fail to %s pd_dp_phy_gdsc regulator ret = %d\n",
 					on ? "enable" : "disable", rc);
 	}
-
 }
 
 static int dp_power_regulator_ctrl(struct dp_power_private *power, bool enable)

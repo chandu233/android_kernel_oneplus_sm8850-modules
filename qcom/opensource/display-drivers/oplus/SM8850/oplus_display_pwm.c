@@ -655,6 +655,7 @@ int oplus_panel_pwm_dbv_threshold_switch_tx_cmd(struct dsi_panel *panel)
 		return rc;
 	}
 
+#ifdef OPLUS_FEATURE_DISPLAY_PWM_MODE
 	switch(last_state) {
 	case PWM_STATE_L1:
 		switch(cur_state) {
@@ -687,6 +688,7 @@ int oplus_panel_pwm_dbv_threshold_switch_tx_cmd(struct dsi_panel *panel)
 		}
 		break;
 	}
+#endif /* OPLUS_FEATURE_DISPLAY_PWM_MODE */
 
 	if (pwm_switch_cmd == 0) {
 		return rc;
@@ -773,7 +775,9 @@ int oplus_panel_pwm_switch_timing_switch(struct dsi_panel *panel)
 		return rc;
 	}
 
+#ifdef OPLUS_FEATURE_DISPLAY_PWM_MODE
 	pwm_switch_cmd = DSI_CMD_PWM_TIMMING_SWITCH_L1 + panel->oplus_panel.pwm_params.pwm_pulse_state;
+#endif /* OPLUS_FEATURE_DISPLAY_PWM_MODE */
 
 	rc = dsi_panel_tx_cmd_set(panel, pwm_switch_cmd, false);
 

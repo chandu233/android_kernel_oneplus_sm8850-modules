@@ -21,6 +21,9 @@
 #include "sde_kms.h"
 #include "sde_fence.h"
 #include "sde_encoder.h"
+// #ifdef OPLUS_ARCH_EXTENDS
+#include "sde_trace.h"
+// #endif /*OPLUS_ARCH_EXTENDS*/
 
 #define TIMELINE_VAL_LENGTH		128
 #define SPEC_FENCE_FLAG_FENCE_ARRAY	0x10
@@ -835,7 +838,6 @@ int sde_fence_update_input_hw_fence_signal(struct sde_hw_ctl *hw_ctl, u32 debugf
 	if (hw_ctl->ops.hw_fence_ctrl[hw_ctl->hw.disp_op])
 		hw_ctl->ops.hw_fence_ctrl[hw_ctl->hw.disp_op](hw_ctl, true, true, 1, false,
 			false);
-
 	return 0;
 }
 #else
@@ -880,11 +882,37 @@ void sde_sync_put(void *fence)
 		dma_fence_put(fence);
 }
 
+// #ifdef OPLUS_ARCH_EXTENDS
+void sde_trace_kgsl_fence_timeout(void *fnc)
+{
+	struct dma_fence *fence = fnc;
+	if (!fence)
+		return;
+	const char *driver_name = fence->ops->get_driver_name(fence);
+
+	SDE_ERROR("[caoy] sde_fence_dump:fence drv name:%s\n", driver_name);
+
+	if (driver_name) {
+		if (!strncmp(driver_name, "kgsl-timeline", strlen("kgsl-timeline")) ||
+		    !strncmp(driver_name, "oplus_sync", strlen("oplus_sync"))) {
+				trace_oplus_kgsl_fence_timeout(fence->ops->get_timeline_name(fence), "kgsl_fence_timeout", 9999);
+		}
+	}
+}
+// #endif /*OPLUS_ARCH_EXTENDS*/
+
 void sde_fence_dump(struct dma_fence *fence)
 {
 	struct dma_fence_array *array = NULL;
 	char timeline_str[TIMELINE_VAL_LENGTH];
 	uint32_t i;
+
+#ifdef OPLUS_FEATURE_DISPLAY
+	if (!fence || !fence->ops) {
+		SDE_ERROR("fence or fence->ops is NULL\n");
+		return;
+	}
+#endif
 
 	if (fence->ops->timeline_value_str)
 		fence->ops->timeline_value_str(fence, timeline_str, TIMELINE_VAL_LENGTH);
@@ -903,8 +931,21 @@ void sde_fence_dump(struct dma_fence *fence)
 		array = container_of(fence, struct dma_fence_array, base);
 		SDE_ERROR("fence drv name:%s num_fences:%d\n", fence->ops->get_driver_name(fence),
 			array->num_fences);
-		for (i = 0; i < array->num_fences; i++)
+#ifdef OPLUS_FEATURE_DISPLAY
+		if (!array || !array->fences) {
+			SDE_ERROR("invalid array fence\n");
+			return;
+		}
+#endif
+		for (i = 0; i < array->num_fences; i++) {
+#ifdef OPLUS_FEATURE_DISPLAY
+			if (!array->fences[i]) {
+				SDE_ERROR("child fence %d is NULL\n", i);
+				continue;
+			}
+#endif
 			sde_fence_dump(array->fences[i]);
+		}
 	}
 }
 

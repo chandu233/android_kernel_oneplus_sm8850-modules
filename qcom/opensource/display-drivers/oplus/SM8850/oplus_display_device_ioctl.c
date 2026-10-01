@@ -40,6 +40,7 @@ extern int dynamic_osc_clock;
 extern int oplus_hw_partial_round;
 int mca_mode = 1;
 int dcc_flags = 0;
+int shutdown_flag = 0;
 
 extern int dither_enable;
 extern int seed_mode;
@@ -56,6 +57,7 @@ extern int dsi_display_spr_mode(struct dsi_display *display, int mode);
 extern int dsi_panel_spr_mode(struct dsi_panel *panel, int mode);
 extern int __oplus_display_set_dither(int mode);
 extern unsigned int is_project(int project);
+
 
 enum {
 	REG_WRITE = 0,
@@ -1691,4 +1693,55 @@ int oplus_display_ioctl_get_panel_btbsn(void *buf)
 	}
 
 	return rc;
+}
+
+int oplus_display_set_shutdown_flag(void *buf)
+{
+	shutdown_flag = 1;
+	OPLUS_DSI_INFO("display set shutdown_flag = %d\n", shutdown_flag);
+	return 0;
+}
+
+int oplus_display_panel_set_LGD_value(void *buf)
+{
+	struct dsi_display *display = get_main_display();
+	struct dsi_panel *panel;
+	unsigned int value;
+	int rc;
+
+	if (!buf || !display || !display->panel)
+		return -EINVAL;
+	value = *(unsigned int *)buf;
+	if (value > 1)
+		return -EINVAL;
+	panel = display->panel;
+	mutex_lock(&display->display_lock);
+	mutex_lock(&panel->panel_lock);
+	if (!panel->oplus_panel.lgd_support || !panel->panel_initialized ||
+	    panel->power_mode != SDE_MODE_DPMS_ON) {
+		rc = -EINVAL;
+		goto unlock;
+	}
+	rc = dsi_panel_tx_cmd_set(panel, value ? DSI_CMD_SET_SWITCH_LGD_ON :
+				DSI_CMD_SET_SWITCH_LGD_OFF, false);
+	if (!rc)
+		panel->oplus_panel.lgd_status = value;
+unlock:
+	mutex_unlock(&panel->panel_lock);
+	mutex_unlock(&display->display_lock);
+	return rc;
+}
+
+int oplus_display_panel_get_LGD_value(void *buf)
+{
+	struct dsi_display *display = get_main_display();
+
+	if (!buf || !display || !display->panel)
+		return -EINVAL;
+	mutex_lock(&display->display_lock);
+	mutex_lock(&display->panel->panel_lock);
+	*(unsigned int *)buf = display->panel->oplus_panel.lgd_status;
+	mutex_unlock(&display->panel->panel_lock);
+	mutex_unlock(&display->display_lock);
+	return 0;
 }

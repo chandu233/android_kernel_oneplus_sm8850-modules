@@ -13,10 +13,11 @@
 #include "oplus_debug.h"
 #include "oplus_display_power.h"
 
-static bool is_pd_with_guesture = false;
-static int panel_esd_check_failed = 0;
+bool is_pd_with_guesture = false;
+int panel_esd_check_failed = 0;
 static bool panel_need_power_on = false;
 extern int (*tp_gesture_enable_notifier)(unsigned int tp_index);
+extern int shutdown_flag;
 
 static int oplus_panel_event_notify_for_touch(struct dsi_panel *panel, int blank)
 {
@@ -46,6 +47,7 @@ static bool oplus_tp_panel_is_lcd(struct dsi_panel *panel)
 {
 	if (!strcmp(panel->name, "Dual dsi csot nt36532 video mode panel with DSC") \
 		|| !strcmp(panel->name, "XN242 p d dsc video mode panel") \
+		|| !strcmp(panel->name, "XN251 p d dsc video mode panel") \
 		|| !strcmp(panel->name, "vtdr6130 amoled video mode dsi visionox panel with DSC") \
 		|| OPLUS_TP_ALWAYS_SUPPORT_LCD_FOR_DEBUG) {
 		return true;
@@ -102,15 +104,17 @@ static void oplus_tp_panel_power_off_cs_off(struct dsi_panel *panel)
 static void oplus_tp_panel_power_off_rst(struct dsi_panel *panel)
 {
 	if (oplus_tp_panel_is_lcd(panel)) {
-		if ((is_pd_with_guesture == true) && !panel_esd_check_failed) {
+		if ((is_pd_with_guesture == true) && !panel_esd_check_failed && shutdown_flag == 0) {
 			OPLUS_DSI_INFO("[TP] notify touch driver to set reset high, when tp gesture is enable.\n");
 			/* oplus_panel_event_notify_for_touch(panel, LCD_CTL_RST_ON); */
 			gpio_set_value(panel->reset_config.reset_gpio, 1);
 		} else {
-			OPLUS_DSI_INFO("[TP] notify touch driver to set reset low and disable tp irq, when tp gesture is disable.\n");
+			OPLUS_DSI_INFO("[TP] notify touch driver to set reset low and disable tp irq, when tp gesture is disable or shutdown.\n");
 			/* oplus_panel_event_notify_for_touch(panel, LCD_CTL_RST_OFF); */
 			gpio_set_value(panel->reset_config.reset_gpio, 0);
-			if(panel->oplus_panel.bl_ic_ktz8868_used) {
+			if(panel->oplus_panel.bl_ic_ktz8869_used) {
+				oplus_bl_ic_ktz8869_power_off(panel);
+			} else if (panel->oplus_panel.bl_ic_ktz8868_used) {
 				oplus_bl_ic_ktz8868_power_off(panel);
 			}
 			oplus_panel_event_notify_for_touch(panel, LCD_CTL_IRQ_OFF);

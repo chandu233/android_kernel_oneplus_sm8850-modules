@@ -26,6 +26,7 @@
 #include "sde_fence.h"
 
 #include "oplus_bl_ic_ktz8868.h"
+#include "oplus_bl_ic_ktz8869.h"
 #include "oplus_display_bl.h"
 #include "oplus_display_ext.h"
 #include "oplus_display_interface.h"
@@ -40,7 +41,8 @@
 #if defined(CONFIG_PXLW_IRIS)
 #include "dsi_iris_api.h"
 #endif
-#define KTZ8868_IC_BL_LEVEL_MAX          (2047)
+#define KTZ8868_IC_BL_LEVEL_MAX (2047)
+#define KTZ8869_IC_BL_LEVEL_MAX          (4095)
 
 char oplus_global_hbm_flags = 0x0;
 static int enable_hbm_enter_dly_on_flags = 0;
@@ -984,6 +986,13 @@ int oplus_panel_post_on_backlight(void *display, struct dsi_panel *panel, u32 bl
 		return -ENODEV;
 	}
 
+	if ((oplus_last_backlight == 0 || oplus_last_backlight == 1) && (bl_lvl != 0 && bl_lvl != 1)) {
+		u64 ns = ktime_to_ns(ktime_get());
+		snprintf(brightness_time, sizeof(brightness_time),
+			"%llu.%09llu", ns / 1000000000, ns % 1000000000);
+		pr_info("Brightness time: %s\n", brightness_time);
+	}
+
 	/* Add some delay to avoid screen flash */
 	if (panel->oplus_panel.need_power_on_backlight && bl_lvl) {
 		panel->oplus_panel.need_power_on_backlight = false;
@@ -1155,20 +1164,20 @@ void oplus_panel_update_backlight(struct dsi_panel *panel,
 	oplus_last_backlight = bl_lvl;
 }
 
-void oplus_printf_backlight_8868_log(struct dsi_display *display, u32 bl_lvl) {
+void oplus_printf_backlight_8869_log(struct dsi_display *display, u32 bl_lvl) {
 	struct timespec64 now;
 	struct tm broken_time;
 	static time64_t time_last = 0;
-	struct backlight_8868_log *map_bl_log;
+	struct backlight_8869_log *map_bl_log;
 	u32 mapping_value = 0;
 	int i = 0;
 	int len = 0;
 	char map_backlight_log_buf[1548];
 
-	if (bl_lvl > KTZ8868_IC_BL_LEVEL_MAX) {
-		mapping_value = backlight_map[KTZ8868_IC_BL_LEVEL_MAX];
+	if (bl_lvl > KTZ8869_IC_BL_LEVEL_MAX) {
+		mapping_value = KTZ8869_IC_BL_LEVEL_MAX;
 	} else {
-		mapping_value = backlight_map[bl_lvl];
+		mapping_value = bl_lvl;
 	}
 
 	ktime_get_real_ts64(&now);
@@ -1180,7 +1189,7 @@ void oplus_printf_backlight_8868_log(struct dsi_display *display, u32 bl_lvl) {
 		time_last = now.tv_sec;
 	}
 
-	map_bl_log = &oplus_bl_8868_log[DISPLAY_PRIMARY];
+	map_bl_log = &oplus_bl_8869_log[DISPLAY_PRIMARY];
 	map_bl_log->backlight[map_bl_log->bl_count] = bl_lvl;
 	map_bl_log->Map_backlight[map_bl_log->bl_count] = mapping_value;
 	map_bl_log->past_times[map_bl_log->bl_count] = now;
@@ -1194,7 +1203,7 @@ void oplus_printf_backlight_8868_log(struct dsi_display *display, u32 bl_lvl) {
 				"%02d:%02d:%02d.%03ld:Map:%d,Bl:%d,", broken_time.tm_hour, broken_time.tm_min,
 				broken_time.tm_sec, map_bl_log->past_times[i].tv_nsec / 1000000, map_bl_log->Map_backlight[i], map_bl_log->backlight[i]);
 		}
-		OPLUS_DSI_INFO("<%s> len:%d dsi_display_set_backlight_8868 %s\n", display->panel->oplus_panel.vendor_name, len, map_backlight_log_buf);
+		OPLUS_DSI_INFO("<%s> len:%d dsi_display_set_backlight_8869 %s\n", display->panel->oplus_panel.vendor_name, len, map_backlight_log_buf);
 	}
 }
 
@@ -1425,4 +1434,47 @@ int oplus_ae174_apl_gamma_update(struct dsi_display *display, unsigned int bl_le
 	}
 
 	return rc;
+}
+
+void oplus_printf_backlight_8868_log(struct dsi_display *display, u32 bl_lvl) {
+	struct timespec64 now;
+	struct tm broken_time;
+	static time64_t time_last = 0;
+	struct backlight_8868_log *map_bl_log;
+	u32 mapping_value = 0;
+	int i = 0;
+	int len = 0;
+	char map_backlight_log_buf[1548];
+
+	if (bl_lvl > KTZ8868_IC_BL_LEVEL_MAX) {
+		mapping_value = backlight_map[KTZ8868_IC_BL_LEVEL_MAX];
+	} else {
+		mapping_value = backlight_map[bl_lvl];
+	}
+
+	ktime_get_real_ts64(&now);
+	time64_to_tm(now.tv_sec, 0, &broken_time);
+	if (now.tv_sec - time_last >= 60) {
+		OPLUS_DSI_INFO("<%s> dsi_display_set_backlight time:%02d:%02d:%02d.%03ld,bl_lvl:%d, mapping_value ;%d\n",
+			display->panel->oplus_panel.vendor_name, broken_time.tm_hour, broken_time.tm_min,
+			broken_time.tm_sec, now.tv_nsec / 1000000, bl_lvl, mapping_value);
+		time_last = now.tv_sec;
+	}
+
+	map_bl_log = &oplus_bl_8868_log[DISPLAY_PRIMARY];
+	map_bl_log->backlight[map_bl_log->bl_count] = bl_lvl;
+	map_bl_log->Map_backlight[map_bl_log->bl_count] = mapping_value;
+	map_bl_log->past_times[map_bl_log->bl_count] = now;
+	map_bl_log->bl_count++;
+	if (map_bl_log->bl_count >= BACKLIGHT_CACHE_MAX) {
+		map_bl_log->bl_count = 0;
+		memset(map_backlight_log_buf, 0, sizeof(map_backlight_log_buf));
+		for (i = 0; i < BACKLIGHT_CACHE_MAX; i++) {
+			time64_to_tm(map_bl_log->past_times[i].tv_sec, 0, &broken_time);
+			len += snprintf(map_backlight_log_buf + len, sizeof(map_backlight_log_buf) - len,
+				"%02d:%02d:%02d.%03ld:Map:%d,Bl:%d,", broken_time.tm_hour, broken_time.tm_min,
+				broken_time.tm_sec, map_bl_log->past_times[i].tv_nsec / 1000000, map_bl_log->Map_backlight[i], map_bl_log->backlight[i]);
+		}
+		OPLUS_DSI_INFO("<%s> len:%d dsi_display_set_backlight_8868 %s\n", display->panel->oplus_panel.vendor_name, len, map_backlight_log_buf);
+	}
 }

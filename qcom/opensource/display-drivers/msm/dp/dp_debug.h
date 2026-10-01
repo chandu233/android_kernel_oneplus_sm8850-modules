@@ -51,7 +51,7 @@
 			DRM_DEBUG("[msm-dp-debug][%-4d]"fmt, current->pid,   \
 					##__VA_ARGS__);                      \
 		else                                                         \
-			pr_debug("[drm:%s][msm-dp-debug][%-4d]"fmt, __func__,\
+			pr_info("[drm:%s][msm-dp-debug][%-4d]"fmt, __func__, \
 				       current->pid, ##__VA_ARGS__);         \
 	} while (0)
 
@@ -66,7 +66,7 @@
 	} while (0)
 
 #define DP_WARN_V(fmt, ...)                                    \
-		pr_warn("[drm:%s][msm-dp-warn][%-4d]"fmt, __func__,  \
+		pr_info("[drm:%s][msm-dp-warn][%-4d]"fmt, __func__,  \
 				current->pid, ##__VA_ARGS__)
 
 #define DP_WARN_RATELIMITED_V(fmt, ...)                                    \
