@@ -26,7 +26,6 @@ static void ssc_interactive_set_fifo(uint8_t type, uint16_t data)
 	struct fifo_frame fifo_fm;
 	struct ssc_interactive *ssc_cxt = g_ssc_cxt;
 	int ret = 0;
-	/* DEVINFO_LOG("type= %u, data=%d\n", type, data); */
 	memset(&fifo_fm, 0, sizeof(struct fifo_frame));
 	fifo_fm.type = type;
 	fifo_fm.data = data;

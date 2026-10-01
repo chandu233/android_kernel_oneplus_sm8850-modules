@@ -31,6 +31,10 @@
 #include <soc/oplus/system/oplus_trace_sensor.h>
 static bool enable_report = false;
 #endif
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_TRACE_SENSOR_ERR)
+#include "oplus_sensor_err/oplus_trace_sensor_err.h"
+static bool enable_report_err = true;
+#endif
 
 #define ALIGN4(s) ((sizeof(s) + 3)&(~0x3))
 
@@ -97,7 +101,6 @@ struct msm_rpmh_master_data {
 #define PHY_SENSOR_NUM          18
 #define VIR_SENSOR_NUM          31
 
-//extern int oplus_subsystem_sleeptime(char *name, u64 *sleeptime);
 static struct sensor_fb_cxt *g_sensor_fb_cxt = NULL;
 #define MSM_ARCH_TIMER_FREQ 19200000
 static char *subsys_names[SUBSYS_COUNTS] = {"ADSP", "CDSP", "SLPI"};
@@ -201,8 +204,8 @@ struct sensor_fb_conf g_fb_conf[] = {
 	{MAG_CALI_DATA_ID, "device_mag_cali_data", SENSOR_DEBUG_DEVICE_TYPE},
 	{MAG_DATA_BLOCK_ID, "device_mag_data_block_data", SENSOR_DEBUG_DEVICE_TYPE},
 	{MAG_DATA_FULL_RANGE_ID, "device_mag_data_full_range", SENSOR_DEBUG_DEVICE_TYPE},
-	{MAG_NO_DATA_ID, "device_mag_no_data_range", SENSOR_DEVICE_TYPE},
-	{MAG_ENABLE_FAIL_ID, "device_mag_enable_fail_range", SENSOR_DEVICE_TYPE},
+	{MAG_NO_DATA_ID, "device_mag_no_data", SENSOR_DEVICE_TYPE},
+	{MAG_ENABLE_FAIL_ID, "device_mag_enable_fail", SENSOR_DEVICE_TYPE},
 
 
 	{SAR_INIT_FAIL_ID, "device_sar_init_fail", SENSOR_DEVICE_TYPE},
@@ -219,6 +222,9 @@ struct sensor_fb_conf g_fb_conf[] = {
 	{BAROMETER_I2C_ERR_ID, "device_barometer_i2c_err", SENSOR_DEVICE_TYPE},
 
 	{HALL_I2C_ERR_ID, "device_hall_i2c_err", SENSOR_DEVICE_TYPE},
+	{HALL_STYLUS_DETECT_INIT_FAIL_ID, "stylus_detect_init_fail", SENSOR_DEVICE_TYPE},
+	{HALL_STYLUS_DETECT_I2C_ERR_ID, "stylus_detect_i2c_err", SENSOR_DEVICE_TYPE},
+	{HALL_STYLUS_DETECT_NO_DATA_ID, "stylus_detect_no_data_err", SENSOR_DEVICE_TYPE},
 
 	{FOLD_DEVICE_FOLDE_COUNT_ID, "device_fold_count", SENSOR_DEVICE_TYPE},
 	{FOLD_DEVICE_USE_HALL_ANGLE_COUNT_ID, "device_use_hall_angle_count", SENSOR_DEVICE_TYPE},
@@ -286,6 +292,9 @@ struct sensor_fb_conf g_fb_conf[] = {
 	{DOUBLE_TAP_PREVENTED_BY_FREEFALL_SLOPE_ID, "device_double_prevented_by_freefall_slope", SENSOR_DEBUG_DEVICE_TYPE},
 
 	{ALAILABLE_SENSOR_LIST_ID, "available_sensor_list", SENSOR_DEBUG_DEVICE_TYPE},
+
+	{EX_GPIO_I2C_RESET_ID, "device_ex_gpio_i2c_reset_id", SENSOR_DEBUG_DEVICE_TYPE},
+	{EX_GPIO_COMPARE_ERROR_COUNT_ID, "device_ex_gpio_compare_error_count_id", SENSOR_DEBUG_DEVICE_TYPE},
 
 	{HAL_SENSOR_NOT_FOUND, "device_hal_not_found", SENSOR_DEVICE_TYPE},
 	{HAL_QMI_ERROR, "device_hal_qmi_error", SENSOR_DEVICE_TYPE},
@@ -579,12 +588,6 @@ static void cal_subsystem_sleep_ratio(struct subsystem_desc *subsystem_desc) {
 		}
 		reset_subsys_sleep_stats();
 	}
-        /*
-        TO DO
-	if (flag == 1) {
-		send_uevent_to_fb(REQ_SSC_POWER_INFO);
-	}
-        */
 }
 
 static ssize_t adsp_notify_show(struct device *dev,
@@ -622,7 +625,6 @@ static ssize_t adsp_notify_store(struct device *dev,
 		node_type);
 
 	set_bit(THREAD_WAKEUP, (unsigned long *)&sensor_fb_cxt->wakeup_flag);
-	/*wake_up_interruptible(&sensor_fb_cxt->wq);*/
 	wake_up(&sensor_fb_cxt->wq);
 
 	return count;
@@ -705,7 +707,6 @@ static ssize_t test_id_store(struct device *dev,
 
 
 	set_bit(THREAD_WAKEUP, (unsigned long *)&sensor_fb_cxt->wakeup_flag);
-	/*wake_up_interruptible(&sensor_fb_cxt->wq);*/
 	wake_up(&sensor_fb_cxt->wq);
 
 	return count;
@@ -785,7 +786,7 @@ static int read_data_from_share_mem(struct sensor_fb_cxt *sensor_fb_cxt)
 		return -2;
 	}
 
-	memcpy((void *)&sensor_fb_cxt->fb_smem, (void *)fb_event, smem_size);
+	memmove((void *)&sensor_fb_cxt->fb_smem, (void *)fb_event, smem_size);
 	return 0;
 }
 
@@ -992,6 +993,13 @@ static int parse_shr_info(struct sensor_fb_cxt *sensor_fb_cxt)
 					sensor_fb_cxt->fb_smem.event[count].count);
 		}
 #endif
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_TRACE_SENSOR_ERR)
+		if (enable_report_err) {
+			oplus_trace_sensor_err_report(g_fb_conf[index].event_id,
+					g_fb_conf[index].fb_event_id, g_fb_conf[index].fb_field,
+					payload);
+		}
+#endif
 	}
 
 	return ret;
@@ -1080,7 +1088,6 @@ static int sensor_fb_notifier(struct notifier_block *nb,
 		return 0;
 	}
 
-	//if(event == MSM_DRM_EARLY_EVENT_BLANK || event == MSM_DRM_EVENT_BLANK)
 	if (event == MSM_DRM_EARLY_EVENT_BLANK) {
 		blank = *(int *)(evdata->data);
 
@@ -1090,7 +1097,6 @@ static int sensor_fb_notifier(struct notifier_block *nb,
 			spin_unlock(&sns_cxt->rw_lock);
 			set_bit(THREAD_WAKEUP, (unsigned long *)&sns_cxt->wakeup_flag);
 
-			/*wake_up_interruptible(&sensor_fb_cxt->wq);*/
 			wake_up(&sns_cxt->wq);
 			pr_info("%s: sensor_fb_notifier resume \n", __func__);
 		} else if (blank == MSM_DRM_BLANK_POWERDOWN) {
@@ -1099,7 +1105,6 @@ static int sensor_fb_notifier(struct notifier_block *nb,
 			spin_unlock(&sns_cxt->rw_lock);
 
 			set_bit(THREAD_WAKEUP, (unsigned long *)&sns_cxt->wakeup_flag);
-			/*wake_up_interruptible(&sensor_fb_cxt->wq);*/
 			wake_up(&sns_cxt->wq);
 			pr_info("%s: sensor_fb_notifier suspend \n", __func__);
 		} else {
@@ -1115,10 +1120,8 @@ static int sensor_fb_notifier(struct notifier_block *nb,
 	int blank;
 	struct fb_event *evdata = data;
 	struct sensor_fb_cxt *sns_cxt = container_of(nb, struct sensor_fb_cxt, fb_notif);
-	struct timespec now_time;
 
 	if (evdata && evdata->data) {
-		//if(event == FB_EARLY_EVENT_BLANK || event == FB_EVENT_BLANK)
 		if (event == FB_EVENT_BLANK) {
 			blank = *(int *)evdata->data;
 
@@ -1147,7 +1150,6 @@ void ssc_fb_set_screen_status(int status)
 		spin_unlock(&sns_cxt->rw_lock);
 		set_bit(THREAD_WAKEUP, (unsigned long *)&sns_cxt->wakeup_flag);
 
-		/*wake_up_interruptible(&sensor_fb_cxt->wq);*/
 		wake_up(&sns_cxt->wq);
 		pr_info("%s: sensor_fb_notifier resume \n", __func__);
 	} else if (status == SCREEN_OFF && screen_status != SCREEN_OFF) {
@@ -1158,7 +1160,6 @@ void ssc_fb_set_screen_status(int status)
 		spin_unlock(&sns_cxt->rw_lock);
 
 		set_bit(THREAD_WAKEUP, (unsigned long *)&sns_cxt->wakeup_flag);
-		/*wake_up_interruptible(&sensor_fb_cxt->wq);*/
 		wake_up(&sns_cxt->wq);
 		pr_info("%s: sensor_fb_notifier suspend \n", __func__);
 	}
@@ -1334,20 +1335,9 @@ static int __init sensor_feedback_init(void)
 	return 0;
 }
 
-/*
-static int __exit sensor_feedback_exit(void)
-{
-	pr_info("sensor_feedback_exit call\n");
-
-	platform_driver_unregister(&_driver);
-	return 0;
-}*/
 
 
 core_initcall(sensor_feedback_init);
-
-//module_init(sensor_feedback_init);
-//module_exit(sensor_feedback_exit);
 
 
 MODULE_AUTHOR("JangHua.Tang");

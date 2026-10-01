@@ -1,0 +1,1 @@
+../../bazel/oplus_modules_variant.bzl
