@@ -72,6 +72,11 @@ int cam_ext_sensor_write_continuous(struct cam_sensor_ctrl_t *s_ctrl)
 	int i = 0;
 	int rc = 0;
 
+	if (!s_ctrl || !s_ctrl->sensor_init_setting.reg_setting) {
+		CAM_EXT_ERR(CAM_EXT_SENSOR, "Invalid sensor initialization settings");
+		return -EINVAL;
+	}
+
 	if (i2c_write_setting_gl == NULL)
 	{
 		i2c_write_setting_gl = (struct cam_sensor_i2c_reg_array *)kzalloc(
