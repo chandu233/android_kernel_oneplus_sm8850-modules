@@ -51,7 +51,8 @@
 #define ERR_COUNT_MAX 3
 #define GAUGE_PARALLEL_IC_NUM_MIN 2
 #define GAUGE_DEFAULT_VOLT_MV		3800
-#define DEFAULT_SOC 50
+#define DEFAULT_SOC   50
+#define DEFAULT_C_SOC 10000
 
 enum fcl_table_type {
 	FCL_EXTERN_GAUGE,
@@ -2106,22 +2107,6 @@ int oplus_gauge_get_gauge_type(struct oplus_mms *mms, int index, int *val)
 	}
 
 	return 0;
-}
-
-int oplus_gauge_dump_register(void)
-{
-	int rc;
-
-	if (g_mms_gauge == NULL) {
-		chg_err("g_mms_gauge is NULL\n");
-		return -ENODEV;
-	}
-
-	rc = oplus_chg_ic_func(g_mms_gauge->gauge_ic, OPLUS_IC_FUNC_REG_DUMP);
-	if (rc == -ENOTSUPP)
-		rc = 0;
-
-	return rc;
 }
 
 int oplus_gauge_lock(void)
@@ -5030,6 +5015,71 @@ static int oplus_mms_gauge_update_car_c(struct oplus_mms *topic, union mms_msg_d
 	return 0;
 }
 
+static int oplus_gauge_ic_get_c_soc(struct oplus_chg_ic_dev *ic_dev, int *temp_c_soc)
+{
+	int rc;
+	int c_soc;
+
+	if (ic_dev == NULL || temp_c_soc == NULL) {
+		chg_err("ic_dev or temp_c_soc is NULL\n");
+		return -EINVAL;
+	}
+
+	rc = oplus_chg_ic_func(ic_dev, OPLUS_IC_FUNC_GAUGE_GET_C_SOC, &c_soc);
+	if (rc < 0 && rc != -ENOTSUPP) {
+		chg_err("can't get c_soc from ic:%s. \n", ic_dev->name);
+		return rc;
+	}
+	*temp_c_soc = c_soc;
+	return rc;
+}
+
+static int oplus_mms_gauge_update_c_soc(struct oplus_mms *mms, union mms_msg_data *data)
+{
+	struct oplus_mms_gauge *chip;
+	struct oplus_chg_ic_dev *ic;
+	int total_c_soc = 0;
+	int temp_c_soc = 0;
+	int rc = 0;
+	int i;
+	int count = 0;
+
+	if (mms == NULL || data == NULL) {
+		chg_err("mms or data is NULL\n");
+		return -EINVAL;
+	}
+
+	chip = oplus_mms_get_drvdata(mms);
+	if (mms == chip->gauge_topic) {
+		for (i = 0; i < chip->child_num; i++) {
+			temp_c_soc = 0;
+			ic = chip->child_list[i].ic_dev;
+			rc = oplus_gauge_ic_get_c_soc(ic, &temp_c_soc);
+			if (rc < 0)
+				continue;
+			total_c_soc += temp_c_soc;
+			count++;
+		}
+	} else {
+		for (i = 0; i < chip->child_num; i++) {
+			if (mms != chip->gauge_topic_parallel[i])
+				continue;
+			ic = chip->gauge_ic_comb[i];
+			rc = oplus_gauge_ic_get_c_soc(ic, &total_c_soc);
+			if (rc < 0)
+				total_c_soc = DEFAULT_C_SOC;
+			count++;
+			break;
+		}
+	}
+
+	if (count == 0)
+		data->intval = DEFAULT_C_SOC;
+	else
+		data->intval = total_c_soc / count;
+	return 0;
+}
+
 static void oplus_mms_sub_gauge_update(struct oplus_mms *mms, bool publish)
 {
 	struct mms_msg *msg;
@@ -5352,6 +5402,15 @@ static struct mms_item oplus_mms_gauge_item[] = {
 			.item_id = GAUGE_ITEM_SOC_CENTI,
 			.update = oplus_mms_gauge_update_soc_centi,
 		}
+	}, {
+		.desc = {
+			.item_id = GAUGE_ITEM_C_SOC,
+			.str_data = false,
+			.up_thr_enable = false,
+			.down_thr_enable = false,
+			.dead_thr_enable = false,
+			.update = oplus_mms_gauge_update_c_soc,
+		}
 	}
 };
 
@@ -5499,6 +5558,7 @@ static const u32 oplus_mms_gauge_update_item[] = {
 	GAUGE_ITEM_REAL_TEMP,
 	GAUGE_ITEM_QMAX,
 	GAUGE_ITEM_CAR_C,
+	GAUGE_ITEM_C_SOC,
 };
 
 static const u32 oplus_mms_main_sub_gauge_update_item[] = {
@@ -5862,6 +5922,7 @@ static void oplus_mms_gauge_wired_subs_callback(struct mms_subscribe *subs,
 				cancel_delayed_work(&chip->gauge_fcc_ra0_work);
 				cancel_delayed_work(&chip->gauge_fcc_t_ra_work);
 			}
+			oplus_dcb_protect_check_start(chip);
 			break;
 		case WIRED_ITEM_CHG_TYPE:
 			if (chip->wired_online && is_voocphy_ic_available(chip))
@@ -5926,6 +5987,7 @@ static void oplus_mms_gauge_subscribe_wired_topic(struct oplus_mms *topic,
 	schedule_work(&chip->set_fast_sampling_work);
 	schedule_work(&chip->update_change_work);
 	oplus_mms_gauge_deep_dischg_init(chip);
+	oplus_dcb_protect_check_start(chip);
 	if (chip->deep_spec.sili_err)
 		oplus_mms_gauge_push_auth(chip);
 
@@ -6499,6 +6561,7 @@ static int oplus_mms_gauge_topic_init(struct oplus_mms_gauge *chip)
 
 	oplus_mms_gauge_sili_init(chip);
 	oplus_mms_gauge_sili_ic_alg_cfg_init(chip);
+	oplus_mms_dcb_protect_init(chip);
 
 	oplus_mms_wait_topic("wired", oplus_mms_gauge_subscribe_wired_topic, chip);
 	oplus_mms_wait_topic("vooc", oplus_mms_gauge_subscribe_vooc_topic, chip);
@@ -6964,6 +7027,9 @@ static int oplus_mms_gauge_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&chip->gauge_fcc_vdelta_work, oplus_gauge_fcc_vdelta_work);
 	INIT_DELAYED_WORK(&chip->gauge_fcc_ra0_work, oplus_gauge_fcc_ra0_work);
 	INIT_DELAYED_WORK(&chip->gauge_fcc_t_ra_work, oplus_gauge_fcc_t_ra_work);
+
+	INIT_DELAYED_WORK(&chip->dcb_protect_check_work, oplus_dcb_protect_check);
+	INIT_DELAYED_WORK(&chip->dcb_protect_track_work, oplus_dcb_protect_track);
 
 	chip->sec_chip = oplus_sec_init();
 	if (chip->sec_chip == NULL)

@@ -185,50 +185,6 @@ error:
 	return rc;
 }
 
-__maybe_unused static int sgm41512_read_data(struct sgm41512_chip *chip,
-					     u8 addr, u8 *buf, int len)
-{
-	int rc;
-	bool is_err = false;
-	int retry = 3;
-
-	mutex_lock(&chip->i2c_lock);
-	do {
-		if (is_err) {
-			usleep_range(5000, 5000);
-		}
-
-		rc = i2c_master_send(chip->client, &addr, 1);
-		if (rc < 1) {
-			chg_err("read 0x%02x error, rc=%d\n", addr, rc);
-			rc = rc < 0 ? rc : -EIO;
-			is_err = true;
-			continue;
-		}
-
-		rc = i2c_master_recv(chip->client, buf, len);
-		if (rc < len) {
-			chg_err("read 0x%02x error, rc=%d\n", addr, rc);
-			rc = rc < 0 ? rc : -EIO;
-			is_err = true;
-			continue;
-		}
-		is_err = false;
-	} while (is_err && retry--);
-
-	if (is_err) {
-		goto error;
-	}
-
-	mutex_unlock(&chip->i2c_lock);
-	sgm41512_i2c_err_clr();
-	return 0;
-
-error:
-	mutex_unlock(&chip->i2c_lock);
-	sgm41512_i2c_err_inc(chip);
-	return rc;
-}
 
 static int sgm41512_write_byte(struct sgm41512_chip *chip, u8 addr, u8 data)
 {
@@ -267,56 +223,6 @@ error:
 	return rc;
 }
 
-__maybe_unused static int sgm41512_write_data(struct sgm41512_chip *chip,
-					      u8 addr, u8 *buf, int len)
-{
-	u8 *buf_temp;
-	int i;
-	int rc;
-	bool is_err = false;
-	int retry = 3;
-
-	buf_temp = kzalloc(len + 1, GFP_KERNEL);
-	if (!buf_temp) {
-		chg_err("alloc memary error\n");
-		return -ENOMEM;
-	}
-
-	buf_temp[0] = addr;
-	for (i = 0; i < len; i++)
-		buf_temp[i + 1] = buf[i];
-
-	mutex_lock(&chip->i2c_lock);
-	do {
-		if (is_err) {
-			usleep_range(5000, 5000);
-		}
-
-		rc = i2c_master_send(chip->client, buf_temp, len + 1);
-		if (rc < (len + 1)) {
-			chg_err("write 0x%02x error, rc=%d\n", addr, rc);
-			rc = rc < 0 ? rc : -EIO;
-			is_err = true;
-			continue;
-		}
-		is_err = false;
-	} while (is_err && retry--);
-
-	if (is_err) {
-		goto error;
-	}
-
-	mutex_unlock(&chip->i2c_lock);
-	kfree(buf_temp);
-	sgm41512_i2c_err_clr();
-	return 0;
-
-error:
-	mutex_unlock(&chip->i2c_lock);
-	kfree(buf_temp);
-	sgm41512_i2c_err_inc(chip);
-	return rc;
-}
 
 __maybe_unused static int sgm41512_read_byte_mask(struct sgm41512_chip *chip,
 						  u8 addr, u8 mask, u8 *data)

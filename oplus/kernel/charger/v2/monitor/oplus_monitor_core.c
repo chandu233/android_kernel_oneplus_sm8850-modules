@@ -280,6 +280,62 @@ static bool oplus_monitor_all_topic_is_ready(struct oplus_monitor *chip)
 	return true;
 }
 
+#define TRACK_LOCAL_T_NS_TO_S_THD 1000000000
+static void oplus_monitor_high_temp_vol_time_info(struct oplus_monitor *chip, bool reset)
+{
+	if (reset) {
+		chip->start_record_time = 0;
+		chip->h_bat_tmp = 0;
+		chip->h_bat_vol = 0;
+		chip->h_led_on = 0;
+		chip->h_bat_cur = 0;
+		chip->h_full_tmp = 0;
+	} else {
+		chip->h_bat_tmp = chip->batt_temp;
+		chip->h_bat_vol = chip->vbat_mv;
+		chip->h_led_on = chip->led_on;
+		chip->h_bat_cur = chip->ibat_ma;
+	}
+}
+
+static void oplus_monitor_high_temp_vol_time(struct oplus_monitor *chip)
+{
+	bool need_record = false;
+	unsigned int max_count = UINT_MAX;
+	unsigned int now_record_time = 0;
+	unsigned int diff = 0;
+
+	if (!chip->wired_online && !chip->wls_online) {
+		chip->start_record_time = 0;
+		return;
+	}
+
+	if (chip->batt_temp > chip->hightemp_temp &&
+				chip->vbat_mv > chip->fv_mv - chip->hightemp_dec_fv) {
+		need_record = true;
+	} else {
+		chip->start_record_time = 0;
+	}
+
+	if (need_record) {
+		if (chip->start_record_time == 0)
+			chip->start_record_time = local_clock() / TRACK_LOCAL_T_NS_TO_S_THD;
+		now_record_time = local_clock() / TRACK_LOCAL_T_NS_TO_S_THD;
+		if (now_record_time >= chip->start_record_time) {
+			diff = now_record_time - chip->start_record_time;
+		} else {
+			chip->start_record_time = now_record_time;
+			diff = 0;
+		}
+		if (chip->h_tmp_vol_time > max_count - diff)
+			chip->h_tmp_vol_time = 0;
+		chip->h_tmp_vol_time = chip->h_tmp_vol_time + diff;
+		chip->start_record_time = now_record_time;
+		oplus_monitor_high_temp_vol_time_info(chip, false);
+		chg_info("record h_tmp_vol_time:%d\n", chip->h_tmp_vol_time);
+	}
+}
+
 #define DUMP_REG_LOG_CNT_30S	3
 #define MAX_SUB_BATT_INFO	32
 static void oplus_monitor_charge_info_update_work(struct work_struct *work)
@@ -299,6 +355,7 @@ static void oplus_monitor_charge_info_update_work(struct work_struct *work)
 		oplus_mms_stop_publish(chip->err_topic);
 
 	oplus_monitor_update_charge_info(chip);
+	oplus_monitor_high_temp_vol_time(chip);
 
 	rc = oplus_mms_get_item_data(chip->comm_topic, COMM_ITEM_SHELL_TEMP,
 				     &data, false);
@@ -381,14 +438,14 @@ static int comm_info_dump_log_data(char *buffer, int size, void *dev_data)
 	snprintf(buffer, size, ",%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,"
 		"%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,"
 		"%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,"
-		"%d,%d,%d,%d",
+		"%d,%d,%d,%d,%d",
 		chip->batt_temp, chip->shell_temp, chip->vbat_mv, chip->vbat_min_mv, chip->ibat_ma,
 		chip->batt_soc, chip->ui_soc, chip->wired_online, chip->wired_charge_type, chip->notify_code,
 		chip->wired_ibus_ma, chip->wired_vbus_mv, chip->smooth_soc, chip->led_on, chip->fv_mv,
 		chip->fcc_ma, chip->wired_icl_ma, chip->otg_switch_status, chip->cool_down, chip->bcc_current,
 		chip->normal_cool_down, chip->chg_cycle_status, chip->mmi_chg, chip->usb_status, chip->cc_detect,
 		chip->batt_full, chip->rechging, chip->pd_svooc, chip->batt_status, chip->batt_qmax,
-		chip->batt_soh, chip->gauge_car_c, chip->batt_rm, chip->batt_fcc);
+		chip->batt_soh, chip->gauge_car_c, chip->batt_rm, chip->batt_fcc, chip->h_tmp_vol_time);
 
 	return 0;
 }
@@ -406,7 +463,7 @@ static int comm_info_get_log_head(char *buffer, int size, void *dev_data)
 		"wired_ibus_ma,wired_vbus_mv,smooth_soc,led_on,fv_mv,"
 		"fcc_ma,wired_icl_ma,otg_switch,cool_down,bcc_current,normal_cool_down,chg_cycle,"
 		"mmi_chg,usb_status,cc_detect,batt_full,rechging,pd_svooc,prop_status,batt_qmax,"
-		"batt_soh,gauge_car_c,batt_rm,batt_fcc");
+		"batt_soh,gauge_car_c,batt_rm,batt_fcc,high_temp_vol_time");
 
 	return 0;
 }
@@ -619,6 +676,8 @@ static void oplus_monitor_subscribe_gauge_topic(struct oplus_mms *topic,
 	oplus_mms_get_item_data(chip->gauge_topic, GAUGE_ITEM_CAR_C, &data, true);
 	chip->gauge_car_c = data.intval;
 	chip->gauge_inited = true;
+	if (chip->wired_online || chip->wls_online)
+		oplus_monitor_high_temp_vol_time_info(chip, false);
 }
 
 #define REVERSE_CHG_PDO_INFO_LEN 4
@@ -1361,10 +1420,12 @@ static void oplus_monitor_wired_subs_callback(struct mms_subscribe *subs,
 						false);
 			chip->wired_online = !!data.intval;
 			chip->notify_flag = 0;
-			if (!chip->wired_online)
+			if (!chip->wired_online) {
 				oplus_chg_track_record_dual_chan_end(chip);
-			else
+			} else {
 				chip->curr_derating_trig = false;
+				oplus_monitor_high_temp_vol_time_info(chip, false);
+			}
 			oplus_chg_track_update_break_ui_online();
 			schedule_work(&chip->charge_info_update_work);
 			schedule_work(&chip->wired_plugin_work);
@@ -1480,6 +1541,8 @@ static void oplus_monitor_wls_subs_callback(struct mms_subscribe *subs,
 		case WLS_ITEM_PRESENT:
 			oplus_mms_get_item_data(chip->wls_topic, id, &data, false);
 			chip->wls_online = !!data.intval;
+			if (chip->wls_online)
+				oplus_monitor_high_temp_vol_time_info(chip, false);
 			schedule_work(&chip->charge_info_update_work);
 			oplus_chg_track_check_wls_charging_break(!!data.intval);
 			oplus_chg_track_check_wls_mul_break_stat(!!data.intval);
@@ -1766,8 +1829,10 @@ static void oplus_monitor_comm_subs_callback(struct mms_subscribe *subs,
 						false);
 			chip->batt_status = data.intval;
 			if (chip->batt_status != pre_batt_status &&
-			    chip->batt_status == POWER_SUPPLY_STATUS_FULL)
+			    chip->batt_status == POWER_SUPPLY_STATUS_FULL) {
 				oplus_chg_track_charge_full(chip);
+				chip->h_full_tmp = chip->shell_temp;
+			}
 			pre_batt_status = chip->batt_status;
 			break;
 		case COMM_ITEM_CHG_FULL:
@@ -2383,13 +2448,19 @@ static struct mms_item oplus_monitor_item[] = {
 	},
 	{
 		.desc = {
-			.item_id = ERR_ITEM_USBIN_ABNORMAL,
+			.item_id = ERR_ITEM_VOTE_ABNORMAL,
+			.str_data = true,
 		}
 	},
 	{
 		.desc = {
 			.item_id = ERR_ITEM_SEC_IC_MEM_INFO,
 			.str_data = true,
+		}
+	},
+	{
+		.desc = {
+			.item_id = ERR_ITEM_USBIN_ABNORMAL,
 		}
 	},
 	{
@@ -2464,6 +2535,18 @@ static int oplus_monitor_topic_init(struct oplus_monitor *chip)
 	chip->water_inlet_plugin_count = 0;
 	chip->oplus_liquid_intake_enable = true;
 
+	rc = of_property_read_u32(mms_cfg.of_node, "oplus,monitor_hightemp_temp", &chip->hightemp_temp);
+	if (rc < 0) {
+		chip->hightemp_temp = 380;
+		chg_info("Not fond  monitor_hightemp_temp, default 380!\n");
+	}
+
+	rc = of_property_read_u32(mms_cfg.of_node, "oplus,monitor_hightemp_dec_fv", &chip->hightemp_dec_fv);
+	if (rc < 0) {
+		chip->hightemp_dec_fv = 20;
+		chg_info("Not fond monitor_hightemp_dec_fv, default 20mv!\n");
+	}
+
 	chip->err_topic = devm_oplus_mms_register(chip->dev, &oplus_monitor_desc, &mms_cfg);
 	if (IS_ERR(chip->err_topic)) {
 		chg_err("Couldn't register error topic\n");
@@ -2502,6 +2585,7 @@ static int oplus_monitor_probe(struct platform_device *pdev)
 	}
 	battlog_comm_ops.dev_data = (void *)chip;
 	battery_log_ops_register(&battlog_comm_ops);
+	oplus_monitor_high_temp_vol_time_info(chip, true);
 
 	INIT_WORK(&chip->charge_info_update_work,
 		  oplus_monitor_charge_info_update_work);

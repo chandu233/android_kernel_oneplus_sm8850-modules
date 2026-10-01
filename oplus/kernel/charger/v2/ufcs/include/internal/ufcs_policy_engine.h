@@ -11,7 +11,7 @@
 #include <linux/kthread.h>
 
 enum ufcs_pe_state {
-	PE_STATE_IDEL = 0,
+	PE_STATE_IDLE = 0,
 	PE_STATE_SOFT_RESET,
 	PE_STATE_HW_RESET,
 	PE_STATE_SEND_EXIT,

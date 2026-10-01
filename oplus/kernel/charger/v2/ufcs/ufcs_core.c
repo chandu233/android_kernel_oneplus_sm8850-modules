@@ -329,11 +329,11 @@ void ufcs_clean_process_info(struct ufcs_class *class)
 		return;
 	}
 
-	memset(class->pwr_change_info, 0, sizeof(class->pwr_change_info));
+	memset(&class->pwr_change_info, 0, sizeof(class->pwr_change_info));
 	class->power_changed = false;
 
 	class->src_info = 0;
-	class->cable_info = 0;
+	memset(class->cable_info, 0, sizeof(class->cable_info));
 	class->dev_info = 0;
 	class->err_info = 0;
 	class->handshake_success = false;
@@ -438,6 +438,7 @@ ufcs_device_register(struct device *parent, struct ufcs_dev_ops *ops,
 	sched_set_fifo(class->worker->task);
 #endif
 	init_completion(&class->request_ack);
+	init_completion(&class->user_encrypt_data_ack);
 	mutex_init(&class->pe_lock);
 	mutex_init(&class->handshake_lock);
 	mutex_init(&class->ext_req_lock);

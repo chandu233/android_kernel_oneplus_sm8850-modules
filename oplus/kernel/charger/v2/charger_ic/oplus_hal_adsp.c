@@ -25,6 +25,7 @@
 #include <linux/rtc.h>
 #include <linux/device.h>
 #include <linux/of_platform.h>
+#include <linux/thermal.h>
 
 #include <oplus_chg_ic.h>
 #include <oplus_chg_module.h>
@@ -117,34 +118,6 @@ static int oplus_chg_set_input_current(struct battery_chg_dev *bcdev, int curren
 static int oplus_get_pps_info_from_adsp(struct oplus_chg_ic_dev *ic_dev, u32 *pdo, int num);
 static int oplus_chg_set_aicl_point(struct oplus_chg_ic_dev *ic_dev, int vbatt);
 static int oplus_sm8350_get_lpd_info(struct oplus_chg_ic_dev *ic_dev, u32 *buf, u32 flag);
-#endif /*OPLUS_FEATURE_CHG_BASIC*/
-
-#ifdef OPLUS_FEATURE_CHG_BASIC
-/*for p922x compile*/
-void __attribute__((weak)) oplus_set_wrx_otg_value(void)
-{
-	return;
-}
-int __attribute__((weak)) oplus_get_idt_en_val(void)
-{
-	return -1;
-}
-int __attribute__((weak)) oplus_get_wrx_en_val(void)
-{
-	return -1;
-}
-int __attribute__((weak)) oplus_get_wrx_otg_val(void)
-{
-	return 0;
-}
-void __attribute__((weak)) oplus_wireless_set_otg_en_val(void)
-{
-	return;
-}
-void __attribute__((weak)) oplus_dcin_irq_enable(void)
-{
-	return;
-}
 
 static RAW_NOTIFIER_HEAD(hboost_notifier);
 
@@ -179,6 +152,62 @@ static void oplus_hboost_notify_work(struct work_struct *work)
 	}
 }
 #endif /*OPLUS_FEATURE_CHG_BASIC*/
+
+#ifdef CONFIG_THERMAL
+static int usb_therm_read_temp(struct thermal_zone_device *tzd, int *val)
+{
+	struct battery_chg_dev *bcdev = g_bcdev;
+	int rc;
+	int temp = 25000;
+
+	if (IS_ERR_OR_NULL(bcdev) || IS_ERR_OR_NULL(bcdev->iio.usb_con_btb_chan)) {
+		chg_err("bcdev->iio.usb_con_btb_chan is NULL\n");
+		return -EINVAL;
+	}
+
+	rc = iio_read_channel_processed(bcdev->iio.usb_con_btb_chan, &temp);
+	if (rc < 0) {
+		chg_err("iio_read_channel_processed get error\n");
+		return temp;
+	}
+	*val = temp;
+
+	return 0;
+}
+
+static struct thermal_zone_device_ops usb_therm_tz_ops = {
+	.get_temp = usb_therm_read_temp,
+};
+
+static struct thermal_zone_device *register_tz_device(const char *type,
+	struct thermal_zone_device_ops *ops)
+{
+	struct thermal_zone_device* tzd = NULL;
+	int ret;
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+	tzd = thermal_tripless_zone_device_register(type, NULL, ops, NULL);
+#else
+	tzd = thermal_zone_device_register(type, 0, 0, NULL, ops, NULL, 0, 0);
+#endif
+	if (IS_ERR(tzd)) {
+		chg_err("%s register fail", type);
+		return NULL;
+	}
+	ret = thermal_zone_device_enable(tzd);
+	if (ret) {
+		chg_err("%s enable fail", type);
+		thermal_zone_device_unregister(tzd);
+	}
+
+	return tzd;
+}
+
+static void register_tz_thermal(void)
+{
+	register_tz_device("usb_therm", &usb_therm_tz_ops);
+}
+#endif
 
 static int oplus_chg_disable_charger(bool disable, const char *client_str)
 {
@@ -1180,7 +1209,10 @@ static void oplus_adsp_voocphy_set_full_para_qbg(struct battery_chg_dev *bcdev, 
 	int rc = 0;
 	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_BATTERY];
 
-	rc = write_property_id(bcdev, pst, BATT_BAT_FULL_CURR_SET, fcss_status);
+	if (bcdev->soccp_support)
+		rc = write_property_id(bcdev, &bcdev->oplus_psy, OPLUS_SET_BAT_FULL_CURRENT, fcss_status);
+	else
+		rc = write_property_id(bcdev, pst, BATT_BAT_FULL_CURR_SET, fcss_status);
 	if (rc) {
 		chg_err("set current level fail, rc=%d\n", rc);
 		return;
@@ -1425,20 +1457,33 @@ static void oplus_sourcecap_suspend_recovery_work(struct work_struct *work)
 	oplus_chg_suspend_charger(false, PD_PDO_ICL_VOTER);
 }
 
-static void oplus_update_pd_svooc_work(struct work_struct *work)
+static bool oplus_get_pd_svooc_status(struct battery_chg_dev *bcdev)
 {
-	struct battery_chg_dev *bcdev = container_of(work,
-		struct battery_chg_dev, update_pd_svooc_work.work);
 	int rc = 0;
 
+	if (bcdev == NULL) {
+		chg_err("bcdev is NULL\n");
+		return false;
+	}
 	if (bcdev->soccp_support) {
 		rc = read_property_id(bcdev, &bcdev->oplus_psy, OPLUS_GET_PD_SVOOC);
 		if (rc < 0) {
 			chg_err("read OPLUS_GET_PD_SVOOC fail\n");
-			return;
+			return false;
 		}
-		bcdev->pd_svooc = bcdev->oplus_psy.prop[OPLUS_GET_PD_SVOOC];
+		return bcdev->oplus_psy.prop[OPLUS_GET_PD_SVOOC];
+	} else {
+		return bcdev->read_buffer_dump.data_buffer[AP_READ_BUFFER_INDEX_PD_SVOOC];
 	}
+}
+
+static void oplus_update_pd_svooc_work(struct work_struct *work)
+{
+	struct battery_chg_dev *bcdev = container_of(work,
+		struct battery_chg_dev, update_pd_svooc_work.work);
+
+	bcdev->pd_svooc = oplus_get_pd_svooc_status(bcdev);
+	chg_info("pd_svooc is %d\n", bcdev->pd_svooc);
 }
 
 #define OPLUS_BC_ENABLE_VIRQ_TRIG_MAX_RETRY		15
@@ -2504,6 +2549,32 @@ static int oplus_ap_init_adsp_gague(struct battery_chg_dev *bcdev)
 	return rc;
 }
 
+static void oplus_chg_adsp_recover_pmic_high_impedance(struct battery_chg_dev *bcdev)
+{
+	if (!bcdev->pmic_high_impedance_support) {
+		chg_info("pmic high impedance not support, skip recover\n");
+		return;
+	}
+
+	switch (bcdev->dpdm_switch_mode) {
+	case DPDM_SWITCH_TO_AP:
+		oplus_chg_adsp_pmic_high_impedance_set(bcdev, false);
+		chg_info("recover pmic high impedance: AP mode, clear high impedance\n");
+		break;
+	case DPDM_SWITCH_TO_VOOC:
+		oplus_chg_adsp_pmic_high_impedance_set(bcdev, true);
+		chg_info("recover pmic high impedance: VOOC mode, set high impedance\n");
+		break;
+	case DPDM_SWITCH_TO_UFCS:
+		oplus_chg_adsp_pmic_high_impedance_set(bcdev, true);
+		chg_info("recover pmic high impedance: UFCS mode, set high impedance\n");
+		break;
+	default:
+		chg_info("recover pmic high impedance: unknown mode=%d, skip\n", bcdev->dpdm_switch_mode);
+		break;
+	}
+}
+
 static void oplus_adsp_crash_recover_func(struct work_struct *work)
 {
 	struct battery_chg_dev *bcdev =
@@ -2530,6 +2601,7 @@ static void oplus_adsp_crash_recover_func(struct work_struct *work)
 	msleep(2000);
 	bcdev->adsp_crash = 0;
 	bcdev->ufcs_key_to_adsp_done = false;
+	oplus_chg_adsp_recover_pmic_high_impedance(bcdev);
 	if (bcdev->last_charger_type == OPLUS_CHG_USB_TYPE_QC2) {
 		chg_err("recover QC OPLUS_IC_VIRQ_CHG_TYPE_CHANGE");
 		oplus_chg_ic_virq_trigger(bcdev->buck_ic, OPLUS_IC_VIRQ_CHG_TYPE_CHANGE);
@@ -5823,6 +5895,7 @@ static int battery_chg_parse_dt(struct battery_chg_dev *bcdev)
 	of_property_read_string(node, "qcom,wireless-fw-name",
 				&bcdev->wls_fw_name);
 	bcdev->oem_lcm_check = of_property_read_bool(node, "oplus,oem-lcm-check");
+	bcdev->pmic_high_impedance_support = of_property_read_bool(node, "oplus,pmic-high-impedance-support");
 	rc = of_property_count_elems_of_size(node, "qcom,thermal-mitigation",
 						sizeof(u32));
 	if (rc <= 0)
@@ -8936,6 +9009,35 @@ static int oplus_chg_8350_rerun_bc12(struct oplus_chg_ic_dev *ic_dev)
 	return 0;
 }
 
+static int oplus_chg_adsp_pmic_high_impedance_set(struct battery_chg_dev *bcdev, bool high_impedance)
+{
+	int rc = 0;
+	struct psy_state *pst = NULL;
+
+	if (bcdev == NULL) {
+		chg_err("bcdev is NULL");
+		return -ENODEV;
+	}
+
+	if (!bcdev->pmic_high_impedance_support) {
+		chg_info("pmic high impedance not support, skip\n");
+		return 0;
+	}
+
+	pst = &bcdev->psy_list[PSY_TYPE_USB];
+
+	if (!bcdev->soccp_support){
+		rc = write_property_id(bcdev, pst, USB_SET_PMIC_HIGH_IMPEDANCE, high_impedance ? 0 : 1);
+		if (rc >= 0) {
+			chg_info("set pmic high impedance=%d success\n", high_impedance);
+		} else {
+			chg_err("set pmic high impedance=%d fail, rc=%d\n", high_impedance, rc);
+		}
+	}
+
+	return rc;
+}
+
 static int oplus_chg_8350_qc_detect_enable(struct oplus_chg_ic_dev *ic_dev, bool en)
 {
 	struct battery_chg_dev *bcdev;
@@ -9614,6 +9716,9 @@ static int oplus_chg_8350_is_oplus_svid(struct oplus_chg_ic_dev *ic_dev, bool *o
 	}
 
 	bcdev = oplus_chg_ic_get_drvdata(ic_dev);
+	if (!bcdev->pd_svooc)
+		bcdev->pd_svooc = oplus_get_pd_svooc_status(bcdev);
+
 	*oplus_svid = bcdev->pd_svooc;
 
 	return 0;
@@ -11840,6 +11945,24 @@ static int oplus_set_three_level_term_volt(struct oplus_chg_ic_dev *ic_dev,
 		AP_MESSAGE_WRITE_THREE_LEVEL_TERM_VOLT, args, len);
 }
 
+static int oplus_sm8350_get_gauge_type(struct oplus_chg_ic_dev *ic_dev, int *gauge_type)
+{
+	struct battery_chg_dev *bcdev;
+
+	if (ic_dev == NULL || gauge_type == NULL)
+		return -ENODEV;
+
+	bcdev = oplus_chg_ic_get_drvdata(ic_dev);
+	if (!bcdev)
+		return -EINVAL;
+
+	if (bcdev->read_buffer_dump.data_buffer[14] == 1)
+		*gauge_type = GAUGE_TYPE_PLATFORM;
+	else
+		*gauge_type = GAUGE_TYPE_PACK;
+	return 0;
+}
+
 static int oplus_set_batt_true_fcc(struct oplus_chg_ic_dev *ic_dev)
 {
 	int rc = 0;
@@ -12463,7 +12586,7 @@ static int oplus_fg_set_vct(struct oplus_chg_ic_dev *ic_dev, int vct)
 		rc = write_property_id(bcdev, &bcdev->oplus_psy, OPLUS_SET_VCT, vct);
 	else
 		rc = write_property_id(bcdev, pst, BATT_SET_VCT, vct);
-	chg_debug(" rc=%d vct = %d\n", rc, vct);
+	chg_info(" rc=%d vct = %d\n", rc, vct);
 
 	return rc;
 }
@@ -13278,6 +13401,10 @@ static void *oplus_chg_8350_gauge_get_func(struct oplus_chg_ic_dev *ic_dev,
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_GAUGE_FFC_RA0_CHECK,
 			oplus_gauge_ra0_check);
 		break;
+	case OPLUS_IC_FUNC_GAUGE_GET_GAUGE_TYPE:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_GAUGE_GET_GAUGE_TYPE,
+						oplus_sm8350_get_gauge_type);
+		break;
 	default:
 		chg_err("this func(=%d) is not supported\n", func_id);
 		func = NULL;
@@ -13620,7 +13747,7 @@ static int oplus_chg_adsp_dpdm_switch_set_switch_mode(struct oplus_chg_ic_dev *i
 	enum oplus_dpdm_switch_mode mode)
 {
 	struct battery_chg_dev *chip;
-	int rc;
+	int rc = 0;
 
 	if (ic_dev == NULL) {
 		chg_err("ic_dev is NULL");
@@ -15156,8 +15283,10 @@ static int oplus_sm8350_ic_register(struct battery_chg_dev *bcdev)
 	struct oplus_chg_ic_dev *ic_dev = NULL;
 	struct oplus_chg_ic_cfg ic_cfg;
 	int rc;
+#ifdef CONFIG_OPLUS_CHG_IC_DEBUG
 	struct device_attribute **attrs;
 	struct device_attribute *attr;
+#endif
 	const char *gauge_name[DEVINFO_DATA_NUM];
 	int check_fg = 0;
 
@@ -15784,6 +15913,10 @@ static int battery_chg_probe(struct platform_device *pdev)
 	rc = oplus_sm8350_ic_register(bcdev);
 	if (rc < 0)
 		goto error;
+
+#ifdef CONFIG_THERMAL
+	register_tz_thermal();
+#endif
 
 	oplus_mms_wait_topic("plc", oplus_chg_adsp_subscribe_plc_topic, bcdev);
 	oplus_mms_wait_topic("wired", oplus_chg_adsp_subscribe_wired_topic, bcdev);

@@ -915,7 +915,6 @@ static void oplus_reverse_clear_keep_status_work(struct work_struct *work)
 		vote(chip->reverse_pdo_votable, USB_VOTER, false, 0, false);
 		vote(chip->high_reverse_disable_votable, CURR_ERR_VOTER, false, 0, false);
 		vote(chip->reverse_pdo_votable, VOL_DIFF_VOTER, false, 0, false);
-		vote(chip->reverse_pdo_votable, VBUS_MV_VOTER, false, 0, false);
 		chg_info("clear keep status \n");
 	}
 }
@@ -1428,8 +1427,9 @@ static void oplus_reverse_online_work(struct work_struct *work)
 		oplus_reverse_chg_disbale_clear_flags(chip);
 		if (chip->reverse_ic && chip->use_cp_reverse)
 			oplus_reverse_set_source_pdo(chip, NORMAL_VBUS, LOWER_IBUS, NORMAL_VBUS, LOWER_IBUS);
-		cancel_delayed_work(&chip->reverse_vbus_retention_check_work);
-		schedule_delayed_work(&chip->reverse_vbus_retention_check_work, 0);
+		if (chip->req_volt == PD_VBUS) {
+			schedule_delayed_work(&chip->reverse_vbus_retention_check_work, 0);
+		}
 		chip->drop_down_count += 1;
 		cancel_delayed_work(&chip->reverse_clear_keep_status_work);
 		if (chip->max_reverse_power <= MIN_HIGH_REVERSE_POWER) {
@@ -1828,7 +1828,7 @@ static void oplus_reverse_vbus_retention_check_work(struct work_struct *work)
 		if (chip->reverse_enable)
 			break;
 	}
-	if (chip->reverse_enable && chip->req_volt == PD_VBUS) {
+	if (chip->reverse_enable) {
 		vbus_down_count++;
 		vbus_retention_pdo_level = chip->reverse_vbus_pdo_limit_num - vbus_down_count;
 		chg_info("pre_pdo_current[%d], pre_pdo_current[%d], reverse_vbus_pdo_limit[%d]]\n",

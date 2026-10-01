@@ -223,7 +223,7 @@ static int __ufcs_send_data_msg_cable_info(struct ufcs_class *class,
 	INIT_DATA_MSG_HEAD(&msg->head, class->sender.msg_number_counter);
 	msg->data_msg.command = DATA_MSG_CABLE_INFO;
 	msg->data_msg.length = sizeof(struct ufcs_data_msg_cable_info);
-	msg->data_msg.cable_info.info = cable_info->info;
+	memmove(msg->data_msg.cable_info.info, cable_info->info, UFCS_CABLE_INFO_SIZE);
 
 	rc = ufcs_send_msg(class, msg, retry);
 	if (rc < 0)
@@ -716,7 +716,12 @@ static void ufcs_recv_data_msg_sink_info(struct ufcs_data_msg_sink_info *sink_in
 
 static void ufcs_recv_data_msg_cable_info(struct ufcs_data_msg_cable_info *cable_info)
 {
-	cable_info->info = be64_to_cpu(cable_info->info);
+	int i;
+	u8 buf[UFCS_CABLE_INFO_SIZE];
+
+	memmove(buf, cable_info->info, UFCS_CABLE_INFO_SIZE);
+	for (i = 0; i < UFCS_CABLE_INFO_SIZE; i++)
+		cable_info->info[i] = buf[UFCS_CABLE_INFO_SIZE - 1 - i];
 }
 
 static void ufcs_recv_data_msg_dev_info(struct ufcs_data_msg_device_info *dev_info)
@@ -758,21 +763,15 @@ static void ufcs_recv_or_pack_data_msg_verify_response(struct ufcs_data_msg_veri
 	memcpy(encrypted_data_buf, verify_response->encrypted_data, UFCS_VERIFY_ENCRYPTED_DATA_SIZE);
 	for (i = 0; i < UFCS_VERIFY_ENCRYPTED_DATA_SIZE; i++)
 		verify_response->encrypted_data[i] = encrypted_data_buf[UFCS_VERIFY_ENCRYPTED_DATA_SIZE - 1 - i];
+
 	memcpy(random_data_buf, verify_response->random_data, UFCS_VERIFY_RANDOM_DATA_SIZE);
 	for (i = 0; i < UFCS_VERIFY_RANDOM_DATA_SIZE; i++)
 		verify_response->random_data[i] = random_data_buf[UFCS_VERIFY_RANDOM_DATA_SIZE - 1 - i];
 }
 
-static void ufcs_recv_data_msg_power_change(struct ufcs_data_msg_power_change *power_change)
+static void ufcs_recv_data_msg_power_change(struct ufcs_data_msg_power_change *power_change, u8 length)
 {
-	u32 data;
-	u8 *buf = (u8 *)power_change->data;
-	int i;
-
-	for (i = UFCS_OUTPUT_MODE_MAX - 1; i > 0; i--) {
-		data = (((u32)(buf[i])) << 16) + (((u32)(buf[i + 1])) << 8) + buf[i + 2];
-		power_change->data[i] = data;
-	}
+	power_change->length = length;
 }
 
 static void ufcs_recv_data_msg_test_request(struct ufcs_data_msg_test_request *test_request)
@@ -805,7 +804,12 @@ static void ufcs_pack_data_msg_sink_info(struct ufcs_data_msg_sink_info *sink_in
 
 static void ufcs_pack_data_msg_cable_info(struct ufcs_data_msg_cable_info *cable_info)
 {
-	cable_info->info = cpu_to_be64(cable_info->info);
+	int i;
+	u8 buf[UFCS_CABLE_INFO_SIZE];
+
+	memmove(buf, cable_info->info, UFCS_CABLE_INFO_SIZE);
+	for (i = 0; i < UFCS_CABLE_INFO_SIZE; i++)
+		cable_info->info[i] = buf[UFCS_CABLE_INFO_SIZE - 1 - i];
 }
 
 static void ufcs_pack_data_msg_dev_info(struct ufcs_data_msg_device_info *dev_info)
@@ -826,20 +830,6 @@ static void ufcs_pack_data_msg_config_wd(struct ufcs_data_msg_config_watchdog *c
 static void ufcs_pack_data_msg_refuse(struct ufcs_data_msg_refuse *refuse)
 {
 	refuse->data = cpu_to_be32(refuse->data);
-}
-
-static void ufcs_pack_data_msg_power_change(struct ufcs_data_msg_power_change *power_change)
-{
-	u32 data;
-	u8 *buf = (u8 *)power_change->data;
-	int i;
-
-	for (i = 0; i < UFCS_OUTPUT_MODE_MAX; i++) {
-		data = power_change->data[i];
-		buf[i] = (data >> 16) & 0xff;
-		buf[i + 1] = (data >> 8) & 0xff;
-		buf[i + 2] = data & 0xff;
-	}
 }
 
 static void ufcs_pack_data_msg_test_request(struct ufcs_data_msg_test_request *test_request)
@@ -918,7 +908,7 @@ int ufcs_data_msg_init(struct ufcs_data_msg *msg)
 		ufcs_recv_or_pack_data_msg_verify_response(&msg->verify_response);
 		break;
 	case DATA_MSG_POWER_CHANGE:
-		ufcs_recv_data_msg_power_change(&msg->power_change);
+		ufcs_recv_data_msg_power_change(&msg->power_change, msg->length);
 		break;
 	case DATA_MSG_TEST_REQUEST:
 		ufcs_recv_data_msg_test_request(&msg->test_request);
@@ -970,9 +960,6 @@ int ufcs_data_msg_pack(struct ufcs_data_msg *msg)
 		break;
 	case DATA_MSG_VERIFY_RESPONSE:
 		ufcs_recv_or_pack_data_msg_verify_response(&msg->verify_response);
-		break;
-	case DATA_MSG_POWER_CHANGE:
-		ufcs_pack_data_msg_power_change(&msg->power_change);
 		break;
 	case DATA_MSG_TEST_REQUEST:
 		ufcs_pack_data_msg_test_request(&msg->test_request);

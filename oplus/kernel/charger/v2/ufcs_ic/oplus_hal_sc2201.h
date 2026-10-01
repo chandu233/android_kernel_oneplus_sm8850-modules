@@ -59,6 +59,7 @@
 #define SC2201_CMD_CLR_TX_RX                (0x32)
 #define SC2201_CMD_CLR_TX                   (0x22)
 #define SC2201_CMD_CLR_RX                   (0x12)
+#define SC2201_SEND_ENABLE_HIZ              BIT(0)
 
 /*reg0A INT Flag0*/
 #define SC2201_ADDR_UFCS_INT_FLAG0          (0x000A)

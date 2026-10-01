@@ -90,7 +90,6 @@ struct pd_manager_chip {
 	bool start_peripheral;
 	bool first_check;
 	bool pd_svooc;
-	bool svid_completed;
 	bool cpa_support;
 	bool enable_tcpc_irq;
 	struct power_supply *batt_psy;
@@ -607,7 +606,6 @@ static void pd_sink_set_vol_and_cur(struct pd_manager_chip *chip,
 static int tcpc_pd_state_change(struct pd_manager_chip *chip, struct tcp_notify *noti)
 {
 	uint32_t partner_vdos[VDO_MAX_NR];
-	int pd_type;
 	int ret = 0;
 
 	switch (noti->pd_state.connected) {
@@ -660,16 +658,6 @@ static int tcpc_pd_state_change(struct pd_manager_chip *chip, struct tcp_notify 
 		break;
 	case PD_CONNECT_PE_READY_SRC:
 	case PD_CONNECT_PE_READY_SRC_PD30:
-		/* update chip->pd_active */
-		pd_type = noti->pd_state.connected ==
-					  PD_CONNECT_PE_READY_SNK_APDO ?
-				  OPLUS_CHG_USB_TYPE_PD_PPS :
-					OPLUS_CHG_USB_TYPE_PD;
-		tcpc_set_pd_type(chip, pd_type);
-		pd_sink_set_vol_and_cur(chip, chip->sink_mv_old,
-					chip->sink_ma_old,
-					TCP_VBUS_CTRL_PD_STANDBY);
-
 		typec_set_pwr_opmode(chip->typec_port, TYPEC_PWR_MODE_PD);
 		if (!chip->partner)
 			break;
@@ -1680,7 +1668,7 @@ static int pd_manager_bc12_completed(struct oplus_chg_ic_dev *ic_dev)
 
 	if (first_boot) {
 		first_boot = false;
-		oplus_mms_get_item_data(chip->wired_topic, WIRED_ITEM_REAL_CHG_TYPE,
+		oplus_mms_get_item_data(chip->wired_topic, WIRED_ITEM_CHG_TYPE,
 					&data, true);
 		chip->chg_type = data.intval;
 		chg_info("chg_type=%s\n", oplus_wired_get_chg_type_str(chip->chg_type));
@@ -1835,6 +1823,33 @@ static int oplus_get_pps_info(struct oplus_chg_ic_dev *ic_dev, u32 *pdo, int num
 	return 0;
 }
 
+static int pd_manager_get_cc_state(struct oplus_chg_ic_dev *ic_dev,
+				     uint8_t *cc1, uint8_t *cc2)
+{
+	struct pd_manager_chip *chip;
+	int rc = 0;
+	uint8_t cc1_temp = 0, cc2_temp = 0;
+
+	if (ic_dev == NULL) {
+		chg_err("ic_dev is NULL");
+		return -ENODEV;
+	}
+	chip = oplus_chg_ic_get_drvdata(ic_dev);
+
+	if (!chip || !chip->tcpc)
+		return -ENODEV;
+
+	rc = tcpm_inquire_remote_cc(chip->tcpc, &cc1_temp, &cc2_temp, true);
+	if (rc == 0) {
+		*cc1 = cc1_temp;
+		*cc2 = cc2_temp;
+	} else {
+		chg_err("failed to get cc state, rc = %d\n", rc);
+	}
+
+	return rc;
+}
+
 static void *oplus_chg_get_func(struct oplus_chg_ic_dev *ic_dev,
 				enum oplus_chg_ic_func func_id)
 {
@@ -1906,6 +1921,9 @@ static void *oplus_chg_get_func(struct oplus_chg_ic_dev *ic_dev,
 		break;
 	case OPLUS_IC_FUNC_PPS_GET_PDO_INFO:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_PPS_GET_PDO_INFO, oplus_get_pps_info);
+		break;
+	case OPLUS_IC_FUNC_BUCK_GET_CC_STATE:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BUCK_GET_CC_STATE, pd_manager_get_cc_state);
 		break;
 	default:
 		chg_err("this func(=%d) is not supported\n", func_id);

@@ -44,17 +44,6 @@ struct oplus_optiga_chip *g_oplus_optiga_chip;
 #define MAX_DEV			   8
 #define MAX_NR_GPIO 300
 
-#ifndef CONFIG_OPLUS_CHARGER_MTK
-#if 0
-/*add for Qcom project*/
-#include "../../../../../drivers/gpio/gpiolib.h"
-#include <soc/qcom/scm.h>
-#include "../../../../../drivers/pinctrl/core.h"
-#include "../../../../../drivers/pinctrl/pinconf.h"
-#include "../../../../../drivers/pinctrl/qcom/pinctrl-msm.h"
-#include "../../../../../drivers/pinctrl/pinctrl-utils.h"
-#endif /* 0 */
-#endif /*CONFIG_OPLUS_CHARGER_MTK*/
 #ifdef CONFIG_OPLUS_OPTIGA_LOW_DELAY
 /*add for Qcom project*/
 #include "gpiolib.h"
@@ -69,10 +58,8 @@ struct oplus_optiga_chip *g_oplus_optiga_chip;
 
 struct msm_pinctrl {
 	struct device *dev;
-	struct pinctrl_dev *pctrl;
 	struct gpio_chip chip;
 	struct notifier_block restart_nb;
-	int irq;
 
 	raw_spinlock_t lock;
 
@@ -82,17 +69,6 @@ struct msm_pinctrl {
 	const struct msm_pinctrl_soc_data *soc;
 	void __iomem *regs;
 	void __iomem *pdc_regs;
-#ifdef CONFIG_FRAGMENTED_GPIO_ADDRESS_SPACE
-	/* For holding per tile virtual address */
-	void __iomem *per_tile_regs[4];
-#endif
-	phys_addr_t spi_cfg_regs;
-	phys_addr_t spi_cfg_end;
-#ifdef CONFIG_HIBERNATION
-	struct msm_gpio_regs *gpio_regs;
-	struct msm_tile *msm_tile_regs;
-	unsigned int *spi_cfg_regs_val;
-#endif
 };
 
 void oem_gpio_dir_control(unsigned gpio, int dir)
@@ -243,35 +219,15 @@ int oplus_optiga_parse_dt(struct oplus_optiga_chip *chip)
 int optiga_authenticate(void){
 	int ret = false;
 	int devloop = 0;
-	/*int i = 0;*/
 	static S_OPTIGA_PUID stDetectedPuids[MAX_DEV];
 	static int first_read_uid = 0;
 	unsigned long flags;
 
 	chg_err("optiga_authenticate devloop:%d\n",devloop);
 	timing_init();
-	/*set_pin_dir(1);
-	for(i=0;i<50;i++){
-		set_pin(1);
-		ic_udelay(10);
-		set_pin(0);
-		ic_udelay(10);
-	}
-	for(i=0;i<50;i++){
-		set_pin(1);
-		ic_udelay(30);
-		set_pin(0);
-		ic_udelay(30);
-	}
-	for(i=0;i<50;i++){
-		set_pin(1);
-		ic_udelay(50);
-		set_pin(0);
-		ic_udelay(50);
-	}*/
+
 	Swi_PowerDown();
 	Swi_PowerUp();
-	//Swi_Reset();
 	spin_lock_irqsave(&g_oplus_optiga_chip->slock, flags);
 	Swi_SelectByAddress(DEFAULT_ADDR);
 
@@ -289,7 +245,6 @@ int optiga_authenticate(void){
 		}
 	}
 
-	//Swi_SetAddress(1);
 	spin_unlock_irqrestore(&g_oplus_optiga_chip->slock, flags);
 
 #ifdef BURST_READ_INTERVAL

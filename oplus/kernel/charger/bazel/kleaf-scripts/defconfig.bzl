@@ -46,6 +46,8 @@ def oplus_modules_get_config(target):
         return oplus_modules_get_qcom_config(target, oplus_config["qcom"])
     elif bazel_support_platform == "mtk":
         return oplus_modules_get_mtk_config(target, oplus_config["mtk"])
+    elif bazel_support_platform == "unisoc":
+        return oplus_modules_get_qcom_config(target, oplus_config["unisoc"])
     else:
         fail("\"{}\" platform is not support".format(bazel_support_platform))
         return {}

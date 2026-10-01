@@ -71,6 +71,7 @@
 #include <oplus_chg_cpa.h>
 #include <recovery/state_keep.h>
 #include <oplus_reverse_chg.h>
+#include <oplus_dischg_boost.h>
 
 #define FULL_COUNTS_SW		5
 #define FULL_COUNTS_HW		4
@@ -165,6 +166,12 @@ enum dec_cv_support_type {
 	DEC_CV_SUPPORT_LITE,
 	DEC_CV_SUPPORT_FULL,
 	DEC_CV_SUPPORT_MAX,
+};
+
+enum power_role_type {
+	POWER_ROLE_UNKNOWN = -1,
+	POWER_ROLE_SINK = 0,
+	POWER_ROLE_SOURCE = 1,
 };
 
 enum bdd_voltdiff_trend {
@@ -348,6 +355,7 @@ struct oplus_chg_comm {
 	struct oplus_mms *cpa_topic;
 	struct oplus_mms *keep_topic;
 	struct oplus_mms *reverse_topic;
+	struct oplus_mms *dischg_boost_topic;
 	struct mms_subscribe *gauge_subs;
 	struct mms_subscribe *wired_subs;
 	struct mms_subscribe *vooc_subs;
@@ -600,20 +608,20 @@ static chg_up_limit_info chg_up_limit_data;
 
 static struct oplus_comm_spec_config default_spec = {
 	.batt_temp_thr = {
-		-100, -50, 0, 50, 120, 160, 350, 450, 530
+		-100, -50, 0, 50, 120, 160, 210, 350, 450, 530
 	},
 	.fcc_gear_cnt = 2,
 	.fcc_gear_thr_mv = {
-		[FCC_GEAR_LOW] = { 4180, 4180, 4180, 4180, 4180, 4180, 4180, 4180, 4180, 4180 },
+		[FCC_GEAR_LOW] = { 4180, 4180, 4180, 4180, 4180, 4180, 4180, 4180, 4180, 4180, 4180 },
 		[FCC_GEAR_LV1] = { 0 },
 		[FCC_GEAR_LV2] = { 0 },
 		[FCC_GEAR_LV3] = { 0 },
 	},
 	.fcc_gear_shake_mv = {
-		[FCC_GEAR_LOW] = { 100, 100, 100, 100, 100, 100, 100, 100, 100, 100 },
-		[FCC_GEAR_LV1] = { 100, 100, 100, 100, 100, 100, 100, 100, 100, 100 },
-		[FCC_GEAR_LV2] = { 100, 100, 100, 100, 100, 100, 100, 100, 100, 100 },
-		[FCC_GEAR_LV3] = { 100, 100, 100, 100, 100, 100, 100, 100, 100, 100 },
+		[FCC_GEAR_LOW] = { 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100 },
+		[FCC_GEAR_LV1] = { 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100 },
+		[FCC_GEAR_LV2] = { 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100 },
+		[FCC_GEAR_LV3] = { 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100 },
 	},
 };
 static int tbatt_pwroff_enable = 1;
@@ -644,6 +652,7 @@ static const char *const oplus_comm_temp_region_text[] = {
 	[TEMP_REGION_LITTLE_COOL] = "little-cool",
 	[TEMP_REGION_PRE_NORMAL] = "pre-normal",
 	[TEMP_REGION_NORMAL] = "normal",
+	[TEMP_REGION_NORMAL_MID] = "normal-mid",
 	[TEMP_REGION_NORMAL_HIGH] = "normal-high",
 	[TEMP_REGION_WARM] = "warm",
 	[TEMP_REGION_HOT] = "hot",
@@ -885,6 +894,14 @@ __maybe_unused static bool is_err_topic_available(struct oplus_chg_comm *chip)
 	return !!chip->err_topic;
 }
 
+static bool is_dischg_boost_topic_available(struct oplus_chg_comm *chip)
+{
+	if (!chip->dischg_boost_topic)
+		chip->dischg_boost_topic = oplus_mms_get_by_name("dischg_boost");
+
+	return !!chip->dischg_boost_topic;
+}
+
 __maybe_unused static bool
 is_flash_mode_votable_available(struct oplus_chg_comm *chip)
 {
@@ -1112,6 +1129,10 @@ static void oplus_comm_check_temp_region(struct oplus_chg_comm *chip)
 					&& chip->batt_status == POWER_SUPPLY_STATUS_FULL) {
 				chip->sw_full = false;
 				chip->hw_full_by_sw = false;
+				if (is_dischg_boost_topic_available(chip)) {
+					oplus_boost_set_fam_en(chip->dischg_boost_topic, false);
+					chg_info("set_fam_en=false\n");
+				}
 				oplus_comm_set_batt_full(chip, false);
 				if (is_support_parallel_battery(chip->gauge_topic)) {
 					chip->sw_sub_batt_full = false;
@@ -1403,6 +1424,11 @@ static void oplus_comm_set_batt_full(struct oplus_chg_comm *chip, bool full)
 		kfree(msg);
 	}
 
+	if (is_dischg_boost_topic_available(chip) && !full) {
+		oplus_boost_set_fam_en(chip->dischg_boost_topic, false);
+		chg_info("set_fam_en=false\n");
+	}
+
 	if (full)
 		oplus_comm_set_rechging(chip, false);
 
@@ -1534,6 +1560,10 @@ static void oplus_comm_check_sw_full(struct oplus_chg_comm *chip)
 				else
 					chg_err("wired_charging_disable_votable not found, can't disable charging");
 			}
+			if (is_dischg_boost_topic_available(chip)) {
+				oplus_boost_set_fam_en(chip->dischg_boost_topic, true);
+				chg_info("set_fam_en=true\n");
+			}
 			chip->fv_over = false;
 			vote(chip->fv_min_votable, OVER_FV_VOTER, false, 0, false);
 			chip->need_start_timeout_work = false;
@@ -1567,6 +1597,10 @@ static void oplus_comm_check_sw_full(struct oplus_chg_comm *chip)
 					vote(chip->wired_charging_disable_votable, CHG_FULL_VOTER, true, 1, false);
 				else
 					chg_err("wired_charging_disable_votable not found, can't disable charging");
+			}
+			if (is_dischg_boost_topic_available(chip)) {
+				oplus_boost_set_fam_en(chip->dischg_boost_topic, true);
+				chg_info("set_fam_en=true\n");
 			}
 			chip->fv_over = false;
 			vote(chip->fv_min_votable, OVER_FV_VOTER, false, 0, false);
@@ -1650,6 +1684,10 @@ static void oplus_comm_check_hw_full(struct oplus_chg_comm *chip)
 				vote(chip->wired_charging_disable_votable, CHG_FULL_VOTER, true, 1, false);
 			else
 				chg_err("wired_charging_disable_votable not found, can't disable charging");
+		}
+		if (is_dischg_boost_topic_available(chip)) {
+			oplus_boost_set_fam_en(chip->dischg_boost_topic, true);
+			chg_info("set_fam_en=true\n");
 		}
 		chip->fv_over = false;
 		vote(chip->fv_min_votable, OVER_FV_VOTER, false, 0, false);
@@ -1738,6 +1776,10 @@ static void oplus_comm_check_sw_sub_batt_full(struct oplus_chg_comm *chip)
 				else
 					chg_err("wired_charging_disable_votable not found, can't disable charging");
 			}
+			if (is_dischg_boost_topic_available(chip)) {
+				oplus_boost_set_fam_en(chip->dischg_boost_topic, true);
+				chg_info("set_fam_en=true\n");
+			}
 			chip->fv_over = false;
 			vote(chip->fv_min_votable, OVER_FV_VOTER, false, 0, false);
 			chip->need_start_timeout_work = false;
@@ -1779,6 +1821,10 @@ static void oplus_comm_check_sw_sub_batt_full(struct oplus_chg_comm *chip)
 					vote(chip->wired_charging_disable_votable, CHG_FULL_VOTER, true, 1, false);
 				else
 					chg_err("wired_charging_disable_votable not found, can't disable charging");
+			}
+			if (is_dischg_boost_topic_available(chip)) {
+				oplus_boost_set_fam_en(chip->dischg_boost_topic, true);
+				chg_info("set_fam_en=true\n");
 			}
 			chip->fv_over = false;
 			vote(chip->fv_min_votable, OVER_FV_VOTER, false, 0, false);
@@ -1872,6 +1918,10 @@ static void oplus_comm_check_hw_sub_batt_full(struct oplus_chg_comm *chip)
 				vote(chip->wired_charging_disable_votable, CHG_FULL_VOTER, true, 1, false);
 			else
 				chg_err("wired_charging_disable_votable not found, can't disable charging");
+		}
+		if (is_dischg_boost_topic_available(chip)) {
+			oplus_boost_set_fam_en(chip->dischg_boost_topic, true);
+			chg_info("set_fam_en=true\n");
 		}
 		chip->fv_over = false;
 		vote(chip->fv_min_votable, OVER_FV_VOTER, false, 0, false);
@@ -2680,6 +2730,10 @@ static void oplus_comm_check_rechg(struct oplus_chg_comm *chip)
 			chip->hw_sub_batt_full_by_sw = false;
 		}
 		oplus_comm_set_rechging(chip, true);
+		if (is_dischg_boost_topic_available(chip)) {
+			oplus_boost_set_fam_en(chip->dischg_boost_topic, false);
+			chg_info("set_fam_en=false\n");
+		}
 		if (chip->wls_online) {
 			if (is_wls_charging_disable_votable_available(chip)) {
 				vote(chip->wls_charging_disable_votable, CHG_FULL_VOTER, false, 0, false);
@@ -5168,6 +5222,10 @@ static void oplus_comm_ffc_start_work(struct work_struct *work)
 					chg_err("wired_charging_disable_votable not found, can't disable charging");
 				}
 			}
+			if (is_dischg_boost_topic_available(chip)) {
+				oplus_boost_set_fam_en(chip->dischg_boost_topic, true);
+				chg_info("set_fam_en=true\n");
+			}
 			goto err;
 		}
 	}
@@ -7407,6 +7465,10 @@ static void oplus_comm_plugin_work(struct work_struct *work)
 		chip->batt_full_jiffies = jiffies;
 	} else {
 		chip->low_temp_check_jiffies = jiffies;
+		if (is_dischg_boost_topic_available(chip)) {
+			oplus_boost_set_fam_en(chip->dischg_boost_topic, false);
+			chg_info("set_fam_en=false\n");
+		}
 		if (is_wired_charging_disable_votable_available(chip)) {
 			vote(chip->wired_charging_disable_votable,
 			     CHG_FULL_VOTER, false, 0, false);
@@ -7686,6 +7748,7 @@ static int oplus_comm_update_batt_cv_full(struct oplus_mms *mms,
 
 	return 0;
 }
+
 
 static int oplus_comm_update_ffc_status(struct oplus_mms *mms,
 				       union mms_msg_data *data)
@@ -8758,6 +8821,11 @@ int oplus_comm_temp_region_map(int index)
 		if (index >= TEMP_REGION_LITTLE_COLD_HIGH)
 			index -= 1;
 	}
+
+	if (oplus_get_chg_spec_version() < OPLUS_CHG_SPEC_VER_V3P7_2) {
+		if (index >= TEMP_REGION_NORMAL_MID)
+			index -= 1;
+	}
 	if (index < 0) {
 		chg_err("index=%d, temp region releated config error", index);
 		index = 0;
@@ -8773,6 +8841,10 @@ int oplus_comm_get_temp_region_max(void)
 
 	if (oplus_get_chg_spec_version() < OPLUS_CHG_SPEC_VER_V3P7_1) {
 		return V3P7_TEMP_REGION_MAX;
+	}
+
+	if (oplus_get_chg_spec_version() < OPLUS_CHG_SPEC_VER_V3P7_2) {
+		return V3P7_1_TEMP_REGION_MAX;
 	}
 
 	return TEMP_REGION_MAX;
@@ -11276,6 +11348,10 @@ static void oplus_wired_chg_check_work(struct work_struct *work)
 	struct oplus_chg_comm *chip =
 		container_of(work, struct oplus_chg_comm, wired_chg_check_work);
 
+	if (is_dischg_boost_topic_available(chip)) {
+		oplus_boost_set_fam_en(chip->dischg_boost_topic, false);
+		chg_info("set_fam_en=false\n");
+	}
 	if (is_wired_charging_disable_votable_available(chip)) {
 		vote(chip->wired_charging_disable_votable,
 		     CHG_FULL_VOTER, false, 0, false);

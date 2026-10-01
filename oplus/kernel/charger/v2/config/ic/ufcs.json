@@ -195,16 +195,23 @@
         {
             "lable": "OPLUS_IC_FUNC_UFCS_GET_CABLE_INFO",
             "desc": {
-                "zh": "获取线缆信息"
+                "zh": "获取cable信息"
             },
-            "auto_debug_code": true,
-            "parameter_list": ["u64 *"],
+            "auto_debug_code": false,
+            "parameter_list": ["u8 *", "int"],
             "parameter_desc": [
                 {
                     "range": "0-*",
                     "type": "out",
                     "desc": {
-                        "zh": "线缆信息，具体格式见ufcs协议手册的cable info数据格式"
+                        "zh": "用于存放cable的buf"
+                    }
+                },
+                {
+                    "range": "0-*",
+                    "type": "in",
+                    "desc": {
+                        "zh": "存放cable的buf的长度"
                     }
                 }
             ],
@@ -434,8 +441,51 @@
                     }
                 }
             }
+        },
+        {
+            "lable": "OPLUS_IC_FUNC_UFCS_RESET_DPDM",
+            "desc": {
+                "zh": "重置DPDM"
+            },
+            "auto_debug_code": true,
+            "parameter_list": [],
+            "parameter_desc": [],
+            "vict": {
+                "read": false,
+                "write": false,
+                "overwrite": false
+            }
+        },
+        {
+            "lable": "OPLUS_IC_FUNC_UFCS_SET_USER_ENCRYPT_DATA",
+            "desc": {
+                "zh": "获取aidl加密数据"
+            },
+            "auto_debug_code": false,
+            "parameter_list": ["u8 *", "u8"],
+            "parameter_desc": [
+                {
+                    "range": "0-*",
+                    "type": "in",
+                    "desc": {
+                        "zh": "aidl加密数据"
+                    }
+                },
+                {
+                    "range": "0-*",
+                    "type": "in",
+                    "desc": {
+                        "zh": "aidl加密数据长度"
+                    }
+                }
+            ],
+            "vict": {
+                "read": false,
+                "write": false,
+                "overwrite": false
+            }
         }
     ],
 
-    "version": "V1.1:17:84c9311f8f9c2834f4134f3c138c710ec8581b04df64a5932803cf0baac4a548"
+    "version": "V2.0:19:aced73720f0ee0898ff40414a158ad25e60994cfe33a3a5786dc4b43936833cb"
 }

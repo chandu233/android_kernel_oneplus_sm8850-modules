@@ -75,6 +75,11 @@ conditional_ko_deps = {
              modules_label("oplus/kernel/dft/bazel:oplus_bsp_dft_olc"),
         ],
     },
+    "CONFIG_TCPC_CLASS": {
+        True: [
+            "{target_variant}_tcpc_class",
+        ],
+    },
 }
 
 conditional_hdr_deps = {
@@ -86,6 +91,11 @@ conditional_hdr_deps = {
     "CONFIG_OPLUS_DYNAMIC_CONFIG": {
         True: [
             ":oplus_cfg_headers"
+        ],
+    },
+    "CONFIG_OPLUS_PD_EXT_SUPPORT": {
+        True: [
+            ":pd_ext_headers"
         ],
     },
     "CONFIG_OPLUS_UFCS_CLASS": {
@@ -186,7 +196,6 @@ def define_oplus_chg_v2_module():
         "v2/oplus_batt_bal.c",
         "v2/oplus_chg_mutual.c",
         "v2/oplus_reverse_chg.c",
-        "v2/oplus_chg_dual_cells_protection.c",
         "v2/gauge_ic/oplus_hal_bq27541.c",
         "v2/hal/oplus_chg_ic.c",
         "v2/hal/oplus_virtual_buck.c",
@@ -210,6 +219,7 @@ def define_oplus_chg_v2_module():
         "v2/mms/oplus_mms_gauge.c",
         "v2/mms/oplus_mms_wired.c",
         "v2/mms/gauge/oplus_sili.c",
+        "v2/mms/gauge/oplus_chg_dual_cells_protection.c",
         "v2/mms/sec/oplus_sec.c",
         "v2/strategy/oplus_strategy.c",
         "v2/strategy/oplus_strategy_cgcl.c",
@@ -245,6 +255,11 @@ def define_oplus_chg_v2_module():
                 "v2/gauge_ic/oplus_hal_mpc7022.c"
             ],
         },
+        "CONFIG_OPLUS_GAUGE_SH366002": {
+            True: [
+                "v2/gauge_ic/oplus_hal_sh366002.c"
+            ],
+        },
         "CONFIG_OPLUS_GAUGE_BQ27Z561": {
             True: [
                 "v2/gauge_ic/oplus_hal_bq27z561.c"
@@ -263,6 +278,11 @@ def define_oplus_chg_v2_module():
         "CONFIG_OPLUS_GAUGE_BQ28Z610_RA": {
             True: [
                 "v2/gauge_ic/oplus_hal_bq28z610.c"
+            ],
+        },
+        "CONFIG_OPLUS_GAUGE_UNISOC": {
+            True: [
+                "v2/gauge_ic/oplus_hal_unisoc_gauge.c"
             ],
         },
         "CONFIG_OPLUS_CHG_IC_DEBUG": {
@@ -304,6 +324,30 @@ def define_oplus_chg_v2_module():
         "CONFIG_OPLUS_PD_MANAGER_CHARGER": {
             True: [
                 "v2/charger_ic/oplus_hal_pd_manager.c"
+            ],
+        },
+        "CONFIG_OPLUS_MT6375_CHARGER": {
+            True: [
+                "v2/charger_ic/oplus_hal_mtk6895S.c",
+                "v2/charger_ic/oplus_hal_mt6375.c",
+                "v2/gauge_ic/oplus_hal_mtk_platform_gauge.c"
+            ],
+        },
+        "CONFIG_OPLUS_MT6835_CHARGER": {
+            True: [
+                "v2/charger_ic/oplus_hal_mtk6895S.c",
+                "v2/gauge_ic/oplus_hal_mtk_platform_gauge.c"
+            ],
+        },
+        "CONFIG_OPLUS_MT6769_CHARGER": {
+            True: [
+                "v2/charger_ic/oplus_hal_mtk6895S.c",
+                "v2/gauge_ic/oplus_hal_mtk_platform_gauge.c"
+            ],
+        },
+        "CONFIG_OPLUS_MT6379_CHARGER": {
+            True: [
+                "v2/charger_ic/oplus_hal_mtk6991V.c"
             ],
         },
         "CONFIG_OPLUS_TPS6128XD_CHARGER": {
@@ -389,6 +433,11 @@ def define_oplus_chg_v2_module():
         "CONFIG_OPLUS_UFCS_SLAVE_NU2112A": {
             True: [
                 "v2/ufcs_ic/oplus_hal_nu2112a_slave.c"
+            ],
+        },
+        "CONFIG_OPLUS_UFCS_MASTER_NU2118A": {
+            True: [
+                "v2/ufcs_ic/oplus_hal_nu2118a.c"
             ],
         },
         "CONFIG_OPLUS_CHG_MOS_CTRL": {
@@ -480,6 +529,21 @@ def define_oplus_chg_v2_module():
                 "v2/charger_ic/oplus_hal_sgm41515.c"
             ],
         },
+        "CONFIG_OPLUS_SC6607_CHARGER": {
+            True: [
+                "v2/charger_ic/oplus_hal_sc6607.c"
+            ],
+        },
+        "CONFIG_OPLUS_SC6607_CP": {
+            True: [
+                "v2/voocphy/phy/oplus_sc6607_cp.c"
+            ],
+        },
+        "CONFIG_OPLUS_SC6607_UFCS": {
+            True: [
+                "v2/ufcs_ic/oplus_hal_sc6607_ufcs.c"
+            ],
+        },
         "CONFIG_OPLUS_CHG_RECOVERY": {
             True: [
                 "v2/recovery/oplus_chg_recovery.c",
@@ -491,6 +555,11 @@ def define_oplus_chg_v2_module():
                 "v2/recovery/state_keep/detection/wired_disconnect_detection.c",
                 "v2/recovery/state_keep/detection/vooc_disconnect_detection.c",
                 "v2/monitor/track/oplus_track_state_keep.c",
+            ],
+        },
+        "CONFIG_OPLUS_CHG_STATE_KEEP_DCP": {
+            True: [
+                "v2/recovery/state_keep/detection/dcp_disconnect_detection.c",
             ],
         },
         "CONFIG_OPLUS_DEBUG_AUTH": {

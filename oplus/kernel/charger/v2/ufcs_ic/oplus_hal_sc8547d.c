@@ -627,8 +627,6 @@ static void sc8547_voocphy_update_data(struct oplus_voocphy_manager *chip)
 		chip->cp_vbat, chip->cp_vac, chip->interrupt_flag, chip->int_column[0],
 		chip->int_column[1], chip->int_column[2], chip->int_column[3]);
 
-	if (chip->voocphy_dual_cp_support)
-		sc8547_slave_update_data(chip);
 }
 
 static int sc8547_voocphy_get_cp_ichg(struct oplus_voocphy_manager *voocphy)
@@ -1819,6 +1817,8 @@ static int sc8547d_read_flags(struct sc8547d_device *chip)
 		err_flag |= BIT(UFCS_RECV_ERR_ACK_TIMEOUT);
 	if (flag_buf[0] & SC8547D_FLAG_MSG_TRANS_FAIL)
 		err_flag |= BIT(UFCS_RECV_ERR_TRANS_FAIL);
+	if (flag_buf[0] & SC8547D_RX_BUFFER_BUSY_FLAG)
+		err_flag |= BIT(UFCS_RECV_ERR_BUFF_BUSY);
 	if (flag_buf[0] & SC8547D_FLAG_RX_OVERFLOW)
 		err_flag |= BIT(UFCS_COMM_ERR_RX_OVERFLOW);
 	if (flag_buf[0] & SC8547D_FLAG_DATA_READY)
@@ -1960,7 +1960,15 @@ retry:
 
 static int sc8547d_ufcs_cable_hard_reset(struct ufcs_dev *ufcs)
 {
-	return 0;
+	struct sc8547d_device *chip = ufcs->drv_data;
+	int rc;
+
+	rc = sc8547d_write_bit_mask(chip, SC8547D_ADDR_UFCS_CTRL1, SEND_CABLE_HARDRESET,
+		SEND_CABLE_HARDRESET);
+	if (rc < 0)
+		chg_err("set cable reset error, rc=%d\n", rc);
+
+	return rc;
 }
 
 static int sc8547d_ufcs_set_baud_rate(struct ufcs_dev *ufcs, enum ufcs_baud_rate baud)
@@ -2126,6 +2134,23 @@ static u8 sc8547d_voocphy_get_vbus_status(struct oplus_voocphy_manager *chip)
 	}
 
 	return sc8547d_get_vbus_status(dev);
+}
+
+static int sc8547d_ufcs_hiz_enable(struct ufcs_dev *ufcs, bool en)
+{
+	struct sc8547d_device *chip = ufcs->drv_data;
+	int rc = 0;
+	u8 data = 0;
+
+	if (en)
+		data = SC8547D_SEND_ENABLE_HIZ;
+	else
+		data = 0;
+	rc = sc8547d_write_bit_mask(chip, SC8547D_ADDR_UFCS_CTRL2, SC8547D_SEND_ENABLE_HIZ, data);
+	if (rc < 0)
+		chg_err("set ufcs hiz %d error, rc=%d\n", en, rc);
+
+	return rc;
 }
 
 static void sc8547_create_device_node(struct device *dev)
@@ -2500,6 +2525,91 @@ static int sc8547d_retrieve_flags(struct ufcs_dev *ufcs)
 	return rc;
 }
 
+#define SC8547D_DP_20K_PD_EN_MASK BIT(4)
+#define SC8547D_DM_20K_PD_EN_MASK BIT(5)
+static int sc8547d_cp_reset_dpdm(struct ufcs_dev *ufcs)
+{
+	struct sc8547d_device *chip = ufcs->drv_data;
+	int rc = 0;
+	int ufcs_disable_rc = 0;
+	static bool first = true;
+	u8 value = 0;
+	bool ufcs_enable_success = false;
+
+	if (!first)
+		return 0;
+	first = false;
+
+	if (chip == NULL) {
+		chg_err("sc8547d chip is NULL\n");
+		return -ENODEV;
+	}
+
+	// SC8547D_ADDR_UFCS_CTRL1 = 0x40
+	rc = sc8547_read_byte(chip->client, SC8547D_ADDR_UFCS_CTRL1, &value);
+	if (rc < 0) {
+		chg_err("[%s] read SC8547D_ADDR_UFCS_CTRL1 error, rc=%d\n",
+			chip->dev->of_node->name, rc);
+		goto reset_dpdm_err;
+	}
+
+	if (!(value & SC8547D_CMD_EN_CHIP)) {
+		rc = sc8547d_ufcs_enable(chip->ufcs);
+		if (rc < 0) {
+			chg_err("sc8547d_ufcs_enable failed, rc=%d\n", rc);
+			goto reset_dpdm_err;
+		}
+		ufcs_enable_success = true;
+	}
+
+	rc = sc8547_read_byte(chip->client, SC8547_REG_21, &value);
+	if (rc < 0) {
+		chg_err("[%s] read SC8547_REG_21 error, rc=%d\n", chip->dev->of_node->name, rc);
+		goto reset_dpdm_err;
+	}
+
+	rc = sc8547_write_byte(chip->client, SC8547_REG_21,
+		value | (SC8547D_DP_20K_PD_EN_MASK | SC8547D_DM_20K_PD_EN_MASK));
+	if(rc < 0) {
+		chg_err("dpdm pull down failed, rc=%d\n", rc);
+		goto reset_dpdm_err;
+	}
+	chg_info("dpdm pull down\n");
+
+	msleep(30);
+
+	rc = sc8547_write_byte(chip->client, SC8547_REG_21,
+		value & ~(SC8547D_DP_20K_PD_EN_MASK | SC8547D_DM_20K_PD_EN_MASK));
+	if(rc < 0) {
+		chg_err("dpdm pull up failed, rc=%d\n", rc);
+		goto reset_dpdm_err;
+	}
+	chg_info("dpdm pull up\n");
+
+reset_dpdm_err:
+	if (ufcs_enable_success) {
+		ufcs_disable_rc = sc8547d_ufcs_disable(chip->ufcs);
+		if (ufcs_disable_rc < 0)
+			chg_err("sc8547d_ufcs_disable failed, ufcs_disable_rc=%d\n",
+				ufcs_disable_rc);
+		if (rc >= 0)
+			rc = ufcs_disable_rc;
+	}
+
+	return rc;
+}
+
+static int sc8547d_ufcs_clr_rx_buf(struct ufcs_dev *ufcs)
+{
+	struct sc8547d_device *chip = ufcs->drv_data;
+	int rc;
+
+	rc = sc8547d_write_bit_mask(chip, SC8547D_ADDR_UFCS_CTRL2, SC8547D_SEND_CLR_RX_BUF, SC8547D_SEND_CLR_RX_BUF);
+	if (rc < 0)
+		chg_err("clear rx buf error, rc=%d\n", rc);
+	return rc;
+}
+
 static struct ufcs_dev_ops ufcs_ops = {
 	.init = sc8547d_ufcs_init,
 	.write_msg = sc8547d_ufcs_write_msg,
@@ -2512,6 +2622,9 @@ static struct ufcs_dev_ops ufcs_ops = {
 	.disable = sc8547d_ufcs_disable,
 	.watchdog_config = sc8547d_ufcs_cp_watchdog_config,
 	.retrieve_flags = sc8547d_retrieve_flags,
+	.reset_dpdm = sc8547d_cp_reset_dpdm,
+	.hiz_enable = sc8547d_ufcs_hiz_enable,
+	.clr_rx_buf = sc8547d_ufcs_clr_rx_buf,
 };
 
 static int sc8547_charger_choose(struct sc8547d_device *chip)

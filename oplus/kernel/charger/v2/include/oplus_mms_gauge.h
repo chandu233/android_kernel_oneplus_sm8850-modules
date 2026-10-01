@@ -47,6 +47,7 @@ enum gauge_topic_item {
 	GAUGE_ITEM_GAUGE_R_INFO,
 	GAUGE_ITEM_SOC_CENTI,
 	GAUGE_ITEM_VOL_FCL,
+	GAUGE_ITEM_C_SOC,
 };
 
 enum gauge_type_id {
@@ -190,7 +191,6 @@ int oplus_gauge_get_battery_cb_status(void);
 int oplus_gauge_get_i2c_err(void);
 void oplus_gauge_clear_i2c_err(void);
 int oplus_gauge_get_passedchg(int *val);
-int oplus_gauge_dump_register(void);
 int oplus_gauge_lock(void);
 int oplus_gauge_unlock(void);
 bool oplus_gauge_is_locked(void);
@@ -271,5 +271,7 @@ int oplus_gauge_get_nvram_stress_test(struct oplus_mms *topic,
 int oplus_gauge_start_term_volt_stress_test(struct oplus_mms *topic,
 		int input_count, int interval_ms);
 int oplus_gauge_get_three_level_term_volt(struct oplus_mms *topic, int term_volt[]);
+void oplus_gauge_set_dcb_protect_status(struct oplus_mms *topic, int val);
+int oplus_gauge_get_dcb_protect_status(struct oplus_mms *topic, int *status, int *reason);
 
 #endif /* __OPLUS_MMS_GAUGE_H__ */

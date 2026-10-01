@@ -66,6 +66,7 @@ struct oplus_maxim_gauge_chip {
 	int batt_info_num;
 	struct delayed_work maxim_err_track_work;
 	bool support_maxim_in_kernel;
+	bool debug_bypass_ic;
 };
 
 static const char *oplus_maxim_get_cmdline(void)
@@ -279,6 +280,10 @@ static int oplus_maxim_parse_dt(struct oplus_maxim_gauge_chip *chip)
 		}
 	}
 
+	chip->debug_bypass_ic = of_property_read_bool(node, "oplus,debug_bypass_ic");
+	if (chip->debug_bypass_ic)
+		chg_info("Bypass maxim ic, set hmac as true");
+
 	return 0;
 }
 
@@ -343,6 +348,12 @@ static int oplus_maxim_guage_get_batt_auth(struct oplus_chg_ic_dev *ic_dev, bool
 	if (chip == NULL) {
 		chg_err("maxim chip is NULL");
 		return -ENODEV;
+	}
+
+	if (chip->debug_bypass_ic) {
+		chg_info("Bypass maxim ic, set hmac as true");
+		*pass = true;
+		return 0;
 	}
 
 	if (chip->authenticate_result == false && chip->maxim_in_kernel_init_ok) {

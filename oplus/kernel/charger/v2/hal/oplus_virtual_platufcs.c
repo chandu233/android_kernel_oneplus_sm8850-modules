@@ -691,7 +691,7 @@ static int oplus_chg_vpu_get_src_info(struct oplus_chg_ic_dev *ic_dev, u64 *src_
 	return rc;
 }
 
-static int oplus_chg_vpu_get_cable_info(struct oplus_chg_ic_dev *ic_dev, u64 *cable_info)
+static int oplus_chg_vpu_get_cable_info(struct oplus_chg_ic_dev *ic_dev, u8 *cable_info, int size)
 {
 	struct oplus_virtual_ufcs_ic *vpu;
 	int rc = 0;
@@ -713,7 +713,7 @@ static int oplus_chg_vpu_get_cable_info(struct oplus_chg_ic_dev *ic_dev, u64 *ca
 			continue;
 		}
 		rc = oplus_chg_ic_func(vpu->child_list[i].ic_dev,
-			OPLUS_IC_FUNC_UFCS_GET_CABLE_INFO, cable_info);
+			OPLUS_IC_FUNC_UFCS_GET_CABLE_INFO, cable_info, size);
 		if (rc < 0)
 			chg_err("child ic[%d] get_cable_info error, rc=%d\n", i, rc);
 	}

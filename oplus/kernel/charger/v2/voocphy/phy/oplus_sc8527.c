@@ -22,6 +22,7 @@
 #include <linux/pinctrl/consumer.h>
 #include <linux/sched/clock.h>
 #include <linux/regmap.h>
+#include <linux/fs.h>
 #ifndef CONFIG_DISABLE_OPLUS_FUNCTION
 #include <soc/oplus/system/oplus_project.h>
 #endif
@@ -41,6 +42,8 @@
 #include <oplus_chg_monitor.h>
 #include <oplus_chg_voter.h>
 #include <oplus_mms_gauge.h>
+#include <oplus_chg_mutual.h>
+#include <oplus_chg_comm.h>
 
 #define ERR_MSG_BUF	PAGE_SIZE
 
@@ -58,6 +61,7 @@ struct sc8527_device {
 	struct oplus_impedance_node *output_imp_node;
 
 	int auto_mode_gpio;
+	int auto_mode_gpio_state;
 	struct pinctrl *pinctrl;
 	struct pinctrl_state *auto_mode_enable;
 	struct pinctrl_state *auto_mode_disable;
@@ -66,8 +70,10 @@ struct sc8527_device {
 	struct mutex chip_lock;
 	atomic_t suspended;
 	atomic_t i2c_err_count;
+	atomic_t in_shutdown; /* after shutdown, sc8527_set_chg_auto_mode can only set to 0 */
 	struct wakeup_source *chip_ws;
 
+	int v2x_low;
 	int ovp_reg;
 	int ocp_reg;
 	int ic_sc8527;
@@ -88,45 +94,109 @@ struct sc8527_device {
 	u8 ufcs_reg_dump[SC8527_FLAG_NUM];
 	struct work_struct check_reg_work;
 	struct work_struct power_on_mode_switch_work;
+	struct work_struct update_work_mode_work;
+	struct work_struct wired_plug_in_work; /* Work for wired plug-in: upload registers and update work mode */
+	struct work_struct ultra_power_saving_work; /* Work for SOC drops to 10%: upload registers */
+	struct delayed_work get_dischg_boost_err_flag_work;
 
 	struct oplus_mms *wired_topic;
 	struct mms_subscribe *wired_subs;
-	bool wired_present;
+	bool wired_present; /* Track previous wired_present state */
+
+	/* Gauge topic subscription for SOC monitoring */
+	struct oplus_mms *gauge_topic;
+	struct mms_subscribe *gauge_subs;
+
+	/* Comm topic subscription for boot completed */
+	struct oplus_mms *comm_topic;
+	struct mms_subscribe *comm_subs;
+	int last_ui_soc; /* Track previous UI SOC value */
+
+	/* Mutual notifier for reading error flag from partition */
+	struct oplus_chg_mutual_notifier dischg_boost_err_flag_mutual;
+	char dischg_boost_err_flag_data[128];
 
 	struct votable *work_mode_votable;
+	bool probe_complete;
+	int i2c_error_happen;
 };
+
+#define SC8527_REGMAX		0x3A
+#define SC8527_UPLOAD_REG_SOC_THRESHOLD	10
 
 static int sc8527_check_register_and_upload_track(struct sc8527_device *chip);
 static void sc8527_boost_ic_reg_set(struct sc8527_device *chip);
 static int sc8527_set_work_mode(struct oplus_chg_ic_dev *dev, int mode);
-#define BOOST_I2C_ERROR_VOTER	"BOOST_I2C_ERROR_VOTER"
+static int sc8527_upload_dischg_boost_err_flag_track(struct sc8527_device *chip,
+	unsigned int err_flag,
+	u8 reg0c_val, u8 reg0d_val,
+	u8 reg0e_val, u8 reg1b_val);
+/* Single source of truth: register definitions */
+/* To add a new register, just add one entry here */
+struct reg_info {
+	uint8_t addr;
+	const char *addr_str;
+};
+
+static const struct reg_info sc8527_reg_infos[] = {
+	{0x09, "9"},
+	{0x0A, "a"},
+	{0x0B, "b"},
+	{0x0C, "c"},
+	{0x0D, "d"},
+	{0x0E, "e"},
+	{0x15, "15"},
+	{0x1A, "1a"},
+	{0x1B, "1b"},
+	{0x37, "37"},
+	{0x38, "38"},
+	{0x39, "39"},
+	{0x3A, "3a"},
+};
+
+#define SC8527_REG_COUNT ARRAY_SIZE(sc8527_reg_infos)
+
+/* Structure fields must match reg_infos array order */
+struct sc8527_register_values {
+	u8 reg09;  /* index 0 */
+	u8 reg0a;  /* index 1 */
+	u8 reg0b;  /* index 2 */
+	u8 reg0c;  /* index 3 */
+	u8 reg0d;  /* index 4 */
+	u8 reg0e;  /* index 5 */
+	u8 reg15;  /* index 6 */
+	u8 reg1a;  /* index 7 */
+	u8 reg1b;  /* index 8 */
+	u8 reg37;  /* index 9 */
+	u8 reg38;  /* index 10 */
+	u8 reg39;  /* index 11 */
+	u8 reg3a;  /* index 12 */
+};
+
+static void sc8527_upload_all_registers(struct sc8527_device *chip,
+					const struct sc8527_register_values *regs,
+					const char *trigger_source);
 #define I2C_RETRY_MAX	3
 
 static bool is_work_mode_votable_available(struct sc8527_device *chip);
 
 static void sc8527_handle_i2c_error_after_retry(struct sc8527_device *chip, int happen)
 {
-	static int last_happen = -1;
 	if (!chip)
 		return;
-
 	if (!happen && is_work_mode_votable_available(chip)) {
+		chip->i2c_error_happen = happen;
 		vote(chip->work_mode_votable, BOOST_I2C_ERROR_VOTER, happen, happen, false);
 		return;
 	}
 
-	if (last_happen == happen) {
+	if (chip->i2c_error_happen == happen)
 		return;
-	}
 
-	last_happen = happen;
-
-	if (is_work_mode_votable_available(chip)) {
+	chip->i2c_error_happen = happen;
+	if (is_work_mode_votable_available(chip) && chip->probe_complete) {
 		vote(chip->work_mode_votable, BOOST_I2C_ERROR_VOTER, happen, happen, false);
 		chg_err("sc8527 I2C set Mode :%d via votable\n", happen);
-	} else {
-		sc8527_set_work_mode(chip->boost_ic, happen);
-		chg_err("work_mode_votable not available, sc8527 I2C set Mode :%d\n", happen);
 	}
 }
 
@@ -227,8 +297,6 @@ static int __sc8527_read_byte(struct i2c_client *client, u8 reg, u8 *data)
 {
 	s32 ret;
 	int retry = I2C_RETRY_MAX;
-	struct oplus_voocphy_manager *chip = i2c_get_clientdata(client);
-	s32 err_info[2] = { 0 };
 
 	ret = i2c_smbus_read_byte_data(client, reg);
 	if (ret < 0) {
@@ -243,15 +311,8 @@ static int __sc8527_read_byte(struct i2c_client *client, u8 reg, u8 *data)
 	}
 
 	if (ret < 0) {
-		sc8527_i2c_error(chip->priv_data, true);
-		chg_err("i2c read fail after %d retries: can't read from reg 0x%02X\n", I2C_RETRY_MAX, reg);
-		err_info[0] = reg;
-		err_info[1] = ret;
-		sc8527_upload_i2c_err_info(chip->priv_data, true, err_info);
-		sc8527_handle_i2c_error_after_retry(chip->priv_data, 1);
 		return ret;
 	}
-	sc8527_handle_i2c_error_after_retry(chip->priv_data, 0);
 
 	*data = (u8) ret;
 
@@ -262,8 +323,6 @@ static int __sc8527_write_byte(struct i2c_client *client, int reg, u8 val)
 {
 	s32 ret;
 	int retry = I2C_RETRY_MAX;
-	struct oplus_voocphy_manager *chip = i2c_get_clientdata(client);
-	s32 err_info[2] = { 0 };
 
 	ret = i2c_smbus_write_byte_data(client, reg, val);
 	if (ret < 0) {
@@ -278,22 +337,16 @@ static int __sc8527_write_byte(struct i2c_client *client, int reg, u8 val)
 	}
 
 	if (ret < 0) {
-		sc8527_i2c_error(chip->priv_data, true);
-		chg_err("i2c write fail after %d retries: can't write 0x%02X to reg 0x%02X: %d\n",
-		       I2C_RETRY_MAX, val, reg, ret);
-		err_info[0] = reg;
-		err_info[1] = ret;
-		sc8527_upload_i2c_err_info(chip->priv_data, false, err_info);
-		sc8527_handle_i2c_error_after_retry(chip->priv_data, 1);
 		return ret;
 	}
-	sc8527_handle_i2c_error_after_retry(chip->priv_data, 0);
+
 	return 0;
 }
 
 static int sc8527_read_byte(struct sc8527_device *chip, u8 reg, u8 *data)
 {
 	int ret;
+	s32 err_info[2] = { 0 };
 
 	if (chip == NULL) {
 		chg_err("sc8527 chip is NULL\n");
@@ -304,12 +357,25 @@ static int sc8527_read_byte(struct sc8527_device *chip, u8 reg, u8 *data)
 	ret = __sc8527_read_byte(chip->client, reg, data);
 	mutex_unlock(&chip->i2c_rw_lock);
 
+	if (ret < 0) {
+		sc8527_i2c_error(chip, true);
+		chg_err("i2c read fail after %d retries: can't read from reg 0x%02X\n", I2C_RETRY_MAX, reg);
+		err_info[0] = reg;
+		err_info[1] = ret;
+		sc8527_upload_i2c_err_info(chip, true, err_info);
+		sc8527_handle_i2c_error_after_retry(chip, 1);
+	} else {
+		sc8527_i2c_error(chip, false);
+		sc8527_handle_i2c_error_after_retry(chip, 0);
+	}
+
 	return ret;
 }
 
 static int sc8527_write_byte(struct sc8527_device *chip, u8 reg, u8 data)
 {
 	int ret;
+	s32 err_info[2] = { 0 };
 
 	if (chip == NULL) {
 		chg_err("sc8527 chip is NULL\n");
@@ -319,6 +385,19 @@ static int sc8527_write_byte(struct sc8527_device *chip, u8 reg, u8 data)
 	mutex_lock(&chip->i2c_rw_lock);
 	ret = __sc8527_write_byte(chip->client, reg, data);
 	mutex_unlock(&chip->i2c_rw_lock);
+
+	if (ret < 0) {
+		sc8527_i2c_error(chip, true);
+		chg_err("i2c write fail after %d retries: can't write 0x%02X to reg 0x%02X: %d\n",
+		       I2C_RETRY_MAX, data, reg, ret);
+		err_info[0] = reg;
+		err_info[1] = ret;
+		sc8527_upload_i2c_err_info(chip, false, err_info);
+		sc8527_handle_i2c_error_after_retry(chip, 1);
+	} else {
+		sc8527_i2c_error(chip, false);
+		sc8527_handle_i2c_error_after_retry(chip, 0);
+	}
 
 	return ret;
 }
@@ -330,6 +409,7 @@ static int sc8527_update_bits(struct i2c_client *client, u8 reg,
 	struct oplus_voocphy_manager *voocphy = i2c_get_clientdata(client);
 	int ret;
 	u8 tmp;
+	s32 err_info[2] = { 0 };
 
 	if (voocphy == NULL) {
 		chg_err("voocphy is NULL\n");
@@ -343,7 +423,14 @@ static int sc8527_update_bits(struct i2c_client *client, u8 reg,
 
 	mutex_lock(&chip->i2c_rw_lock);
 	ret = __sc8527_read_byte(client, reg, &tmp);
-	if (ret) {
+	if (ret < 0) {
+		mutex_unlock(&chip->i2c_rw_lock);
+		sc8527_i2c_error(chip, true);
+		chg_err("i2c read fail after %d retries: can't read from reg 0x%02X\n", I2C_RETRY_MAX, reg);
+		err_info[0] = reg;
+		err_info[1] = ret;
+		sc8527_upload_i2c_err_info(chip, true, err_info);
+		sc8527_handle_i2c_error_after_retry(chip, 1);
 		chg_err("failed to read %02X register, ret=%d\n", reg, ret);
 		goto out;
 	}
@@ -352,10 +439,22 @@ static int sc8527_update_bits(struct i2c_client *client, u8 reg,
 	tmp |= data & mask;
 
 	ret = __sc8527_write_byte(client, reg, tmp);
-	if (ret)
-		chg_err("failed to write %02X register, ret=%d\n", reg, ret);
-out:
 	mutex_unlock(&chip->i2c_rw_lock);
+	if (ret < 0) {
+		sc8527_i2c_error(chip, true);
+		chg_err("i2c write fail after %d retries: can't write 0x%02X to reg 0x%02X: %d\n",
+		       I2C_RETRY_MAX, tmp, reg, ret);
+		err_info[0] = reg;
+		err_info[1] = ret;
+		sc8527_upload_i2c_err_info(chip, false, err_info);
+		sc8527_handle_i2c_error_after_retry(chip, 1);
+		chg_err("failed to write %02X register, ret=%d\n", reg, ret);
+		goto out;
+	} else {
+		sc8527_i2c_error(chip, false);
+		sc8527_handle_i2c_error_after_retry(chip, 0);
+	}
+out:
 	chg_err("write 0x%02X : 0x%02X\n", reg, tmp);
 	return ret;
 }
@@ -365,6 +464,7 @@ static s32 sc8527_read_word(struct i2c_client *client, u8 reg)
 	s32 ret;
 	struct oplus_voocphy_manager *voocphy = i2c_get_clientdata(client);
 	struct sc8527_device *chip;
+	s32 err_info[2] = { 0 };
 
 	if (voocphy == NULL) {
 		chg_err("voocphy is NULL\n");
@@ -389,16 +489,19 @@ static s32 sc8527_read_word(struct i2c_client *client, u8 reg)
 				break;
 		}
 	}
+	mutex_unlock(&chip->i2c_rw_lock);
 
 	if (ret < 0) {
-		sc8527_i2c_error(voocphy->priv_data, true);
+		sc8527_i2c_error(chip, true);
 		chg_err("i2c read word fail after %d retries: can't read reg:0x%02X \n", I2C_RETRY_MAX, reg);
+		err_info[0] = reg;
+		err_info[1] = ret;
+		sc8527_upload_i2c_err_info(chip, true, err_info);
 		sc8527_handle_i2c_error_after_retry(chip, 1);
-		mutex_unlock(&chip->i2c_rw_lock);
 		return ret;
 	}
+	sc8527_i2c_error(chip, false);
 	sc8527_handle_i2c_error_after_retry(chip, 0);
-	mutex_unlock(&chip->i2c_rw_lock);
 
 	return ret;
 }
@@ -408,6 +511,7 @@ static s32 sc8527_write_word(struct i2c_client *client, u8 reg, u16 val)
 	s32 ret;
 	struct oplus_voocphy_manager *voocphy = i2c_get_clientdata(client);
 	struct sc8527_device *chip;
+	s32 err_info[2] = { 0 };
 
 	if (voocphy == NULL) {
 		chg_err("voocphy is NULL\n");
@@ -432,16 +536,19 @@ static s32 sc8527_write_word(struct i2c_client *client, u8 reg, u16 val)
 				break;
 		}
 	}
+	mutex_unlock(&chip->i2c_rw_lock);
 
 	if (ret < 0) {
-		sc8527_i2c_error(voocphy->priv_data, true);
+		sc8527_i2c_error(chip, true);
 		chg_err("i2c write word fail after %d retries: can't write 0x%02X to reg:0x%02X\n", I2C_RETRY_MAX, val, reg);
+		err_info[0] = reg;
+		err_info[1] = ret;
+		sc8527_upload_i2c_err_info(chip, false, err_info);
 		sc8527_handle_i2c_error_after_retry(chip, 1);
-		mutex_unlock(&chip->i2c_rw_lock);
 		return ret;
 	}
+	sc8527_i2c_error(chip, false);
 	sc8527_handle_i2c_error_after_retry(chip, 0);
-	mutex_unlock(&chip->i2c_rw_lock);
 
 	return 0;
 }
@@ -486,6 +593,7 @@ static int sc8527_read_i2c_block(struct i2c_client *client, u8 reg, u8 length, u
 	struct oplus_voocphy_manager *voocphy = i2c_get_clientdata(client);
 	int rc = 0;
 	int retry;
+	s32 err_info[2] = { 0 };
 
 	if (voocphy == NULL) {
 		chg_err("voocphy is NULL\n");
@@ -511,16 +619,19 @@ static int sc8527_read_i2c_block(struct i2c_client *client, u8 reg, u8 length, u
 				break;
 		}
 	}
+	mutex_unlock(&chip->i2c_rw_lock);
 
 	if (rc < 0) {
 		sc8527_i2c_error(chip, true);
 		chg_err("read err after %d retries, rc = %d,\n", I2C_RETRY_MAX, rc);
+		err_info[0] = reg;
+		err_info[1] = rc;
+		sc8527_upload_i2c_err_info(chip, true, err_info);
 		sc8527_handle_i2c_error_after_retry(chip, 1);
 	} else {
 		sc8527_i2c_error(chip, false);
 		sc8527_handle_i2c_error_after_retry(chip, 0);
 	}
-	mutex_unlock(&chip->i2c_rw_lock);
 
 	return rc;
 }
@@ -530,6 +641,7 @@ static int sc8527_write_data(struct sc8527_device *chip, u8 addr,
 {
 	u8 *buf;
 	int rc = 0;
+	s32 err_info[2] = { 0 };
 
 	buf = kzalloc(length + 1, GFP_KERNEL);
 	if (!buf) {
@@ -542,7 +654,7 @@ static int sc8527_write_data(struct sc8527_device *chip, u8 addr,
 
 	mutex_lock(&chip->i2c_rw_lock);
 	rc = i2c_master_send(chip->client, buf, length + 1);
-	if (rc < length + 1) {
+	if (rc < 0) {
 		int retry = I2C_RETRY_MAX;
 		while (retry > 0 && rc < length + 1) {
 			usleep_range(5000, 5000);
@@ -553,18 +665,45 @@ static int sc8527_write_data(struct sc8527_device *chip, u8 addr,
 				break;
 		}
 	}
+	mutex_unlock(&chip->i2c_rw_lock);
 
-	if (rc < length + 1) {
+	if (rc < 0) {
+		sc8527_i2c_error(chip, true);
 		chg_err("write 0x%04x error after %d retries, ret = %d \n", addr, I2C_RETRY_MAX, rc);
+		err_info[0] = addr;
+		err_info[1] = rc;
+		sc8527_upload_i2c_err_info(chip, false, err_info);
 		sc8527_handle_i2c_error_after_retry(chip, 1);
-		mutex_unlock(&chip->i2c_rw_lock);
 		kfree(buf);
 		rc = rc < 0 ? rc : -EIO;
 		return rc;
 	}
+	sc8527_i2c_error(chip, false);
 	sc8527_handle_i2c_error_after_retry(chip, 0);
-	mutex_unlock(&chip->i2c_rw_lock);
 	kfree(buf);
+	return rc;
+}
+
+static int sc8527_write_bit_mask(struct sc8527_device *chip, u8 reg,
+	u8 mask, u8 data)
+{
+	u8 temp = 0;
+	int rc = 0;
+
+	mutex_lock(&chip->i2c_rw_lock);
+	rc = __sc8527_read_byte(chip->client, reg, &temp);
+	if (rc) {
+		chg_err("read failed: reg=%02X, rc=%d\n", reg, rc);
+		goto out;
+	}
+
+	temp = (data & mask) | (temp & (~mask));
+	rc = __sc8527_write_byte(chip->client, reg, temp);
+	if (rc)
+		chg_err("write failed: reg=%02X, rc=%d\n", reg, rc);
+
+out:
+	mutex_unlock(&chip->i2c_rw_lock);
 	return rc;
 }
 
@@ -573,6 +712,7 @@ static int sc8527_read_data(struct sc8527_device *chip, u8 addr, u8 *buf, int le
 {
 	int rc = 0;
 	struct i2c_msg msg[I2C_MSG_LEN] = {0};
+	s32 err_info[2] = { 0 };
 
 	if (!chip)
 		return -EINVAL;
@@ -600,17 +740,19 @@ static int sc8527_read_data(struct sc8527_device *chip, u8 addr, u8 *buf, int le
 				break;
 		}
 	}
+	mutex_unlock(&chip->i2c_rw_lock);
 
 	if (rc < 0) {
 		chg_err("read 0x%02x error after %d retries, rc=%d\n", addr, I2C_RETRY_MAX, rc);
 		sc8527_i2c_error(chip, true);
+		err_info[0] = addr;
+		err_info[1] = rc;
+		sc8527_upload_i2c_err_info(chip, true, err_info);
 		sc8527_handle_i2c_error_after_retry(chip, 1);
-		mutex_unlock(&chip->i2c_rw_lock);
 		return rc;
 	}
 	sc8527_i2c_error(chip, false);
 	sc8527_handle_i2c_error_after_retry(chip, 0);
-	mutex_unlock(&chip->i2c_rw_lock);
 	return 0;
 }
 
@@ -876,23 +1018,40 @@ static u8 sc8527_get_chg_auto_mode(struct oplus_voocphy_manager *chip)
 	return value;
 }
 
-static int sc8527_set_chg_auto_mode(struct oplus_voocphy_manager *chip, bool enable)
+static int sc8527_set_chg_auto_mode(struct oplus_chg_ic_dev *ic_dev, bool enable)
 {
 	int ret = 0;
+	struct sc8527_device *sc8527_chip;
+	struct oplus_voocphy_manager *voocphy;
 
-	if (!chip) {
-		chg_err("chip is null\n");
-		return -1;
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
 	}
+	sc8527_chip = oplus_chg_ic_get_priv_data(ic_dev);
+	if (sc8527_chip == NULL) {
+		chg_err("sc8527_chip is NULL");
+		return -ENODEV;
+	}
+	voocphy = sc8527_chip->voocphy;
 
 	chg_info("enable = %d\n", enable);
 
-	if (enable && (sc8527_get_chg_auto_mode(chip) == SC8527_CHG_FIX_MODE))
-		ret = sc8527_update_bits(chip->client, SC8527_REG_15,
+	/* After shutdown, only allow setting to 0 (disable), not to 1 (enable) */
+	if (atomic_read(&sc8527_chip->in_shutdown)) {
+		ret = sc8527_update_bits(voocphy->client, SC8527_REG_15,
+			SC8527_CHG_MODE_MASK,
+			SC8527_CHG_FIX_MODE);
+		chg_err("set auto mode to 0 after shutdown\n");
+		return 0;
+	}
+
+	if (enable && (sc8527_get_chg_auto_mode(voocphy) == SC8527_CHG_FIX_MODE))
+		ret = sc8527_update_bits(voocphy->client, SC8527_REG_15,
 					 SC8527_CHG_MODE_MASK,
 					 SC8527_CHG_AUTO_MODE);
-	else if (!enable && (sc8527_get_chg_auto_mode(chip) == SC8527_CHG_AUTO_MODE))
-		ret = sc8527_update_bits(chip->client, SC8527_REG_15,
+	else if (!enable && (sc8527_get_chg_auto_mode(voocphy) == SC8527_CHG_AUTO_MODE))
+		ret = sc8527_update_bits(voocphy->client, SC8527_REG_15,
 					 SC8527_CHG_MODE_MASK,
 					 SC8527_CHG_FIX_MODE);
 	if (ret < 0)
@@ -909,7 +1068,7 @@ static void sc8527_set_pd_svooc_config(struct oplus_voocphy_manager *chip, bool 
 	}
 
 	sc8527_write_byte(chip->priv_data, SC8527_REG_04, 0x36); /* WD:1000ms */
-	sc8527_write_byte(chip->priv_data, SC8527_REG_2C, 0xd1); /* Loose_det=1 */
+	sc8527_write_byte(chip->priv_data, SC8527_REG_2C, 0xd9); /* Loose_det=1 */
 
 	chg_info("pd svooc \n");
 }
@@ -948,7 +1107,8 @@ static int sc8527_reset_voocphy(struct oplus_voocphy_manager *chip)
 	sc8527_write_byte(chip->priv_data, SC8527_REG_26, 0x00);
 	/* disable vooc phy irq */
 	sc8527_write_byte(chip->priv_data, SC8527_REG_29, 0x7F); /* mask all flag */
-	sc8527_write_byte(chip->priv_data, SC8527_REG_10, 0x79); /* disable irq */
+	sc8527_write_byte(chip->priv_data, SC8527_REG_10, 0xfd); /* Masked Pulse_filtered, RX_Start,Tx_Done */
+	sc8527_update_bits(chip->client, SC8527_REG_39, 0x25, 0x25);
 	/* set D+ HiZ */
 	sc8527_write_byte(chip->priv_data, SC8527_REG_20, 0xc0);
 
@@ -977,7 +1137,7 @@ static int sc8527_reactive_voocphy(struct oplus_voocphy_manager *chip)
 	/* dpdm */
 	sc8527_write_byte(chip->priv_data, SC8527_REG_20, 0x21);
 	sc8527_write_byte(chip->priv_data, SC8527_REG_21, 0x80);
-	sc8527_write_byte(chip->priv_data, SC8527_REG_2C, 0xD1);
+	sc8527_write_byte(chip->priv_data, SC8527_REG_2C, 0xd9);
 
 	/* clear tx data */
 	sc8527_write_byte(chip->priv_data, SC8527_REG_25, 0x00);
@@ -1015,7 +1175,7 @@ static int sc8527_init_vooc(struct oplus_voocphy_manager *chip)
 	msleep(1);
 	sc8527_write_byte(chip->priv_data, SC8527_REG_20, 0x21); /* VOOC_CTRL:disable,no handshake */
 	sc8527_write_byte(chip->priv_data, SC8527_REG_21, 0x80); /* VOOC_CTRL:disable,no handshake */
-	sc8527_write_byte(chip->priv_data, SC8527_REG_2C, 0xD1); /* VOOC_CTRL:disable,no handshake */
+	sc8527_write_byte(chip->priv_data, SC8527_REG_2C, 0xd9); /* VOOC_CTRL:disable,no handshake */
 	sc8527_write_byte(chip->priv_data, SC8527_REG_29, 0x25); /* mask sedseq flag,rx start,tx done */
 	/* sc8527_vac_inrange_enable(chip, SC8527_VAC_INRANGE_DISABLE); */
 
@@ -1031,7 +1191,8 @@ static void sc8527_hardware_init(struct oplus_voocphy_manager *chip)
 	sc8527_write_byte(chip->priv_data, SC8527_REG_06, 0x85); /* enable  audio mode */
 	sc8527_write_byte(chip->priv_data, SC8527_REG_08, 0xA6); /* REF_SKIP_R 40mv */
 	sc8527_write_byte(chip->priv_data, SC8527_REG_29, 0x05); /* Masked Pulse_filtered, RX_Start,Tx_Done,soft intflag */
-	sc8527_write_byte(chip->priv_data, SC8527_REG_10, 0x79); /* Masked Pulse_filtered, RX_Start,Tx_Done */
+	sc8527_write_byte(chip->priv_data, SC8527_REG_10, 0xfd); /* Masked Pulse_filtered, RX_Start,Tx_Done */
+	sc8527_update_bits(chip->client, SC8527_REG_39, 0x25, 0x25);
 	sc8527_write_byte(chip->priv_data, SC8527_REG_03, 0xFF); /* set rvs and fwd ocp */
 	sc8527_write_byte(chip->priv_data, SC8527_REG_12, 0x10); /* set OCP trigger time to 10us */
 #ifndef CONFIG_DISABLE_OPLUS_FUNCTION
@@ -1086,7 +1247,7 @@ static int sc8527_dump_registers(struct oplus_voocphy_manager *chip)
 static int sc8527_svooc_hw_setting(struct oplus_voocphy_manager *chip)
 {
 	sc8527_write_byte(chip->priv_data, SC8527_REG_04, 0x36); /* WD:1000ms */
-	sc8527_write_byte(chip->priv_data, SC8527_REG_2C, 0xd1); /* Loose_det=1 */
+	sc8527_write_byte(chip->priv_data, SC8527_REG_2C, 0xd9); /* Loose_det=1 */
 
 	return 0;
 }
@@ -1113,9 +1274,47 @@ int sc8527_set_cv_volt(struct oplus_chg_ic_dev *ic_dev, int voltage_mv)
 	return sc8527_update_bits(chip->client, SC8527_REG_16, SC8527_CV_VOLT_MASK, bits_shift);
 }
 
+static int sc8527_boost_get_cv(struct oplus_chg_ic_dev *ic_dev, int *cv)
+{
+	int ret = 0;
+	u8 value = 0;
+	int bits = 0;
+	int cv_mv = 0;
+	struct sc8527_device *chip;
+
+	if (ic_dev == NULL) {
+		chg_err("oplus_chg_ic_dev is NULL");
+		return -ENODEV;
+	}
+	if (cv == NULL) {
+		chg_err("cv is NULL");
+		return -EINVAL;
+	}
+	chip = oplus_chg_ic_get_priv_data(ic_dev);
+
+	if (!chip) {
+		chg_err("chip is null\n");
+		return -ENODEV;
+	}
+
+	ret = sc8527_read_byte(chip, SC8527_REG_16, &value);
+	if (ret < 0) {
+		chg_err("i2c error:%d\n", ret);
+		return ret;
+	}
+
+	bits = (value & SC8527_CV_VOLT_MASK) >> SC8527_CV_VOLT_SHIFT;
+	cv_mv = bits * STEP_50MV + V1X_CV_OFFSET;
+	*cv = cv_mv;
+
+	chg_info("cv = %d, bits = %d\n", *cv, bits);
+
+	return 0;
+}
+
 int sc8527_set_v1x_th_cv2cp_l(struct sc8527_device *chip, int voltage_mv)
 {
-	int bits = volt_curr_to_bits(voltage_mv, V1X_l_TH_OFFSET, STEP_50MV);
+	int bits = volt_curr_to_bits(voltage_mv, V1X_L_TH_OFFSET, STEP_50MV);
 	int bits_shift = bits << SC8527_V1X_TH_CV2CP_L_SHIFT;
 
 	bits_shift = bits_shift > SC8527_V1X_TH_CV2CP_L_MASK ? SC8527_V1X_TH_CV2CP_L_MASK : bits_shift;
@@ -1178,7 +1377,7 @@ static int sc8527_get_in_cv_mode(struct oplus_chg_ic_dev *ic_dev, bool *cv_mode)
 static int sc8527_vooc_hw_setting(struct oplus_voocphy_manager *chip)
 {
 	sc8527_write_byte(chip->priv_data, SC8527_REG_04, 0x46); /* WD:5000ms */
-	sc8527_write_byte(chip->priv_data, SC8527_REG_2C, 0xd1); /* Loose_det=1 */
+	sc8527_write_byte(chip->priv_data, SC8527_REG_2C, 0xd9); /* Loose_det=1 */
 
 	return 0;
 }
@@ -1348,6 +1547,404 @@ static int sc8527_track_upload_cp_err_info_simple(struct sc8527_device *chip, in
 
 	return 0;
 }
+/* Get register field pointer by index - structure fields must match reg_infos order */
+static uint8_t *sc8527_get_reg_field(struct sc8527_register_values *regs, int index)
+{
+	uint8_t *base = (uint8_t *)regs;
+	if (index >= 0 && index < SC8527_REG_COUNT)
+		return base + index;
+	return NULL;
+}
+
+/* Read register values from chip and fill into sc8527_register_values structure */
+static void sc8527_read_register_values(struct sc8527_device *chip,
+					struct sc8527_register_values *regs)
+{
+	int i, ret;
+	uint8_t *field_ptr;
+
+	if (!chip || !regs)
+		return;
+
+	for (i = 0; i < SC8527_REG_COUNT; i++) {
+		field_ptr = sc8527_get_reg_field(regs, i);
+		if (!field_ptr)
+			continue;
+		ret = sc8527_read_byte(chip, sc8527_reg_infos[i].addr, field_ptr);
+		if (ret < 0) {
+			chg_err("Failed to read register 0x%02x: %d\n",
+				sc8527_reg_infos[i].addr, ret);
+			*field_ptr = 0;
+		}
+	}
+}
+
+/* Get UI SOC from common topic */
+static int sc8527_get_ui_soc(void)
+{
+	struct oplus_mms *comm_topic;
+	union mms_msg_data data_soc = { 0 };
+
+	comm_topic = oplus_mms_get_by_name("common");
+	if (comm_topic && (oplus_mms_get_item_data(comm_topic, COMM_ITEM_UI_SOC, &data_soc, false) == 0))
+		return data_soc.intval;
+	return -1;
+}
+
+/* Format register dump string */
+static int sc8527_format_register_dump(const struct sc8527_register_values *regs,
+					const char *trigger_source, int ui_soc,
+					char *buf, size_t buf_size)
+{
+	int i;
+	size_t index = 0;
+
+	/* Format trigger source identifier */
+	if (trigger_source && trigger_source[0] != '\0')
+		index += scnprintf(buf + index, buf_size - index,
+				   "$$trigger_source@@%s$$reg_info@@", trigger_source);
+	else
+		index += scnprintf(buf + index, buf_size - index, "$$reg_info@@");
+
+
+	/* Format register address list: 9/a/b/c/d/e/15/1a/1b/37/38/39/3a */
+	for (i = 0; i < SC8527_REG_COUNT; i++) {
+		if (i == 0)
+			index += scnprintf(buf + index, buf_size - index, "%s",
+					   sc8527_reg_infos[i].addr_str);
+		else
+			index += scnprintf(buf + index, buf_size - index, "/%s",
+					   sc8527_reg_infos[i].addr_str);
+	}
+	index += scnprintf(buf + index, buf_size - index, ":[");
+
+	/* Format register values array from regs structure */
+	for (i = 0; i < SC8527_REG_COUNT; i++) {
+		uint8_t *field_ptr = sc8527_get_reg_field((struct sc8527_register_values *)regs, i);
+		uint8_t reg_val = field_ptr ? *field_ptr : 0;
+		if (i == 0)
+			index += scnprintf(buf + index, buf_size - index, "0x%02x", reg_val);
+		else
+			index += scnprintf(buf + index, buf_size - index, ", 0x%02x", reg_val);
+	}
+	index += scnprintf(buf + index, buf_size - index, "]");
+
+	/* Add UI SOC information */
+	if (ui_soc >= 0)
+		index += scnprintf(buf + index, buf_size - index, "$$ui_soc@@%d", ui_soc);
+
+	return index;
+}
+
+static void sc8527_upload_all_registers(struct sc8527_device *chip,
+					const struct sc8527_register_values *regs,
+					const char *trigger_source)
+{
+	char *buf = NULL;
+	int ui_soc;
+	int curr_time;
+	static int upload_count = 0;
+	static int pre_upload_time = 0;
+
+	if (!chip || !regs)
+		return;
+
+	curr_time = sc8527_track_get_local_time_s();
+	if (curr_time - pre_upload_time > TRACK_DEVICE_ABNORMAL_UPLOAD_PERIOD)
+		upload_count = 0;
+
+	if (upload_count > TRACK_UPLOAD_COUNT_MAX) {
+		chg_info("upload_all_registers upload_count = %d > max %d, should return\n",
+			 upload_count, TRACK_UPLOAD_COUNT_MAX);
+		return;
+	}
+
+	upload_count++;
+	pre_upload_time = sc8527_track_get_local_time_s();
+
+	/* Allocate buffer for register dump string */
+	buf = kzalloc(ERR_MSG_BUF, GFP_KERNEL);
+	if (!buf) {
+		chg_err("Failed to allocate buffer for register dump\n");
+		return;
+	}
+
+	/* Get UI SOC */
+	ui_soc = sc8527_get_ui_soc();
+
+	/* Format register dump string */
+	sc8527_format_register_dump(regs, trigger_source, ui_soc, buf, ERR_MSG_BUF);
+
+	chg_info("Upload all registers (trigger: %s): %s\n",
+		 trigger_source ? trigger_source : "unknown", buf);
+
+	/* Upload register dump via error message */
+	sc8527_publish_ic_err_msg(OPLUS_IC_ERR_CP, 0, "%s", buf);
+
+	kfree(buf);
+}
+
+#define DISCHG_BOOST_ERR_FLAG_OBTAIN_DELAY_MS	2000
+#define DISCHG_BOOST_ERR_FLAG_OBTAIN_RETRY_MAX	3
+
+static int sc8527_dischg_boost_err_flag_obtain_mutual_notifier_call(
+	struct notifier_block *nb, unsigned long param, void *v)
+{
+	struct sc8527_device *chip;
+	struct oplus_chg_mutual_notifier *notifier;
+	unsigned int err_flag = 0;
+	u8 reg0c_val = 0, reg0d_val = 0, reg0e_val = 0, reg1b_val = 0;
+	char *str, *token;
+
+	notifier = container_of(nb, struct oplus_chg_mutual_notifier, nb);
+	chip = container_of(notifier, struct sc8527_device, dischg_boost_err_flag_mutual);
+
+	if (mutual_info_to_cmd(param) != CMD_DISCHG_BOOST_ERR_OBTAIN)
+		goto out;
+
+	if (mutual_info_to_data_size(param) != sizeof(chip->dischg_boost_err_flag_data)) {
+		chg_err("data_len is not ok, datas is invalid\n");
+		return NOTIFY_DONE;
+	}
+
+	if (v)
+		memmove(chip->dischg_boost_err_flag_data, v, sizeof(chip->dischg_boost_err_flag_data));
+
+	chip->dischg_boost_err_flag_data[sizeof(chip->dischg_boost_err_flag_data) - 1] = '\0';
+	chg_info("dischg_boost_err_flag_data:%s\n", chip->dischg_boost_err_flag_data);
+
+	/* Parse data format: "dischg_boost_err,0x%08X,0x%02X,0x%02X,0x%02X,0x%02X" */
+	str = chip->dischg_boost_err_flag_data;
+	if (!strstr(str, "dischg_boost_err")) {
+		chg_info("no dischg_boost_err tag found\n");
+		goto out;
+	}
+
+	/* Skip "dischg_boost_err," */
+	token = strstr(str, "dischg_boost_err,");
+	if (!token) {
+		chg_err("invalid format\n");
+		goto out;
+	}
+	token += strlen("dischg_boost_err,");
+
+	/* Parse err_flag */
+	if (sscanf(token, "0x%x", &err_flag) != 1) {
+		chg_err("failed to parse err_flag\n");
+		goto out;
+	}
+
+	/* Find next comma */
+	token = strchr(token, ',');
+	if (!token) {
+		chg_err("invalid format: no reg0c\n");
+		goto out;
+	}
+	token++;
+
+	/* Parse reg0c */
+	if (sscanf(token, "0x%hhx", &reg0c_val) != 1) {
+		chg_err("failed to parse reg0c\n");
+		goto out;
+	}
+
+	/* Find next comma */
+	token = strchr(token, ',');
+	if (!token) {
+		chg_err("invalid format: no reg0d\n");
+		goto out;
+	}
+	token++;
+
+	/* Parse reg0d */
+	if (sscanf(token, "0x%hhx", &reg0d_val) != 1) {
+		chg_err("failed to parse reg0d\n");
+		goto out;
+	}
+	chip->reg0d_val = reg0d_val;
+
+	/* Find next comma */
+	token = strchr(token, ',');
+	if (!token) {
+		chg_err("invalid format: no reg0e\n");
+		goto out;
+	}
+	token++;
+
+	/* Parse reg0e */
+	if (sscanf(token, "0x%hhx", &reg0e_val) != 1) {
+		chg_err("failed to parse reg0e\n");
+		goto out;
+	}
+
+	/* Find next comma */
+	token = strchr(token, ',');
+	if (!token) {
+		chg_err("invalid format: no reg1b\n");
+		goto out;
+	}
+	token++;
+
+	/* Parse reg1b */
+	if (sscanf(token, "0x%hhx", &reg1b_val) != 1) {
+		chg_err("failed to parse reg1b\n");
+		goto out;
+	}
+
+	/* If err_flag is not zero, upload track */
+	if (err_flag != 0) {
+		chg_err("detected error flag from partition: 0x%08X\n", err_flag);
+		sc8527_upload_dischg_boost_err_flag_track(chip, err_flag, reg0c_val, reg0d_val, reg0e_val, reg1b_val);
+	}
+
+
+out:
+	chg_info(": parsed: err_flag=0x%08X, reg0c=0x%02X, reg0d=0x%02X, reg0e=0x%02X, reg1b=0x%02X\n",
+		err_flag, reg0c_val, reg0d_val, reg0e_val, reg1b_val);
+	schedule_work(&chip->power_on_mode_switch_work);
+	return NOTIFY_OK;
+}
+
+static int sc8527_dischg_boost_err_flag_mutual_notify_reg(struct sc8527_device *chip)
+{
+	int rc = 0;
+
+	chip->dischg_boost_err_flag_mutual.name = "dischg_boost_err_obtain";
+	chip->dischg_boost_err_flag_mutual.cmd = CMD_DISCHG_BOOST_ERR_OBTAIN;
+	chip->dischg_boost_err_flag_mutual.nb.notifier_call = sc8527_dischg_boost_err_flag_obtain_mutual_notifier_call;
+	rc = oplus_chg_reg_mutual_notifier(&chip->dischg_boost_err_flag_mutual);
+	if (rc < 0) {
+		chg_err("register dischg boost err flag obtain mutual event notifier error, rc=%d\n", rc);
+		return rc;
+	}
+
+	return 0;
+}
+
+static int sc8527_upload_dischg_boost_err_flag_track(struct sc8527_device *chip,
+						     unsigned int err_flag,
+						     u8 reg0c_val, u8 reg0d_val,
+						     u8 reg0e_val, u8 reg1b_val)
+{
+	int index = 0;
+	int curr_time;
+	static int upload_count = 0;
+	static int pre_upload_time = 0;
+	char temp_str[REASON_LENGTH_MAX] = {0};
+	struct oplus_mms *err_topic;
+	struct mms_msg *msg = NULL;
+	int rc = 0;
+
+	if (!chip) {
+		chg_err("chip is NULL\n");
+		return -EINVAL;
+	}
+
+	err_topic = oplus_mms_get_by_name("error");
+	if (!err_topic) {
+		chg_err("error topic not found\n");
+		return -ENODEV;
+	}
+
+	curr_time = sc8527_track_get_local_time_s();
+	if (curr_time - pre_upload_time > TRACK_DEVICE_ABNORMAL_UPLOAD_PERIOD)
+		upload_count = 0;
+
+	if (upload_count > TRACK_UPLOAD_COUNT_MAX) {
+		chg_info("dischg_boost_err_flag upload_count = %d > max %d, should return\n",
+			 upload_count, TRACK_UPLOAD_COUNT_MAX);
+		return 0;
+	}
+
+	upload_count++;
+	pre_upload_time = sc8527_track_get_local_time_s();
+
+	index += scnprintf(&(temp_str[index]), REASON_LENGTH_MAX - index, "$$device_id@@%s", "sc8527");
+	index += scnprintf(&(temp_str[index]),
+		REASON_LENGTH_MAX - index, "$$err_scene@@sc8527_dischg_boost_err");
+	index += scnprintf(&(temp_str[index]),
+		REASON_LENGTH_MAX - index,
+		"$$err_reason@@0x%08X", err_flag);
+	index += scnprintf(&(temp_str[index]),
+		REASON_LENGTH_MAX - index,
+		"$$reg0c@@0x%02X", reg0c_val);
+	index += scnprintf(&(temp_str[index]),
+		REASON_LENGTH_MAX - index,
+		"$$reg0d@@0x%02X", reg0d_val);
+	index += scnprintf(&(temp_str[index]),
+		REASON_LENGTH_MAX - index,
+		"$$reg0e@@0x%02X", reg0e_val);
+	index += scnprintf(&(temp_str[index]),
+		REASON_LENGTH_MAX - index,
+		"$$reg1b@@0x%02X", reg1b_val);
+	index += scnprintf(&(temp_str[index]),
+		REASON_LENGTH_MAX - index,
+		"$$err_position@@%s", "main");
+
+	msg = oplus_mms_alloc_str_msg(MSG_TYPE_ITEM, MSG_PRIO_MEDIUM,
+		ERR_ITEM_ERR_PHY_CP_INFO, temp_str);
+	if (msg == NULL) {
+		chg_err("alloc msg error\n");
+		return -ENOMEM;
+	}
+	rc = oplus_mms_publish_msg_sync(err_topic, msg);
+	if (rc < 0) {
+		chg_err("publish msg error, rc=%d\n", rc);
+		kfree(msg);
+	}
+
+	return 0;
+}
+
+static void sc8527_get_dischg_boost_err_flag_work_func(struct work_struct *work)
+{
+	struct sc8527_device *chip = container_of(work, struct sc8527_device,
+						   get_dischg_boost_err_flag_work.work);
+	int mutual_rc;
+	static int try_count = DISCHG_BOOST_ERR_FLAG_OBTAIN_RETRY_MAX;
+
+	if (!chip) {
+		chg_err("chip is NULL\n");
+		return;
+	}
+
+	chg_info("get_dischg_boost_err_flag_work_func: requesting err flag from partition, try_count=%d\n", try_count);
+
+	/* Request AIDL layer to read partition and return data via mutual */
+	mutual_rc = oplus_chg_set_mutual_cmd(CMD_DISCHG_BOOST_ERR_OBTAIN, 0, NULL);
+	if (mutual_rc != CMD_ACK_OK && try_count--) {
+		/* Retry if AIDL service not ready yet */
+		chg_info("AIDL service not ready yet, retry after 2s, remaining=%d\n", try_count);
+		schedule_delayed_work(&chip->get_dischg_boost_err_flag_work, msecs_to_jiffies(2000));
+		return;
+	}
+
+	/* Reset try_count for next time */
+	try_count = DISCHG_BOOST_ERR_FLAG_OBTAIN_RETRY_MAX;
+
+	/* Data will be received in notifier callback */
+	if (mutual_rc == CMD_ACK_OK)
+		chg_info("requested dischg boost err flag from partition successfully\n");
+	else
+		chg_err("failed to get dischg boost err flag from partition, rc=%d\n", mutual_rc);
+}
+
+static void sc8527_get_dischg_boost_err_flag_from_partition(struct sc8527_device *chip)
+{
+	static bool update = false;
+
+	if (!chip)
+		return;
+
+	if (!update) {
+		update = true;
+		chg_info("schedule get_dischg_boost_err_flag_work, delay=%d ms\n", DISCHG_BOOST_ERR_FLAG_OBTAIN_DELAY_MS);
+		schedule_delayed_work(&chip->get_dischg_boost_err_flag_work,
+				     msecs_to_jiffies(DISCHG_BOOST_ERR_FLAG_OBTAIN_DELAY_MS));
+	} else {
+		chg_info("get_dischg_boost_err_flag_from_partition already called, skip\n");
+	}
+}
 
 static int sc8527_check_register_and_upload_track(struct sc8527_device *chip)
 {
@@ -1430,10 +2027,10 @@ static int sc8527_check_register_and_upload_track(struct sc8527_device *chip)
 	}
 
 	/* Register 0Ah (STATUS2): low 3 bits (SC_EN_STAT, REG_EN_STAT, CP_SWITCHING_STAT) must be 111 */
-	if ((reg0a_val & SC8527_STATUS2_LOW_3BITS_MASK) != SC8527_STATUS2_LOW_3BITS_STANDARD_VAL) {
+	if ((reg0a_val & SC8527_STATUS2_SC_EN_STAT_MASK) != SC8527_STATUS2_SC_EN_STAT_STANDARD_VAL) {
 		err_flag |= BIT(1);
 		chg_err("Register 0x0A (STATUS2) abnormal: low 3 bits should be 0x%02x, got 0x%02x\n",
-			SC8527_STATUS2_LOW_3BITS_STANDARD_VAL, reg0a_val);
+			SC8527_STATUS2_SC_EN_STAT_STANDARD_VAL, reg0a_val);
 	}
 
 	/* Register 0Bh (STATUS3): any value, no check */
@@ -1448,7 +2045,6 @@ static int sc8527_check_register_and_upload_track(struct sc8527_device *chip)
 	/* Register 0Dh (FLAG2): V2X_UVLO_FLG(bit7), V1X_SCP_FLG(bit6), CONV_OCP_FLG(bit2) should be 0 */
 	if ((reg0d_val & SC8527_FLAG2_CHECK_MASK) != SC8527_FLAG2_CHECK_STANDARD_VAL) {
 		err_flag |= BIT(3);
-		chip->reg0d_val = reg0d_val;
 		chg_err("Register 0x0D (FLAG2) abnormal: V2X_UVLO_FLG/V1X_SCP_FLG/CONV_OCP_FLG should be 0, got 0x%02x\n",
 			reg0d_val);
 	}
@@ -1473,6 +2069,59 @@ static int sc8527_check_register_and_upload_track(struct sc8527_device *chip)
 		__func__, reg09_val, reg0a_val, reg0b_val, reg0c_val, reg0d_val, reg0e_val, reg1a_val, reg1b_val, err_flag);
 
 	if (err_flag != 0) {
+		uint8_t reg15_val = 0;
+		uint8_t reg37_val = 0;
+		uint8_t reg38_val = 0;
+		uint8_t reg39_val = 0;
+		uint8_t reg3a_val = 0;
+		struct sc8527_register_values regs = {0};
+
+		/* Read additional registers required for upload_all_registers */
+		ret = sc8527_read_byte(chip, SC8527_REG_15, &reg15_val);
+		if (ret < 0) {
+			chg_err("Failed to read register 0x15: %d\n", ret);
+			reg15_val = 0;
+		}
+		ret = sc8527_read_byte(chip, SC8527_REG_37, &reg37_val);
+		if (ret < 0) {
+			chg_err("Failed to read register 0x37: %d\n", ret);
+			reg37_val = 0;
+		}
+		ret = sc8527_read_byte(chip, SC8527_REG_38, &reg38_val);
+		if (ret < 0) {
+			chg_err("Failed to read register 0x38: %d\n", ret);
+			reg38_val = 0;
+		}
+		ret = sc8527_read_byte(chip, SC8527_REG_39, &reg39_val);
+		if (ret < 0) {
+			chg_err("Failed to read register 0x39: %d\n", ret);
+			reg39_val = 0;
+		}
+		ret = sc8527_read_byte(chip, SC8527_REG_3A, &reg3a_val);
+		if (ret < 0) {
+			chg_err("Failed to read register 0x3A: %d\n", ret);
+			reg3a_val = 0;
+		}
+
+		/* Fill register values structure */
+		regs.reg09 = reg09_val;
+		regs.reg0a = reg0a_val;
+		regs.reg0b = reg0b_val;
+		regs.reg0c = reg0c_val;
+		regs.reg0d = reg0d_val;
+		regs.reg0e = reg0e_val;
+		regs.reg15 = reg15_val;
+		regs.reg1a = reg1a_val;
+		regs.reg1b = reg1b_val;
+		regs.reg37 = reg37_val;
+		regs.reg38 = reg38_val;
+		regs.reg39 = reg39_val;
+		regs.reg3a = reg3a_val;
+
+		/* Upload all registers with same format as sc8527_upload_all_registers */
+		sc8527_upload_all_registers(chip, &regs, "exception_interrupt");
+
+		/* Also upload simple err_flag for compatibility */
 		sc8527_track_upload_cp_err_info_simple(chip, err_flag);
 	}
 
@@ -1487,6 +2136,45 @@ static void sc8527_check_register_work(struct work_struct *work)
 		return;
 
 	sc8527_check_register_and_upload_track(chip);
+}
+
+/* Work function to handle wired plug-in: upload registers and update work mode */
+static void sc8527_wired_plug_in_work(struct work_struct *work)
+{
+	struct sc8527_device *chip = container_of(work, struct sc8527_device,
+						   wired_plug_in_work);
+	struct sc8527_register_values regs = {0};
+	int work_mode = get_effective_result(chip->work_mode_votable);
+	int ret = 0;
+
+	if (!chip) {
+		chg_err("chip is NULL\n");
+		return;
+	}
+
+	chg_info("wired_plug_in_work: upload registers and update work mode\n");
+
+	sc8527_read_register_values(chip, &regs);
+	sc8527_upload_all_registers(chip, &regs, "charger_plug_in");
+
+	/* Update work mode based on votable */
+	if (!is_work_mode_votable_available(chip)) {
+		chg_err("work_mode_votable not available\n");
+		return;
+	}
+
+	if (!chip->boost_ic) {
+		chg_err("boost_ic is NULL\n");
+		return;
+	}
+	if (work_mode < 0) {
+		chg_err("get_effective_result failed, work_mode=%d\n", work_mode);
+		return;
+	}
+	chg_info("update work mode to %d based on votable\n", work_mode);
+	ret = oplus_chg_ic_func(chip->boost_ic, OPLUS_IC_FUNC_BOOST_SET_WORK_MODE, work_mode);
+	if (ret < 0)
+		chg_err("set work mode error, ret=%d\n", ret);
 }
 
 static void sc8527_wired_subs_callback(struct mms_subscribe *subs,
@@ -1504,6 +2192,14 @@ static void sc8527_wired_subs_callback(struct mms_subscribe *subs,
 		case WIRED_ITEM_PRESENT:
 			oplus_mms_get_item_data(chip->wired_topic, WIRED_ITEM_PRESENT,
 						&data, false);
+			/* Check if transition from unplugged to plugged */
+			if (!chip->wired_present && !!data.intval) {
+				chg_info("wired_present changed from %d to %d, schedule plug-in work\n",
+					 chip->wired_present, !!data.intval);
+				chip->wired_present = !!data.intval;
+				/* Schedule work to upload registers and update work mode */
+				schedule_work(&chip->wired_plug_in_work);
+			}
 			chip->wired_present = !!data.intval;
 			chg_info("wired_present changed to %d\n", chip->wired_present);
 			break;
@@ -1538,11 +2234,194 @@ static void sc8527_subscribe_wired_topic(struct oplus_mms *topic, void *prv_data
 	chg_info("initial wired_present = %d\n", chip->wired_present);
 }
 
+/* Work function to handle SOC drops to 10%: upload registers */
+static void sc8527_ultra_power_saving_work(struct work_struct *work)
+{
+	struct sc8527_device *chip = container_of(work, struct sc8527_device,
+						    ultra_power_saving_work);
+	struct sc8527_register_values regs = {0};
+
+	if (!chip) {
+		chg_err("chip is NULL\n");
+		return;
+	}
+
+	chg_info("ultra_power_saving_work: SOC dropped to %d%%, entering ultra power saving mode, upload all registers\n",
+		 SC8527_UPLOAD_REG_SOC_THRESHOLD);
+
+	/* Read and upload all registers */
+	sc8527_read_register_values(chip, &regs);
+	sc8527_upload_all_registers(chip, &regs, "ultra_power_saving_mode");
+}
+
+static void sc8527_gauge_subs_callback(struct mms_subscribe *subs,
+				       enum mms_msg_type type, u32 id, bool sync)
+{
+	struct sc8527_device *chip = subs->priv_data;
+	union mms_msg_data data = { 0 };
+	int soc = 0;
+
+	if (!chip)
+		return;
+
+	switch (type) {
+	case MSG_TYPE_ITEM:
+		switch (id) {
+		case GAUGE_ITEM_SOC:
+			oplus_mms_get_item_data(chip->gauge_topic, GAUGE_ITEM_SOC,
+						&data, false);
+			soc = data.intval;
+			chg_info("GAUGE_ITEM_SOC SOC = %d\n", soc);
+			break;
+		default:
+			break;
+		}
+		break;
+	default:
+		break;
+	}
+}
+
+static void sc8527_subscribe_gauge_topic(struct oplus_mms *topic, void *prv_data)
+{
+	struct sc8527_device *chip = prv_data;
+	union mms_msg_data data = { 0 };
+
+	if (!chip)
+		return;
+
+	chg_info("subscribe gauge topic\n");
+	chip->gauge_topic = topic;
+	chip->gauge_subs = oplus_mms_subscribe(chip->gauge_topic, chip,
+					       sc8527_gauge_subs_callback, "sc8527");
+	if (IS_ERR_OR_NULL(chip->gauge_subs)) {
+		chg_err("subscribe gauge topic error, rc=%ld\n",
+			PTR_ERR(chip->gauge_subs));
+		return;
+	}
+
+	oplus_mms_get_item_data(chip->gauge_topic, GAUGE_ITEM_SOC, &data, true);
+	chg_info("initial GAUGE_ITEM_SOC SOC = %d\n", data.intval);
+}
+
+static void sc8527_comm_subs_callback(struct mms_subscribe *subs,
+				      enum mms_msg_type type, u32 id, bool update)
+{
+	struct sc8527_device *chip = subs->priv_data;
+	union mms_msg_data data = { 0 };
+	int ui_soc = 0;
+
+	if (!chip)
+		return;
+
+	switch (type) {
+	case MSG_TYPE_ITEM:
+		switch (id) {
+		case COMM_ITEM_BOOT_COMPLETED:
+			chg_info("COMM_ITEM_BOOT_COMPLETED received, trigger get_dischg_boost_err_flag\n");
+			sc8527_get_dischg_boost_err_flag_from_partition(chip);
+			break;
+		case COMM_ITEM_UI_SOC:
+			oplus_mms_get_item_data(chip->comm_topic, COMM_ITEM_UI_SOC,
+						&data, false);
+			ui_soc = data.intval;
+			/* Detect when UI SOC drops to 10% (entering ultra power saving mode)
+			 * This matches the system logic in oplus_chg_comm.c
+			 */
+			if (ui_soc == SC8527_UPLOAD_REG_SOC_THRESHOLD && chip->last_ui_soc > SC8527_UPLOAD_REG_SOC_THRESHOLD) {
+				chg_info("UI SOC dropped to %d%%, entering ultra power saving mode, schedule upload work\n",
+					 SC8527_UPLOAD_REG_SOC_THRESHOLD);
+				/* Schedule work to upload registers */
+				schedule_work(&chip->ultra_power_saving_work);
+			}
+			chip->last_ui_soc = ui_soc;
+			break;
+		default:
+			break;
+		}
+		break;
+	default:
+		break;
+	}
+}
+
+static void sc8527_subscribe_comm_topic(struct oplus_mms *topic, void *prv_data)
+{
+	struct sc8527_device *chip = prv_data;
+	union mms_msg_data data = { 0 };
+
+	chg_info("subscribe comm topic\n");
+	chip->comm_topic = topic;
+	chip->comm_subs =
+		oplus_mms_subscribe(chip->comm_topic, chip,
+				    sc8527_comm_subs_callback, "sc8527");
+	if (IS_ERR_OR_NULL(chip->comm_subs)) {
+		chg_err("subscribe comm topic error, rc=%ld\n",
+			PTR_ERR(chip->comm_subs));
+		return;
+	}
+
+	/* Check if boot already completed */
+	oplus_mms_get_item_data(chip->comm_topic, COMM_ITEM_BOOT_COMPLETED, &data, true);
+	if (data.intval) {
+		chg_info("boot already completed when subscribing, trigger get_dischg_boost_err_flag\n");
+		sc8527_get_dischg_boost_err_flag_from_partition(chip);
+	} else {
+		chg_info("boot not completed yet, will wait for COMM_ITEM_BOOT_COMPLETED event\n");
+	}
+
+	/* Initialize last_ui_soc */
+	oplus_mms_get_item_data(chip->comm_topic, COMM_ITEM_UI_SOC, &data, true);
+	chip->last_ui_soc = data.intval;
+	chg_info("initial UI SOC = %d\n", chip->last_ui_soc);
+}
+
 static bool is_work_mode_votable_available(struct sc8527_device *chip)
 {
 	if (!chip->work_mode_votable)
 		chip->work_mode_votable = find_votable("BOOST_WORK_MODE");
 	return !!chip->work_mode_votable;
+}
+
+static void sc8527_update_work_mode_work(struct work_struct *work)
+{
+	struct sc8527_device *chip = container_of(work, struct sc8527_device,
+						   update_work_mode_work);
+	int work_mode = 0;
+	int ret = 0;
+
+	if (!chip) {
+		chg_err("chip is NULL\n");
+		return;
+	}
+
+	if (!chip->boost_ic) {
+		chg_err("boost_ic is NULL\n");
+		return;
+	}
+
+	if (!is_work_mode_votable_available(chip)) {
+		chg_err("work_mode_votable not available\n");
+		return;
+	}
+
+	/* Get effective result from work_mode_votable */
+	work_mode = get_effective_result(chip->work_mode_votable);
+	if (work_mode < 0) {
+		chg_err("get_effective_result failed, work_mode=%d\n", work_mode);
+		return;
+	}
+
+	chg_info("update work mode to %d based on votable\n", work_mode);
+
+	/* Set work mode through boost_ic */
+	ret = oplus_chg_ic_func(chip->boost_ic, OPLUS_IC_FUNC_BOOST_SET_WORK_MODE, work_mode);
+	if (ret < 0) {
+		chg_err("set work mode error, rc=%d, mode=%d\n", ret, work_mode);
+		return;
+	}
+
+	chg_info("update work mode work completed, mode=%d\n", work_mode);
 }
 
 static void sc8527_power_on_mode_switch_work(struct work_struct *work)
@@ -1551,7 +2430,6 @@ static void sc8527_power_on_mode_switch_work(struct work_struct *work)
 	bool v1x_scp_flg = false;
 	bool conv_ocp_flg = false;
 	bool has_ocp_event = false;
-	int ret = 0;
 
 	if (!chip || !chip->boost_ic) {
 		chg_err("chip or boost_ic is NULL\n");
@@ -1567,31 +2445,21 @@ static void sc8527_power_on_mode_switch_work(struct work_struct *work)
 	if (has_ocp_event) {
 		chg_err("Overcurrent event detected: V1X_SCP_FLG=%d, CONV_OCP_FLG=%d, reg0d=0x%02x\n",
 				v1x_scp_flg, conv_ocp_flg, chip->reg0d_val);
-		if (is_work_mode_votable_available(chip)) {
+
+		if (is_work_mode_votable_available(chip))
 			vote(chip->work_mode_votable, BOOST_ERROR_VOTER, true, 1, false);
-		}
 		chg_info("Power on with Force CP Mode completed\n");
 		return;
 	}
 
-	/* Step 2: REG_RST */
-	ret = sc8527_update_bits(chip->client, SC8527_REG_06,
-				  SC8527_REG_RESET_MASK,
-				  SC8527_RESET_REG << SC8527_REG_RESET_SHIFT);
-	if (ret < 0) {
-		chg_err("failed to reset register, ret=%d\n", ret);
+	/* If no OCP event and auto_mode_gpio was low at boot, try to pull it high now */
+	if (chip->auto_mode_gpio_state == 0) {
+		chg_info("No OCP event detected, cancel BOOST_ERROR_VOTER and try to pull auto_mode_gpio high\n");
+		/* Update auto_mode_gpio_state after confirming no OCP event */
+		chip->auto_mode_gpio_state = 1;
+		if (is_work_mode_votable_available(chip))
+			vote(chip->work_mode_votable, BOOST_ERROR_VOTER, false, 0, false);
 	}
-	msleep(10);
-
-	/* Step 3: init registers */
-	sc8527_boost_ic_reg_set(chip);
-	sc8527_update_bits(chip->client, SC8527_REG_1F, 0x01, 0x01);
-	sc8527_update_bits(chip->client, SC8527_REG_1A, 0xc0, 0xc0);
-
-
-	/* Step 4: try automode */
-	chg_info("Attempting to enter Auto Mode\n");
-	ret = oplus_chg_ic_func(chip->boost_ic, OPLUS_IC_FUNC_BOOST_SET_WORK_MODE, 0);
 
 	chg_info("power on mode switch work completed\n");
 }
@@ -1755,7 +2623,6 @@ static ssize_t sc8527_store_register(struct device *dev,
 	chg_err("write 0x%02X : 0x%02X\n", reg, val);
 	if (ret == 2 && reg <= 0x50)
 		sc8527_write_byte(chip->priv_data, (unsigned char)reg, (unsigned char)val);
-	sc8527_check_register_and_upload_track(chip->priv_data);
 
 	return count;
 }
@@ -1813,7 +2680,6 @@ static struct oplus_voocphy_operations oplus_sc8527_ops = {
 	.set_pd_svooc_config	= sc8527_set_pd_svooc_config,
 	.get_pd_svooc_config	= sc8527_get_pd_svooc_config,
 	.get_vbus_status	= sc8527_get_vbus_status,
-	.set_chg_auto_mode	= sc8527_set_chg_auto_mode,
 	.get_voocphy_enable	= sc8527_get_voocphy_enable,
 	.dump_voocphy_reg	= sc8527_dump_reg_in_err_issue,
 	.check_cp_int_happened	= sc8527_check_cp_int_happened,
@@ -1839,6 +2705,8 @@ static int sc8527_retrieve_reg_flags(struct sc8527_device *chip)
 		err_flag |= BIT(UFCS_RECV_ERR_ACK_TIMEOUT);
 	if (flag_buf[0] & SC8527_FLAG_MSG_TRANS_FAIL)
 		err_flag |= BIT(UFCS_RECV_ERR_TRANS_FAIL);
+	if (flag_buf[0] & SC8527_FLAG_RX_BUFFER_BUSY)
+		err_flag |= BIT(UFCS_RECV_ERR_BUFF_BUSY);
 	if (flag_buf[0] & SC8527_FLAG_RX_OVERFLOW)
 		err_flag |= BIT(UFCS_COMM_ERR_RX_OVERFLOW);
 	if (flag_buf[0] & SC8527_FLAG_DATA_READY)
@@ -1980,6 +2848,14 @@ retry:
 
 static int sc8527_ufcs_cable_hard_reset(struct ufcs_dev *ufcs)
 {
+	struct sc8527_device *chip = ufcs->drv_data;
+	int rc;
+
+	rc = sc8527_write_bit_mask(chip, SC8527_ADDR_UFCS_CTRL1, SEND_CABLE_HARDRESET,
+					SEND_CABLE_HARDRESET);
+	if (rc < 0)
+		chg_err("set cable reset error, rc=%d\n", rc);
+
 	return 0;
 }
 
@@ -2012,9 +2888,16 @@ static int sc8527_ufcs_enable(struct ufcs_dev *ufcs)
 	};
 	int i;
 	int rc;
+	u8 reg_val;
 
 	chip->rested = true;
-	sc8527_reg_reset(chip->client, true);
+	sc8527_read_byte(chip, SC8527_ADDR_GENERAL_INT_FLAG1, &reg_val);
+	sc8527_read_byte(chip, SC8527_ADDR_GENERAL_INT_FLAG2, &reg_val);
+	sc8527_read_byte(chip, SC8527_ADDR_GENERAL_INT_FLAG3, &reg_val);
+	/* reset 0x46/0x47/0x48 = 00 */
+	sc8527_write_byte(chip, SC8527_ADDR_UFCS_INT_MASK3, 0x00);
+	sc8527_write_byte(chip, SC8527_REG_10, 0xfd);
+	sc8527_update_bits(chip->client, SC8527_REG_39, 0x25, 0x25);
 	msleep(10);
 	sc8527_init_device(chip);
 	for (i = 0; i < SC8527_ENABLE_REG_NUM; i++) {
@@ -2025,7 +2908,8 @@ static int sc8527_ufcs_enable(struct ufcs_dev *ufcs)
 		}
 	}
 	chip->ufcs_enable = true;
-	sc8527_write_byte(chip, SC8527_REG_CC, 0x00);/* hardreset signal to 1900us */
+	/* hardreset signal to 1900us ; ack timeout to 10ms + rx_FRAME_TIME */
+	sc8527_write_byte(chip, SC8527_REG_CC, 0x80);
 
 /*	rc = sc8527_write_byte(chip, SC8527_REG_09, SC8527_WATCHDOG_5S);
 	if (rc < 0) {
@@ -2109,6 +2993,35 @@ static int sc8527_ufcs_cp_watchdog_config(struct ufcs_dev *ufcs, unsigned int ti
 }
 
 
+static int sc8527_ufcs_hiz_enable(struct ufcs_dev *ufcs, bool en)
+{
+	struct sc8527_device *chip = ufcs->drv_data;
+	int rc = 0;
+	u8 data = 0;
+
+	if (en)
+		data = SC8527_SEND_ENABLE_HIZ;
+	else
+		data = 0;
+	rc = sc8527_write_bit_mask(chip, SC8527_ADDR_UFCS_CTRL2, SC8527_SEND_ENABLE_HIZ, data);
+	if (rc < 0)
+		chg_err("set ufcs hiz %d error, rc=%d\n", en, rc);
+
+	return rc;
+}
+
+static int sc8527_ufcs_clr_rx_buf(struct ufcs_dev *ufcs)
+{
+	struct sc8527_device *chip = ufcs->drv_data;
+	int rc;
+
+	rc = sc8527_write_bit_mask(chip, SC8527_ADDR_UFCS_CTRL2,
+		SC8527_SEND_CLR_RX_BUF, SC8527_SEND_CLR_RX_BUF);
+	if (rc < 0)
+		chg_err("clear rx buf error, rc=%d\n", rc);
+	return 0;
+}
+
 static struct ufcs_dev_ops ufcs_ops = {
 	.init = sc8527_ufcs_init,
 	.write_msg = sc8527_ufcs_write_msg,
@@ -2120,6 +3033,8 @@ static struct ufcs_dev_ops ufcs_ops = {
 	.enable = sc8527_ufcs_enable,
 	.disable = sc8527_ufcs_disable,
 	.watchdog_config = sc8527_ufcs_cp_watchdog_config,
+	.hiz_enable = sc8527_ufcs_hiz_enable,
+	.clr_rx_buf = sc8527_ufcs_clr_rx_buf,
 };
 
 
@@ -2171,7 +3086,7 @@ static irqreturn_t sc8527_interrupt_handler(int irq, void *dev_id)
 	if (chip->use_ufcs_phy && chip->ufcs_enable) {
 		sc8527_ufcs_event_handler(chip);
 		return IRQ_HANDLED;
-	} else if (chip->use_vooc_phy && chip->voocphy_enable) {
+	} else if (chip->use_vooc_phy) {
 		return oplus_voocphy_interrupt_handler(voocphy);
 	}
 
@@ -2182,8 +3097,13 @@ static irqreturn_t sc8527_interrupt_handler(int irq, void *dev_id)
 static int sc8527_parse_dt(struct oplus_voocphy_manager *chip)
 {
 	struct device_node *node = chip->dev->of_node;
+	struct sc8527_device *sc8527_chip = chip->priv_data;
+	int rc;
 
 	chip->v2x_volt_full_open_low = of_property_read_bool(node, "oplus,v2x_volt_full_open_low");
+	rc = of_property_read_u32(node, "oplus,v2x_low", &sc8527_chip->v2x_low);
+	if (rc)
+		sc8527_chip->v2x_low = V2X_LOW_DEFAULT;
 
 	return 0;
 }
@@ -2265,11 +3185,22 @@ static int sc8527_gpio_init(struct sc8527_device *chip)
 		chg_err("failed to get the auto_mode_disable pinctrl state(%d)\n", __LINE__);
 		return -EINVAL;
 	}
+	chip->auto_mode_gpio_state = gpio_get_value(chip->auto_mode_gpio);
+	chg_info("auto_mode_gpio_state = %d\n", chip->auto_mode_gpio_state);
 
-	rc = pinctrl_select_state(chip->pinctrl, chip->auto_mode_enable);
-	chg_info("set auto_mode enable %s, gpio_val:%d\n", rc < 0 ? "fail" : "success",
-		gpio_get_value(chip->auto_mode_gpio));
-
+	/* If auto_mode_gpio is not pulled high, bootloader initialization failed */
+	if (chip->auto_mode_gpio_state == 0) {
+		chg_err("auto_mode_gpio is low, bootloader initialization failed, keep it low\n");
+		/* Keep auto_mode_gpio low */
+		rc = pinctrl_select_state(chip->pinctrl, chip->auto_mode_disable);
+		if (rc < 0)
+			chg_err("failed to set auto_mode_disable, ret=%d\n", rc);
+		/* Vote BOOST_ERROR_VOTER to set Force CP Mode */
+		if (is_work_mode_votable_available(chip)) {
+			vote(chip->work_mode_votable, BOOST_ERROR_VOTER, true, 1, false);
+			chg_err("Voted BOOST_ERROR_VOTER due to bootloader init failure\n");
+		}
+	}
 	return 0;
 }
 
@@ -2292,7 +3223,7 @@ static int sc8527_gpio_register(struct sc8527_device *chip)
 	if (voocphy->irq) {
 		ret = request_threaded_irq(voocphy->irq, NULL,
 					   sc8527_interrupt_handler,
-					   IRQF_TRIGGER_FALLING | IRQF_ONESHOT,
+					   IRQF_TRIGGER_RISING | IRQF_ONESHOT,
 					   "voocphy_irq", chip);
 		if (ret < 0) {
 			chg_err("request irq for irq=%d failed, ret =%d\n",
@@ -2714,6 +3645,7 @@ static int sc8527_set_work_mode(struct oplus_chg_ic_dev *dev, int mode)
 	uint8_t conv_mode_stat = 0;
 	int retry_count = 0;
 	bool auto_mode_ok = false;
+	struct sc8527_register_values regs = {0};
 
 	if (dev == NULL) {
 		chg_err("oplus_chg_ic_dev is NULL\n");
@@ -2734,10 +3666,18 @@ static int sc8527_set_work_mode(struct oplus_chg_ic_dev *dev, int mode)
 		return -ENODEV;
 	}
 
+	if (chip->auto_mode_gpio_state == 0) {
+		chg_err("boot error, return\n"); //auto_mode_gpio is low, means lk or uefi error
+		return -EIO;
+	}
+
 	if (mode == 1) {
 		rc = pinctrl_select_state(chip->pinctrl, chip->auto_mode_disable);
 		chg_info("set force cp mode %s, gpio_val:%d\n", rc < 0 ? "fail" : "success",
 			 gpio_get_value(chip->auto_mode_gpio));
+		mutex_lock(&chip->i2c_rw_lock);
+		rc = __sc8527_write_byte(chip->client, SC8527_REG_06, 0x85); /* enable  audio mode */
+		mutex_unlock(&chip->i2c_rw_lock);
 		return rc;
 	}
 
@@ -2761,13 +3701,16 @@ static int sc8527_set_work_mode(struct oplus_chg_ic_dev *dev, int mode)
 
 		msleep(AUTO_MODE_DELAY_MS);
 
-		rc = sc8527_read_byte(chip, SC8527_REG_0A, &reg0a_val);
+		mutex_lock(&chip->i2c_rw_lock);
+		rc = __sc8527_read_byte(chip->client, SC8527_REG_0A, &reg0a_val);
+		mutex_unlock(&chip->i2c_rw_lock);
 		if (rc < 0) {
 			chg_err("failed to read register 0x0A, ret=%d\n", rc);
 			continue;
 		}
-
-		rc = sc8527_read_byte(chip, SC8527_REG_1A, &reg1a_val);
+		mutex_lock(&chip->i2c_rw_lock);
+		rc = __sc8527_read_byte(chip->client, SC8527_REG_1A, &reg1a_val);
+		mutex_unlock(&chip->i2c_rw_lock);
 		if (rc < 0) {
 			chg_err("failed to read register 0x1A, ret=%d\n", rc);
 			continue;
@@ -2787,13 +3730,21 @@ static int sc8527_set_work_mode(struct oplus_chg_ic_dev *dev, int mode)
 		}
 	}
 
+	mutex_lock(&chip->i2c_rw_lock);
+	rc = __sc8527_write_byte(chip->client, SC8527_REG_06, 0x85); /* enable  audio mode */
+	mutex_unlock(&chip->i2c_rw_lock);
+
 	if (!auto_mode_ok) {
 		chg_err("Auto Mode entry failed after %d retries, use Force CP Mode\n", AUTO_MODE_RETRY_MAX);
 		rc = pinctrl_select_state(chip->pinctrl, chip->auto_mode_disable);
+		mutex_lock(&chip->i2c_rw_lock);
+		rc = __sc8527_write_byte(chip->client, SC8527_REG_06, 0x85); /* enable  audio mode */
+		mutex_unlock(&chip->i2c_rw_lock);
 		if (rc < 0) {
 			chg_err("failed to set Force CP Mode, ret=%d\n", rc);
 		}
-		sc8527_check_register_and_upload_track(chip);
+		sc8527_read_register_values(chip, &regs);
+		sc8527_upload_all_registers(chip, &regs, "reg_en_error");
 		chg_info("Power on with Force CP Mode completed\n");
 		return -1;
 	}
@@ -2917,6 +3868,9 @@ static void *sc8527_boost_get_func(struct oplus_chg_ic_dev *ic_dev, enum oplus_c
 	case OPLUS_IC_FUNC_BOOST_SET_CV:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BOOST_SET_CV, sc8527_set_cv_volt);
 		break;
+	case OPLUS_IC_FUNC_BOOST_GET_CV:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BOOST_GET_CV, sc8527_boost_get_cv);
+		break;
 	case OPLUS_IC_FUNC_BOOST_SET_WORK_MODE:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BOOST_SET_WORK_MODE, sc8527_set_work_mode);
 		break;
@@ -2925,6 +3879,9 @@ static void *sc8527_boost_get_func(struct oplus_chg_ic_dev *ic_dev, enum oplus_c
 		break;
 	case OPLUS_IC_FUNC_BOOST_GET_IN_CV_MODE:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BOOST_GET_IN_CV_MODE, sc8527_get_in_cv_mode);
+		break;
+	case OPLUS_IC_FUNC_BOOST_SET_FAM_EN:
+		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_BOOST_SET_FAM_EN, sc8527_set_chg_auto_mode);
 		break;
 	default:
 		chg_err("this func(=%d) is not supported\n", func_id);
@@ -3120,6 +4077,55 @@ static bool sc8527_check_device_is_exist(struct i2c_client *client)
 	}
 }
 
+static void sc8527_set_v2x_low(struct sc8527_device *chip, int voltage_mv)
+{
+	int bits;
+	int bits_shift;
+	int ret;
+
+	if (!chip) {
+		chg_err("chip is NULL\n");
+		return;
+	}
+
+	bits = volt_curr_to_bits(voltage_mv, V2X_LOW_OFFSET, STEP_200MV);
+
+	bits_shift = bits << SC8527_V2X_LOW_SHIFT;
+
+	bits_shift = bits_shift > SC8527_V2X_LOW_MASK ?
+			SC8527_V2X_LOW_MASK : bits_shift;
+
+	chg_info("set v2x_low %dmV: bits=%d, bits_shift=0x%02X, reg=0x%02X\n",
+		voltage_mv, bits, bits_shift, SC8527_REG_38);
+
+	ret = sc8527_update_bits(chip->client, SC8527_REG_38,
+			SC8527_V2X_LOW_MASK, bits_shift);
+	if (ret < 0) {
+		chg_err("failed to set v2x_low voltage, ret=%d\n", ret);
+	}
+}
+
+static void sc8527_boost_ic_reg_set(struct sc8527_device *chip)
+{
+	if (!chip || !chip->boost_ic) {
+		chg_info("chip is NULL,skip set sc8527 reg\n");
+		return;
+	}
+	sc8527_set_cv_volt(chip->boost_ic, 3300);
+	sc8527_set_v1x_th_cv2cp_l(chip, 300);
+	sc8527_set_v1x_th_cv2cp_h(chip, 300);
+	sc8527_set_v1x_th_cp2cv(chip, 100);
+	//sc8527_set_q2_ocp_enable(chip, 1);
+	sc8527_set_iind_limt(chip, IIND_LIM_DEFAULT_TH);
+#ifdef CONFIG_OPLUS_CHARGER_MTK
+	sc8527_set_mtk_pre_uv_mode(chip, K_CHANGE_DEFAULT_TH);
+	sc8527_set_clamp_mode(chip, 0);
+#else
+	sc8527_boost_set_bcl_rate(chip->boost_ic, SC8527_SNS_RATIO_550_THR);
+#endif
+	sc8527_set_v2x_low(chip, chip->v2x_low);
+	return;
+}
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
 static int sc8527_charger_probe(struct i2c_client *client)
 #else
@@ -3155,10 +4161,15 @@ static int sc8527_charger_probe(struct i2c_client *client,
 	voocphy->dev = &client->dev;
 	voocphy->priv_data = chip;
 	chip->voocphy = voocphy;
+	atomic_set(&chip->in_shutdown, 0);
 	mutex_init(&chip->i2c_rw_lock);
 	mutex_init(&chip->chip_lock);
 	INIT_WORK(&chip->check_reg_work, sc8527_check_register_work);
 	INIT_WORK(&chip->power_on_mode_switch_work, sc8527_power_on_mode_switch_work);
+	INIT_WORK(&chip->update_work_mode_work, sc8527_update_work_mode_work);
+	INIT_WORK(&chip->wired_plug_in_work, sc8527_wired_plug_in_work);
+	INIT_WORK(&chip->ultra_power_saving_work, sc8527_ultra_power_saving_work);
+	INIT_DELAYED_WORK(&chip->get_dischg_boost_err_flag_work, sc8527_get_dischg_boost_err_flag_work_func);
 	i2c_set_clientdata(client, voocphy);
 
 	sc8527_create_device_node(&(client->dev));
@@ -3206,26 +4217,25 @@ static int sc8527_charger_probe(struct i2c_client *client,
 	sc8527_cp_init(chip->cp_ic);
 
 	oplus_mms_wait_topic("wired", sc8527_subscribe_wired_topic, chip);
-	if (sc8527_check_register_and_upload_track(chip) && !chip->wired_present)
-		schedule_work(&chip->power_on_mode_switch_work);
+
+	/* Subscribe to gauge topic for SOC monitoring */
+	oplus_mms_wait_topic("gauge", sc8527_subscribe_gauge_topic, chip);
+
+	/* Subscribe to comm topic for boot completed event */
+	oplus_mms_wait_topic("common", sc8527_subscribe_comm_topic, chip);
+
+	/* Register mutual notifier for reading error flag from partition */
+	ret = sc8527_dischg_boost_err_flag_mutual_notify_reg(chip);
+	if (ret < 0)
+		chg_err("register dischg boost err flag mutual notifier failed(%d)\n", ret);
+		/* Continue even if registration fails */
 
 	sc8527_dump_registers(voocphy);
 	register_voocphy_devinfo();
-	sc8527_set_cv_volt(chip->boost_ic, 3500);
-	sc8527_set_v1x_th_cv2cp_l(chip, 300);
-	sc8527_set_v1x_th_cv2cp_h(chip, 200);
-	sc8527_set_v1x_th_cp2cv(chip, 200);
-	//sc8527_set_q2_ocp_enable(chip, 1);
-	sc8527_set_iind_limt(chip, IIND_LIM_DEFAULT_TH);
-#ifdef CONFIG_OPLUS_CHARGER_MTK
-	sc8527_set_mtk_pre_uv_mode(chip, K_CHANGE_DEFAULT_TH);
-	sc8527_set_clamp_mode(chip, 0);
-#else
-	sc8527_boost_set_bcl_rate(chip->boost_ic, SC8527_SNS_RATIO_550_THR);
-#endif
+	sc8527_boost_ic_reg_set(chip);
 	sc8527_update_bits(chip->client, SC8527_REG_1F, 0x01, 0x01);
 	sc8527_update_bits(chip->client, SC8527_REG_1A, 0xc0, 0xc0);
-
+	chip->probe_complete = true;
 	chg_info("sc8527(%s) probe successfully\n", chip->dev->of_node && chip->dev->of_node->name ? chip->dev->of_node->name : "null");
 
 	return 0;
@@ -3290,6 +4300,31 @@ static void sc8527_charger_remove(struct i2c_client *client)
 	chip = voocphy->priv_data;
 	chg_info("enter\n");
 
+	/* Cancel delayed work for getting error flag */
+	cancel_delayed_work_sync(&chip->get_dischg_boost_err_flag_work);
+
+	/* Cancel work for updating work mode */
+	cancel_work_sync(&chip->update_work_mode_work);
+	cancel_work_sync(&chip->wired_plug_in_work);
+	cancel_work_sync(&chip->ultra_power_saving_work);
+
+	/* Unsubscribe gauge topic */
+	if (chip->gauge_subs) {
+		oplus_mms_unsubscribe(chip->gauge_subs);
+		chip->gauge_subs = NULL;
+	}
+	chip->gauge_topic = NULL;
+
+	/* Unsubscribe comm topic */
+	if (chip->comm_subs) {
+		oplus_mms_unsubscribe(chip->comm_subs);
+		chip->comm_subs = NULL;
+	}
+	chip->comm_topic = NULL;
+
+	/* Unregister mutual notifier */
+	oplus_chg_unreg_mutual_notifier(&chip->dischg_boost_err_flag_mutual);
+
 	sc8527_release_chip_resources(chip);
 	sc8527_release_irq_resources(voocphy);
 
@@ -3303,6 +4338,7 @@ static void sc8527_charger_shutdown(struct i2c_client *client)
 	int bits = 0;
 	int bits_mask = 0;
 
+	atomic_set(&chip->in_shutdown, 1);
 	sc8527_update_bits(client, SC8527_REG_06, SC8527_REG_RESET_MASK,
 			   SC8527_RESET_REG << SC8527_REG_RESET_SHIFT);
 	msleep(10);
@@ -3330,21 +4366,11 @@ static void sc8527_charger_shutdown(struct i2c_client *client)
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))
 static int oplus_sc8527_pm_resume(struct device *dev)
 {
-	struct oplus_voocphy_manager *chip = dev_get_drvdata(dev);
-	struct sc8527_device *sc8527_chip;
-
-	sc8527_chip = chip->priv_data;
-	sc8527_set_v1x_th_cp2cv(sc8527_chip, 200);
 	return 0;
 }
 
 static int oplus_sc8527_pm_suspend(struct device *dev)
 {
-	struct oplus_voocphy_manager *chip = dev_get_drvdata(dev);
-	struct sc8527_device *sc8527_chip;
-
-	sc8527_chip = chip->priv_data;
-	sc8527_set_v1x_th_cp2cv(sc8527_chip, 100);
 	return 0;
 }
 

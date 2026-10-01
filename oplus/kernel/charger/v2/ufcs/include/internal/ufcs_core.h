@@ -78,6 +78,8 @@ struct ufcs_power_info_ext {
 struct ufcs_verify_info {
 	u8 random_data[UFCS_VERIFY_RANDOM_DATA_SIZE];
 	u8 auth_data[UFCS_VERIFY_AUTH_DATA_SIZE];
+	u8 user_encrypt_random_data[UFCS_USER_ENCRYPT_RANDOM_DATA_SIZE];
+	u8 user_encrypt_auth_data[UFCS_USER_ENCRYPT_AUTH_DATA_SIZE];
 };
 
 struct ufcs_class {
@@ -105,10 +107,10 @@ struct ufcs_class {
 	struct ufcs_verify_info verify_info;
 
 	u64 src_info;
-	u64 cable_info;
+	u8 cable_info[UFCS_CABLE_INFO_SIZE];
 	u64 dev_info;
 	u32 err_info;
-	u32 pwr_change_info[UFCS_OUTPUT_MODE_MAX];
+	struct ufcs_data_msg_power_change pwr_change_info;
 	u16 test_request;
 	bool power_changed;
 	bool test_mode;
@@ -121,12 +123,14 @@ struct ufcs_class {
 	bool handshake_success;
 	bool sm_task_wakeup;
 	bool start_cable_detect;
+	bool cable_accpet;
 	bool exit_ufcs_ack_received;
 
 	struct mutex pe_lock;
 	struct mutex handshake_lock;
 	struct mutex ext_req_lock;
 	struct completion request_ack;
+	struct completion user_encrypt_data_ack;
 
 #if IS_ENABLED(CONFIG_OPLUS_UFCS_CLASS_DEBUG)
 	struct ufcs_debug_data debug;

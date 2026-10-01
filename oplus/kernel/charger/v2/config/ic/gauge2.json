@@ -437,8 +437,40 @@
                 },
                 "overwrite": false
             }
+        },
+        {
+            "lable": "OPLUS_IC_FUNC_GAUGE_GET_C_SOC",
+            "desc": {
+                "zh": "获取电量计c_soc"
+            },
+            "auto_debug_code": true,
+            "parameter_list": ["int *"],
+            "parameter_desc": [
+                {
+                    "range": "0-*",
+                    "type": "out",
+                    "desc": {
+                        "zh": "电量计c_soc"
+                    }
+                }
+            ],
+            "vict": {
+                "read": {
+                    "cmd": "vict -f {id} -G vic-*",
+                    "desc": {
+                        "zh": "N/A"
+                    }
+                },
+                "write": false,
+                "overwrite": {
+                    "cmd": "vict -f {id} -O {val} vic-*",
+                    "desc": {
+                        "zh": "N/A"
+                    }
+                }
+            }
         }
     ],
 
-    "version": "V6.4:16:a4afdb37e034f45b36dcf72f7793a307fb02305fd37b41550ba17f8c6ff7fda3"
+    "version": "V6.5:17:cdc4208e96ef1d161c7575ed4bbc793b27060361662775454ad8fd485e631bdc"
 }

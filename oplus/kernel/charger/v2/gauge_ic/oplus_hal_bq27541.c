@@ -70,6 +70,7 @@
 
 #include "oplus_hal_bq27541.h"
 #include "oplus_hal_nfg8011b.h"
+#include "oplus_hal_sh366002.h"
 #include "oplus_hal_bq28z610.h"
 #include <oplus_chg_monitor.h>
 #include "../monitor/oplus_chg_track.h"
@@ -6906,6 +6907,8 @@ static bool get_smem_batt_info(oplus_gauge_auth_result *auth, int kk)
 	} else {
 		return false;
 	}
+#elif IS_ENABLED(CONFIG_OPLUS_CHARGER_UNISOC)
+	return 0;
 #else
 	size_t smem_size;
 	void *smem_addr;
@@ -7275,6 +7278,8 @@ static bool get_smem_sha256_batt_info(
 		return true;
 
 	return false;
+#elif IS_ENABLED(CONFIG_OPLUS_CHARGER_UNISOC)
+	return 0;
 #else
 	size_t smem_size;
 	void *smem_addr;
@@ -9488,20 +9493,31 @@ static int oplus_bq27541_set_ui_cycle_count(struct oplus_chg_ic_dev *ic_dev, u16
 static int oplus_bq27541_get_ui_soh(struct oplus_chg_ic_dev *ic_dev, u8 *ui_soh)
 {
 	struct chip_bq27541 *chip;
+	int rc = 0;
 
 	if (ic_dev == NULL) {
 		chg_err("oplus_chg_ic_dev is NULL");
 		return -ENODEV;
 	}
 	chip = oplus_chg_ic_get_drvdata(ic_dev);
-	if (!chip)
+	if (!chip || !ui_soh)
 		return -EINVAL;
 
-	if (!chip->support_eco_design)
-		return -ENOTSUPP;
+	/* Read ui_soh from gauge storage */
+	if (chip->batt_nfg8011b) {
+		rc = nfg8011b_read_block(chip, NFG8011B_SUBCMD_DEEP_INFO_ADDR, (u8 *)ui_soh,
+					 sizeof(*ui_soh), NFG8011B_ECO_UI_SOH_OFFSET, true);
+		if (rc) {
+			chg_err("get ui_soh from nfg8011b fail rc = %d, use cached value\n", rc);
+			*ui_soh = chip->battinfo.ui_soh;
+		} else {
+			chip->battinfo.ui_soh = *ui_soh;
+		}
+	} else {
+		*ui_soh = chip->battinfo.ui_soh;
+	}
 
-	*ui_soh = chip->battinfo.ui_soh;
-
+	chg_info("oplus_bq27541_get_ui_soh:%d\n", *ui_soh);
 	return 0;
 }
 
@@ -9520,9 +9536,7 @@ static int oplus_bq27541_set_ui_soh(struct oplus_chg_ic_dev *ic_dev, u8 ui_soh)
 	if (!chip)
 		return -EINVAL;
 
-	if (!chip->support_eco_design)
-		return -ENOTSUPP;
-
+	chg_info("oplus_bq27541_set_ui_soh:%d\n", ui_soh);
 	if (chip->batt_nfg8011b) {
 		rc = nfg8011b_write_block(chip, NFG8011B_SUBCMD_DEEP_INFO_ADDR, (u8 *)&ui_soh, sizeof(ui_soh),
 					  NFG8011B_ECO_UI_SOH_OFFSET, true, true);
@@ -9927,7 +9941,6 @@ static int oplus_bq27541_ra0_check(struct oplus_chg_ic_dev *ic_dev)
 	if (!chip->batt_bq28z610 || !chip->fcc_ra0_support)
 		return ret;
 
-
 	ret = bq28z610_fcc_ra0_init(chip);
 	return ret;
 }
@@ -9969,6 +9982,15 @@ static int oplus_bq27541_set_fast_sampling(
 		ret = nfg8011b_set_fast_sampling(chip, enable);
 
 	return ret;
+}
+
+static void bq27541_imp_model_check_work(struct work_struct *work)
+{
+	struct chip_bq27541 *chip = container_of(
+		work, struct chip_bq27541, imp_model_check_work);
+
+	if (chip->device_type == DEVICE_ZY0602)
+		oplus_sh36002_check_imp_model(chip);
 }
 
 static int oplus_bq27541_check_imp_model(struct oplus_chg_ic_dev *ic_dev)
@@ -10314,6 +10336,10 @@ static void *oplus_chg_get_func(struct oplus_chg_ic_dev *ic_dev,
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_GAUGE_GET_BATT_SN,
 					      oplus_bq27541_get_battinfo_sn);
 		break;
+	case OPLUS_IC_FUNC_GAUGE_GET_BATT_IC_SN:
+			func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_GAUGE_GET_BATT_IC_SN,
+				oplus_bq27541_get_battinfo_sn);
+		break;
 	case OPLUS_IC_FUNC_GAUGE_GET_MANU_DATE:
 		func = OPLUS_CHG_IC_FUNC_CHECK(OPLUS_IC_FUNC_GAUGE_GET_MANU_DATE,
 					       oplus_bq27541_get_manu_date);
@@ -10605,6 +10631,7 @@ rerun:
 	schedule_delayed_work(&fg_ic->hw_config, 0);
 */
 	INIT_WORK(&fg_ic->fcc_too_small_check_work, bq27541_fcc_too_small_check_work);
+	INIT_WORK(&fg_ic->imp_model_check_work, bq27541_imp_model_check_work);
 	INIT_DELAYED_WORK(&fg_ic->check_iic_recover, bq27541_check_iic_recover);
 	INIT_DELAYED_WORK(&fg_ic->track_fcc_ra0_work, bq27541_track_fcc_ra0_work);
 	INIT_DELAYED_WORK(&fg_ic->track_fcc_vdelta_work, bq27541_track_fcc_vdelta_work);

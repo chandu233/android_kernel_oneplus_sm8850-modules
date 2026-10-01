@@ -459,7 +459,7 @@ out:
 
 #ifdef MODULE
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0))
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)) && !IS_ENABLED(CONFIG_OPLUS_CHARGER_DDK_BUILD)
 
 __attribute__((weak)) size_t __oplus_chg_module_start;
 __attribute__((weak)) size_t __oplus_chg_module_end;
@@ -547,7 +547,7 @@ static void __exit oplus_chg_modules_exit(void)
 	}
 }
 
-#else /* (LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)) */
+#else /* LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)) && !IS_ENABLED(CONFIG_OPLUS_CHARGER_DDK_BUILD) */
 
 oplus_chg_module_register_null(oplus_chg_normal);
 oplus_chg_module_core_register_null(oplus_chg_core);
@@ -726,7 +726,7 @@ static void __exit oplus_chg_modules_exit(void)
 	oplus_chg_section_modules_exit(OPLUS_CHG_MODULE_CORE_MAGIC);
 }
 
-#endif /* (LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)) */
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)) && !IS_ENABLED(CONFIG_OPLUS_CHARGER_DDK_BUILD) */
 
 #endif /* MODULE */
 

@@ -6165,7 +6165,7 @@ static int oplus_chg_8350_get_hw_detect(struct oplus_chg_ic_dev *ic_dev, int *de
 	}
 
 
-	if (recheck)
+	if(recheck)
 		msleep(CID_STATUS_DELAY_MS);
 	bcdev = oplus_chg_ic_get_drvdata(ic_dev);
 	pst = &bcdev->psy_list[PSY_TYPE_USB];
