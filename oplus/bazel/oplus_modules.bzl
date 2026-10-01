@@ -5,6 +5,7 @@ load(":oplus_modules_define.bzl", "oplus_ddk_get_oplus_features")
 
 def define_oplus_ddk_modules(target, msm_target, variant):
     oplus_ddk_targets = [
+        modules_label("oplus/kernel/audio/bazel:snd-soc-tfa98xx"),
         modules_label("oplus/hardware/radio/kernel:oplus_mdmfeature"),
         modules_label("oplus/hardware/radio/mdmrst/bazel:oplus_mdmrst"),
         modules_label("oplus/kernel/boot:buildvariant"),
@@ -21,6 +22,7 @@ def define_oplus_ddk_modules(target, msm_target, variant):
         modules_label("oplus/kernel/charger/bazel:{}_oplus_chg_v2").format(target),
         modules_label("oplus/kernel/charger/bazel:{}_test-kit").format(target),
         modules_label("oplus/kernel/charger/bazel:{}_ufcs_class").format(target),
+        modules_label("oplus/kernel/charger/bazel:{}_oplus_wireless_pen_mt5806").format(target),
         modules_label("oplus/kernel/cpu:horae_shell_temp"),
         modules_label("oplus/kernel/device_info/device_info/bazel:device_info"),
         modules_label("oplus/kernel/device_info/magnetic_cover:oplus_magcvr_ak09973"),
@@ -79,6 +81,7 @@ def define_oplus_ddk_modules(target, msm_target, variant):
         modules_label("oplus/sensor/kernel/qcom:oplus_sensor_kookong_ir_spi"),
         modules_label("oplus/kernel/nfc:oplus_nfc"),
         modules_label("oplus/kernel/nfc:oplus_network_nfc_thn31"),
+        modules_label("oplus/kernel/tp/hbp/hbp:oplus_ft3685g"),
     ]
 
     #conditional_build modules
