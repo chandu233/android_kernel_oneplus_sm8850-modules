@@ -2545,6 +2545,10 @@ static bool adreno_hwsched_do_fault(struct adreno_device *adreno_dev)
 
 	kgsl_mutex_lock(&device->mutex);
 
+#ifdef CONFIG_OPLUS_GPU_MINIDUMP
+	device->snapshotfault = fault;
+#endif /*CONFIG_OPLUS_GPU_MINIDUMP*/
+
 	if (device->state == KGSL_STATE_ACTIVE) {
 		/*
 		 * Halt CP for page faults here. CP is halted from GMU when required,
