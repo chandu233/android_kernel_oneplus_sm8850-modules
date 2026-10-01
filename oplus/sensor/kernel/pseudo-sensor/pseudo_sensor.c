@@ -461,7 +461,7 @@ static int qcom_send_msg(uint8_t cmd, char *data, int len)
 	mutex_lock(&g_data.client.lock);
 
 	req->data_len = min_t(uint32_t, sizeof(req->data), len);
-	memcpy(req->data, data, req->data_len);
+	memmove(req->data, data, req->data_len);
 
 	ERR("send data: %02X %02X %02X %02X %02X %02X %02X %02X\n",
 		req->data[0], req->data[1], req->data[2], req->data[3],
@@ -527,7 +527,7 @@ static int qcom_send_fatal_msg(char* data, int len)
 	len = MIN(16, len);
 
 	memset(&cust_cmd[0], 0, sizeof(cust_cmd));
-	memcpy(&cust_cmd[1], data, len);
+	memmove(&cust_cmd[1], data, len);
 
 	cust_cmd[0] = 0x50544E00;
 
@@ -636,7 +636,7 @@ static int mtk_send_msg(uint8_t cmd, char *data, int len)
 	cust_cmd.rx_len = 0;
 	cust_cmd.tx_len = len;
 
-	memcpy(&cust_cmd.data[0], data, len);
+	memmove(&cust_cmd.data[0], data, len);
 
 	ret = hf_client_custom_cmd(g_data.client, SENSOR_TYPE_DEBUG_KIT, &cust_cmd);
 
