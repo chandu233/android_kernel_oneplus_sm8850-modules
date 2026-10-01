@@ -318,6 +318,7 @@ bool oplus_ofp_full_screen_aod_mode_is_enabled(void);
 bool oplus_ofp_video_mode_30hz_aod_is_enabled(void);
 bool oplus_ofp_get_hbm_state(void);
 int oplus_ofp_property_update(void *sde_connector, void *sde_connector_state, int prop_id, uint64_t prop_val);
+bool oplus_ofp_low_pwm_aod_mode_is_enabled(void);
 
 /* -------------------- fod -------------------- */
 int oplus_ofp_parse_dtsi_config(void *dsi_display_mode, void *dsi_parser_utils);

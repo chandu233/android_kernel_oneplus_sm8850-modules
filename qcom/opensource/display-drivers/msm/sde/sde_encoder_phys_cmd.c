@@ -1301,11 +1301,18 @@ static int _sde_encoder_phys_cmd_wait_for_idle(
 		struct sde_encoder_phys *phys_enc)
 {
 	struct sde_encoder_wait_info wait_info = {0};
+	struct sde_hw_ctl *ctl;
 	enum sde_intr_idx intr_idx;
 	int ret;
 
 	if (!phys_enc) {
 		SDE_ERROR("invalid encoder\n");
+		return -EINVAL;
+	}
+
+	ctl = phys_enc->hw_ctl;
+	if (!ctl) {
+		SDE_ERROR("invalid hw_ctl\n");
 		return -EINVAL;
 	}
 
@@ -1331,6 +1338,16 @@ static int _sde_encoder_phys_cmd_wait_for_idle(
 				INTR_IDX_CTL_DONE : INTR_IDX_PINGPONG;
 
 	ret = sde_encoder_helper_wait_for_irq(phys_enc, intr_idx, &wait_info);
+
+	/*
+	* if hwfencing enabled, try again to wait for up to the extended timeout time in
+	* increments as long as fence has not been signaled.
+	*/
+	if (ret == -ETIMEDOUT && (phys_enc->sde_kms->catalog->hw_fence_rev ||
+				phys_enc->sde_kms->catalog->is_vrr_hw_fence_enable))
+		ret = sde_encoder_helper_hw_fence_extended_wait(phys_enc, ctl, &wait_info,
+				intr_idx);
+
 	if (ret == -ETIMEDOUT) {
 		if (_sde_encoder_phys_cmd_is_scheduler_idle(phys_enc))
 			return 0;

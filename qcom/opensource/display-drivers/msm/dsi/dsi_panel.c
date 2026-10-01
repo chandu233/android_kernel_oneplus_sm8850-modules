@@ -37,7 +37,12 @@
 #include "oplus_display_pwm.h"
 #include "oplus_display_power.h"
 #include "oplus_bl_ic_ktz8868.h"
+#include "oplus_bl_ic_ktz8869.h"
 #endif /* OPLUS_FEATURE_DISPLAY */
+
+#ifdef OPLUS_FEATURE_TP_BASIC
+#include "oplus_display_notify_tp.h"
+#endif /* OPLUS_FEATURE_TP_BASIC */
 
 #ifdef OPLUS_FEATURE_DISPLAY_ADFR
 #include "oplus_adfr.h"
@@ -427,6 +432,9 @@ static int dsi_panel_reset(struct dsi_panel *panel)
 			usleep_range(r_config->sequence[i].sleep_ms * 1000,
 				(r_config->sequence[i].sleep_ms * 1000) + 100);
 	}
+#ifdef OPLUS_FEATURE_DISPLAY
+	oplus_reset_custom(panel, r_config);
+#endif /* OPLUS_FEATURE_DISPLAY */
 
 skip_reset_gpio:
 	if (gpio_is_valid(panel->bl_config.en_gpio)) {
@@ -607,13 +615,21 @@ int dsi_panel_power_off(struct dsi_panel *panel)
 		return rc;
 	}
 
+#ifdef OPLUS_FEATURE_TP_BASIC
+	if (oplus_display_notify_tp_ops.tp_panel_power_off_cs_off) {
+		oplus_display_notify_tp_ops.tp_panel_power_off_cs_off(panel);
+	}
+#endif /* OPLUS_FEATURE_TP_BASIC */
+
 #ifdef OPLUS_FEATURE_DISPLAY
 	// Special Adaptation
-	if (!strcmp(panel->name, "AA607 P 7 A0020 dsc cmd mode panel")
+	if(!strcmp(panel->name, "AA607 P 7 A0020 dsc cmd mode panel")
 		&& panel->cur_mode && (panel->cur_mode->timing.refresh_rate == 60)) {
 		usleep_range(10*1000, 10*1000 + 10);
 	} else if (!strcmp(panel->name, "AA616 P 7 A0020 dsc cmd mode panel")){
 		usleep_range(70*1000, 70*1000 + 10);
+	} else if (!strcmp(panel->name, "XN253 P D A0040 dsc cmd mode panel")) {
+		usleep_range(2*1000, 2*1000 + 10);
 	}
 #endif /* OPLUS_FEATURE_DISPLAY */
 
@@ -628,7 +644,13 @@ int dsi_panel_power_off(struct dsi_panel *panel)
 			!strcmp(panel->name, "AE174 P 1 A0037 dsc cmd mode panel")) {
 			usleep_range(3*1000, 3*1000 + 10);
 		}
-		oplus_panel_gpio_set_value(panel->reset_config.reset_gpio, 0);
+#ifdef OPLUS_FEATURE_TP_BASIC
+		if (oplus_display_notify_tp_ops.tp_panel_power_off_rst) {
+			oplus_display_notify_tp_ops.tp_panel_power_off_rst(panel);
+		} else
+#endif /* OPLUS_FEATURE_TP_BASIC */
+			oplus_panel_gpio_set_value(panel->reset_config.reset_gpio, 0);
+
 	}
 #else /* OPLUS_FEATURE_DISPLAY */
 		gpio_set_value(panel->reset_config.reset_gpio, 0);
@@ -1015,6 +1037,13 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 		rc = dsi_panel_update_backlight(panel, bl_lvl);
 		break;
 	case DSI_BACKLIGHT_EXTERNAL:
+#ifdef OPLUS_FEATURE_DISPLAY
+		/* add for ktz8866 backlight ctrl*/
+		if (panel->oplus_panel.bl_ic_ktz8869_used)
+			rc = bl_ic_ktz8869_set_brightness(bl_lvl);
+		else if (panel->oplus_panel.bl_ic_ktz8868_used)
+			rc = bl_ic_ktz8868_set_brightness(bl_lvl);
+#endif /* OPLUS_FEATURE_DISPLAY */
 		break;
 	case DSI_BACKLIGHT_PWM:
 		rc = dsi_panel_update_pwm_backlight(panel, bl_lvl);
@@ -2311,6 +2340,25 @@ static int dsi_panel_parse_dyn_clk_caps(struct dsi_panel *panel)
 	return 0;
 }
 
+static int dsi_panel_parse_dfps_porches(struct dsi_parser_utils *utils,
+	u32 **dfps_porch_list, const char *porch_type, u32 dfps_list_len)
+{
+	int rc;
+
+	*dfps_porch_list = kcalloc(dfps_list_len, sizeof(u32), GFP_KERNEL);
+	if (!*dfps_porch_list)
+		return -ENOMEM;
+
+	rc = utils->read_u32_array(utils->data, porch_type,
+			*dfps_porch_list, dfps_list_len);
+	if (rc) {
+		kfree(*dfps_porch_list);
+		*dfps_porch_list = NULL;
+		DSI_ERR("[%s] dfps porch list parse failed, rc = %d\n", porch_type, rc);
+	}
+	return rc;
+}
+
 static int dsi_panel_parse_dfps_caps(struct dsi_panel *panel)
 {
 	int rc = 0;
@@ -2344,6 +2392,8 @@ static int dsi_panel_parse_dfps_caps(struct dsi_panel *panel)
 		dfps_caps->type = DSI_DFPS_IMMEDIATE_HFP;
 	} else if (!strcmp(type, "dfps_immediate_porch_mode_vfp")) {
 		dfps_caps->type = DSI_DFPS_IMMEDIATE_VFP;
+	} else if (!strcmp(type, "dfps_immediate_porch_mode_both_hv_porch")) {
+		dfps_caps->type = DSI_DFPS_IMMEDIATE_HV_P;
 	} else {
 		DSI_ERR("[%s] dfps type is not recognized\n", name);
 		rc = -EINVAL;
@@ -2374,6 +2424,34 @@ static int dsi_panel_parse_dfps_caps(struct dsi_panel *panel)
 		rc = -EINVAL;
 		goto error;
 	}
+
+	if (dfps_caps->type == DSI_DFPS_IMMEDIATE_HV_P) {
+		rc = dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_hfp_list, "qcom,dsi-dfps-hfp-list",
+			dfps_caps->dfps_list_len);
+		if (rc)
+			goto porch_error;
+		rc = dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_hbp_list, "qcom,dsi-dfps-hbp-list",
+			dfps_caps->dfps_list_len);
+		if (rc)
+			goto porch_error;
+		rc = dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_hpw_list, "qcom,dsi-dfps-hpw-list",
+			dfps_caps->dfps_list_len);
+		if (rc)
+			goto porch_error;
+		rc = dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_vbp_list, "qcom,dsi-dfps-vbp-list",
+			dfps_caps->dfps_list_len);
+		if (rc)
+			goto porch_error;
+		rc = dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_vfp_list, "qcom,dsi-dfps-vfp-list",
+			dfps_caps->dfps_list_len);
+		if (rc)
+			goto porch_error;
+		rc = dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_vpw_list, "qcom,dsi-dfps-vpw-list",
+			dfps_caps->dfps_list_len);
+		if (rc)
+			goto porch_error;
+	}
+
 	dfps_caps->dfps_support = true;
 
 	/* calculate max and min fps */
@@ -2387,6 +2465,23 @@ static int dsi_panel_parse_dfps_caps(struct dsi_panel *panel)
 			dfps_caps->max_refresh_rate = dfps_caps->dfps_list[i];
 	}
 
+	return 0;
+
+porch_error:
+	kfree(dfps_caps->dfps_hfp_list);
+	dfps_caps->dfps_hfp_list = NULL;
+	kfree(dfps_caps->dfps_hbp_list);
+	dfps_caps->dfps_hbp_list = NULL;
+	kfree(dfps_caps->dfps_hpw_list);
+	dfps_caps->dfps_hpw_list = NULL;
+	kfree(dfps_caps->dfps_vbp_list);
+	dfps_caps->dfps_vbp_list = NULL;
+	kfree(dfps_caps->dfps_vfp_list);
+	dfps_caps->dfps_vfp_list = NULL;
+	kfree(dfps_caps->dfps_vpw_list);
+	dfps_caps->dfps_vpw_list = NULL;
+	kfree(dfps_caps->dfps_list);
+	dfps_caps->dfps_list = NULL;
 error:
 	return rc;
 }
@@ -3658,6 +3753,9 @@ static int dsi_panel_parse_phy_timing(struct dsi_display_mode *mode,
 				mode->timing.refresh_rate);
 		do_div(pixel_clk_khz, 1000);
 		mode->pixel_clk_khz = pixel_clk_khz;
+		DSI_INFO("h_total_dce=%llu, v_total=%u, refresh_rate=%u, pclk = %llu, h_total=%u \n",
+			dsi_h_total_dce(&mode->timing), DSI_V_TOTAL(&mode->timing),
+			mode->timing.refresh_rate, pixel_clk_khz, DSI_H_TOTAL(&mode->timing));
 	}
 
 	return rc;
@@ -4937,6 +5035,12 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 
 	return panel;
 error:
+	kfree(panel->dfps_caps.dfps_hfp_list);
+	kfree(panel->dfps_caps.dfps_hbp_list);
+	kfree(panel->dfps_caps.dfps_hpw_list);
+	kfree(panel->dfps_caps.dfps_vbp_list);
+	kfree(panel->dfps_caps.dfps_vfp_list);
+	kfree(panel->dfps_caps.dfps_vpw_list);
 	kfree(panel);
 	return ERR_PTR(rc);
 }
@@ -4949,6 +5053,12 @@ void dsi_panel_put(struct dsi_panel *panel)
 	dsi_panel_esd_config_deinit(&panel->esd_config);
 
 	kfree(panel->avr_caps.avr_step_fps_list);
+	kfree(panel->dfps_caps.dfps_hfp_list);
+	kfree(panel->dfps_caps.dfps_hbp_list);
+	kfree(panel->dfps_caps.dfps_hpw_list);
+	kfree(panel->dfps_caps.dfps_vbp_list);
+	kfree(panel->dfps_caps.dfps_vfp_list);
+	kfree(panel->dfps_caps.dfps_vpw_list);
 	kfree(panel);
 }
 

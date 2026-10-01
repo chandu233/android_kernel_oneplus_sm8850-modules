@@ -20,6 +20,7 @@
 
 extern u32 bl_lvl;
 extern struct panel_id panel_id;
+extern bool low_pwm_aod_flag;
 
 const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-pre-on-command",
@@ -302,7 +303,6 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 	"oplus,mdss-dsi-dynamic-float-dc-te-command",
 	"oplus,mdss-dsi-dynamic-float-default-te-command",
 #endif /* OPLUS_FEATURE_DISPLAY */
-
 #ifdef OPLUS_FEATURE_AP_UIR_DIMMING
 	"oplus,dsi-panel-apuir-on-command",
 	"oplus,dsi-panel-apuir-middle-off-command",
@@ -310,6 +310,30 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 #endif /*OPLUS_FEATURE_AP_UIR_DIMMING*/
 	"oplus,dsi-panel-switch-low-pwm-aod-on-command",
 	"oplus,dsi-panel-switch-low-pwm-aod-off-command",
+	"qcom,mdss-dsi-timing-switch-v2-command",
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-0-command",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-1-command",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-2-command",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-3-command",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-4-command",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-5-command",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-6-command",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-7-command",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-8-command",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-9-command",
+#endif
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR_EXTEND
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-10-command",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-11-command",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-12-command",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-13-command",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-14-command",
+#endif
+#endif
+	"oplus,dsi-panel-switch-lgd-on-command",
+	"oplus,dsi-panel-switch-lgd-off-command",
 };
 
 const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
@@ -600,6 +624,30 @@ const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 #endif /*OPLUS_FEATURE_AP_UIR_DIMMING*/
 	"oplus,dsi-panel-switch-low-pwm-aod-on-command-state",
 	"oplus,dsi-panel-switch-low-pwm-aod-off-command-state",
+	"qcom,mdss-dsi-timing-switch-v2-command-state",
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-0-command-state",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-1-command-state",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-2-command-state",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-3-command-state",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-4-command-state",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-5-command-state",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-6-command-state",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-7-command-state",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-8-command-state",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-9-command-state",
+#endif
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR_EXTEND
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-10-command-state",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-11-command-state",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-12-command-state",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-13-command-state",
+	"qcom,mdss-dsi-lpwm-adfr-min-fps-14-command-state",
+#endif
+#endif
+	"oplus,dsi-panel-switch-lgd-on-command-state",
+	"oplus,dsi-panel-switch-lgd-off-command-state",
 };
 
 EXPORT_SYMBOL(cmd_set_prop_map);
@@ -648,7 +696,9 @@ int oplus_panel_cmd_print(struct dsi_panel *panel, enum dsi_cmd_set_type type)
 	switch (type) {
 	case DSI_CMD_SET_ROI:
 	case DSI_CMD_ESD_SWITCH_PAGE:
+#ifdef OPLUS_FEATURE_DISPLAY_SKIPFRAME_DBV
 	case DSI_CMD_SKIPFRAME_DBV:
+#endif
 	case DSI_CMD_DEFAULT_SWITCH_PAGE:
 		/* Do nothing */
 		break;
@@ -704,6 +754,23 @@ int oplus_panel_cmd_print(struct dsi_panel *panel, enum dsi_cmd_set_type type)
 	case DSI_CMD_BIGDC_ADFR_MIN_FPS_13:
 	case DSI_CMD_BIGDC_ADFR_MIN_FPS_14:
 #endif
+	case DSI_CMD_LPWM_ADFR_MIN_FPS_0:
+	case DSI_CMD_LPWM_ADFR_MIN_FPS_1:
+	case DSI_CMD_LPWM_ADFR_MIN_FPS_2:
+	case DSI_CMD_LPWM_ADFR_MIN_FPS_3:
+	case DSI_CMD_LPWM_ADFR_MIN_FPS_4:
+	case DSI_CMD_LPWM_ADFR_MIN_FPS_5:
+	case DSI_CMD_LPWM_ADFR_MIN_FPS_6:
+	case DSI_CMD_LPWM_ADFR_MIN_FPS_7:
+	case DSI_CMD_LPWM_ADFR_MIN_FPS_8:
+	case DSI_CMD_LPWM_ADFR_MIN_FPS_9:
+#ifdef OPLUS_FEATURE_DISPLAY_ADFR_EXTEND
+	case DSI_CMD_LPWM_ADFR_MIN_FPS_10:
+	case DSI_CMD_LPWM_ADFR_MIN_FPS_11:
+	case DSI_CMD_LPWM_ADFR_MIN_FPS_12:
+	case DSI_CMD_LPWM_ADFR_MIN_FPS_13:
+	case DSI_CMD_LPWM_ADFR_MIN_FPS_14:
+#endif
 		if (panel->cur_mode->priv_info->oplus_adfr_idle_min_fps_log) {
 			ADFR_DEBUG("[%s] dsi_cmd: %s, count=%d\n", panel->oplus_panel.vendor_name,
 					cmd_set_prop_map[type], count);
@@ -749,6 +816,17 @@ void oplus_panel_timing_switch_cmd_replace_handle(struct dsi_panel *panel, enum 
 		}
 	}
 
+	/* low pwn aod for LTPO  */
+	if (panel->oplus_panel.ltpo_low_pwm_full_screen_aod_enable && low_pwm_aod_flag) {
+		if (panel->oplus_panel.last_refresh_rate == 120
+		&& panel->cur_mode->timing.refresh_rate == 60) {
+			if (*type == DSI_CMD_SET_TIMING_SWITCH) {
+				*type = DSI_CMD_SET_SWITCH_LOW_PWM_AOD_ON;
+				return;
+			}
+		}
+	}
+
 	if (panel->oplus_panel.last_refresh_rate != 165
 			&& panel->cur_mode->timing.refresh_rate != 165) {
 		return;
@@ -756,6 +834,21 @@ void oplus_panel_timing_switch_cmd_replace_handle(struct dsi_panel *panel, enum 
 
 	if (*type == DSI_CMD_SET_TIMING_SWITCH) {
 		*type = DSI_CMD_SET_TIMING_SWITCH_COMPENSATION;
+	}
+
+	return;
+}
+
+void oplus_panel_timing_switch_compatible_replace_handle(struct dsi_panel *panel, enum dsi_cmd_set_type *type)
+{
+	struct dsi_display *display = to_dsi_display(panel->host);
+
+	if (!display) {
+		OPLUS_DSI_ERR("display is null\n");
+		return;
+	}
+	if (panel->oplus_panel.timing_switch_compatible && display->oplus_display.panel_id2 >= 0x03 && *type == DSI_CMD_SET_TIMING_SWITCH){
+		*type = DSI_CMD_SET_TIMING_V2_SWITCH;
 	}
 
 	return;
@@ -769,6 +862,7 @@ int oplus_panel_cmd_switch(struct dsi_panel *panel, enum dsi_cmd_set_type *type)
 	oplus_panel_pwm_cmd_replace_handle(panel, type);
 	oplus_panel_set_on_cmd_replace_handle(panel, type);
 	oplus_panel_timing_switch_cmd_replace_handle(panel, type);
+	oplus_panel_timing_switch_compatible_replace_handle(panel, type);
 
 	if (*type == type_store) {
 		OPLUS_DSI_DEBUG("[%s] %s doesn't need switch\n",
@@ -924,6 +1018,13 @@ int oplus_panel_cmd_reg_read_specific_row(struct dsi_panel *panel, struct dsi_di
 
 	if ((tx_len - 1) != read_reg_len) {
 		OPLUS_DSI_ERR("the number of rows of the command is wrong tx_len = %zu read_reg_len = %zu\n", tx_len, read_reg_len);
+		if ((type >= DSI_CMD_UIR_LOADING_EFFECT_MODE1 && type < DSI_CMD_UIR_LOADING_EFFECT_MODE2)
+				|| (type >= DSI_CMD_LOADING_EFFECT_MODE1 && type < DSI_CMD_LOADING_EFFECT_OFF)) {
+			tx_buf++;
+			memcpy(read_reg, tx_buf, tx_len - 1);
+			OPLUS_DSI_ERR("reset type %d the number of rows of the command to %zu\n", type, tx_len - 1);
+			return tx_len - 1;
+		}
 		return -EFAULT;
 	}
 	tx_buf++;

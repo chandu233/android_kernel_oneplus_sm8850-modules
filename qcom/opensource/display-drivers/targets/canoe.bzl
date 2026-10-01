@@ -23,6 +23,9 @@ def define_canoe():
                     "OPLUS_FEATURE_APDMR",
                     "OPLUS_FEATURE_AP_UIR_DIMMING",
 #endif /* OPLUS_FEATURE_DISPLAY */
+#ifdef OPLUS_FEATURE_TP_BASIC
+                    "OPLUS_FEATURE_TP_BASIC",
+#endif /* OPLUS_FEATURE_TP_BASIC */
                     "CONFIG_DRM_MSM_SDE",
                     "CONFIG_SYNC_FILE",
                     "CONFIG_DRM_MSM_DSI",

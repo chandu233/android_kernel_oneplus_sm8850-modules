@@ -156,6 +156,7 @@ struct oplus_adfr_params {
 	unsigned long current_wr_rd_irq_interval;		/* a value used to indicates current wr rd ptr interval */
 	unsigned long last_wr_rd_irq_interval;			/* a value used to indicates last wr rd ptr interval */
 	bool oa_use_fixed_te;							/* indicates whether oa use fixed te or not */
+	bool cur_low_pwm_aod_mode;						/* indicates whether current low pwm aod mode is enabled or not */
 };
 
 /* log level config */
@@ -271,6 +272,7 @@ ssize_t oplus_adfr_get_config_attr(struct kobject *obj,
 /* test te */
 int oplus_adfr_set_test_te(void *buf);
 int oplus_adfr_get_test_te(void *buf);
+int _oplus_adfr_set_test_te(struct dsi_panel *panel, unsigned int test_te_config);
 ssize_t oplus_adfr_set_test_te_attr(struct kobject *obj,
 	struct kobj_attribute *attr, const char *buf, size_t count);
 ssize_t oplus_adfr_get_test_te_attr(struct kobject *obj,
