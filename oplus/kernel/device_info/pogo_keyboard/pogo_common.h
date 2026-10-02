@@ -25,4 +25,6 @@ struct pogo_keyboard_operations {
     bool (*check)(struct uart_port *port);
 };
 
+struct pogo_keyboard_operations *get_pogo_keyboard_operations(void);
+
 #endif
