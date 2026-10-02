@@ -21,6 +21,7 @@ def define_oplus_local_modules():
 
     define_oplus_ddk_module(
         name = "snd-soc-tfa98xx",
+        out = "oplus_audio_tfa98xx.ko" if bazel_support_platform == "qcom" else None,
         srcs = native.glob([
             "**/*.h",
             "tfa98xx_v6.14.2/src/tfa98xx.c",
