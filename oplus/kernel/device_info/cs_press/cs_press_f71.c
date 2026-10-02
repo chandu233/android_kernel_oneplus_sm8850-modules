@@ -2172,7 +2172,6 @@ err_release_cfg:
     cs_press_set_trigger_strength(g_cs_press.strength_cfg);
 #endif
     g_cs_press.update_done = 1;
-exit:
     mutex_unlock(&press_lock);
     LOG_INFO("end\n");
 }
