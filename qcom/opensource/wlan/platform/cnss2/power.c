@@ -1585,6 +1585,9 @@ static int cnss_aop_update_mode(struct cnss_plat_data *plat_priv)
 	u32 i;
 	int ret = 0;
 
+	if (of_property_read_bool(dev->of_node, "drop-l3k"))
+		return 0;
+
 	cnss_pr_dbg("Reading PDC Mode Vote table\n");
 
 	/* common DT Entries */
