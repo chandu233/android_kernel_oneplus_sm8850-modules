@@ -67,10 +67,21 @@ ddk_headers(
 #ifdef OPLUS_ARCH_EXTENDS
 #add for oplus audio extends driver
 ddk_headers(
-    name = "tfa98xx_headers",
+    name = "tfa98xx_v6_headers",
     hdrs = glob([
         "oplus/codecs/tfa98xx-v6/*.h"
     ])
+)
+ddk_headers(
+    name = "tfa98xx_headers",
+    hdrs = glob([
+        "oplus/codecs/tfa98xx_v6.14.2/inc/*.h",
+        "oplus/codecs/tfa98xx_v6.14.2/src/*.h"
+    ]),
+    includes = [
+        "oplus/codecs/tfa98xx_v6.14.2/inc",
+        "oplus/codecs/tfa98xx_v6.14.2/src"
+    ]
 )
 ddk_headers(
     name = "aw882xx_headers",

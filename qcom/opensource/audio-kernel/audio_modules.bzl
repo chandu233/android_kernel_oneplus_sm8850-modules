@@ -672,6 +672,20 @@ audio_modules.register(
         "tfa_dsp_v6.c",
         "tfa_init_v6.c",
     ],
+    deps = [":tfa98xx_v6_headers"],
+)
+# >>>>  TFA98XX v6.14.2 PA MODULES <<<<
+audio_modules.register(
+    name = "oplus_audio_tfa98xx",
+    path = "oplus/codecs/tfa98xx_v6.14.2",
+    config_option = "CONFIG_SND_SOC_TFA98XX",
+    srcs = [
+        "src/tfa98xx.c",
+        "src/tfa_container.c",
+        "src/tfa_dsp.c",
+        "src/tfa_init.c",
+        "src/oplus_tfa98xx_feedback.c",
+    ],
     deps = [":tfa98xx_headers"],
 )
 # >>>>  AW88XXX PA MODULES <<<<

@@ -5,7 +5,6 @@ load(":oplus_modules_define.bzl", "oplus_ddk_get_oplus_features")
 
 def define_oplus_ddk_modules(target, msm_target, variant):
     oplus_ddk_targets = [
-        modules_label("oplus/kernel/audio/bazel:snd-soc-tfa98xx"),
         modules_label("oplus/hardware/radio/kernel:oplus_mdmfeature"),
         modules_label("oplus/hardware/radio/mdmrst/bazel:oplus_mdmrst"),
         modules_label("oplus/kernel/boot:buildvariant"),

@@ -53,6 +53,7 @@ def define_canoe():
 #add for oplus audio extends driver
             "oplus_audio_extend",
             "oplus_audio_tfa98xx_v6",
+            "oplus_audio_tfa98xx",
             "oplus_audio_aw882xx",
 #ifdef CONFIG_AUDIO_DAEMON_KERNEL_QCOM
 #add for oplus audio daemon kernel
@@ -90,6 +91,7 @@ def define_canoe():
             "OPLUS_FEATURE_SPEAKER_MUTE",
             "OPLUS_FEATURE_RINGTONE_HAPTIC",
             "CONFIG_OPLUS_FEATURE_MM_FEEDBACK",
+            "OPLUS_TFA98XX_DRV_NEED_COMPAT",
 #endif /* OPLUS_ARCH_EXTENDS */
         ]
     )
