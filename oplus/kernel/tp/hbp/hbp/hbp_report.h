@@ -1,8 +1,50 @@
 #ifndef __HBP_REPORT_H__
 #define __HBP_REPORT_H__
 
+#include <linux/ioctl.h>
+#include <linux/types.h>
 
 #define TOUCH_MAX_FINGERS 10
+
+/* HBP5 uses a separate node and fixed-width ABI for processed contacts. */
+#define HBP_REPORT_IOCTL _IO(0xC5, 0x24)
+
+struct hbp_report_request {
+	__aligned_u64 payload;
+	__aligned_u64 size;
+};
+
+struct hbp_report_slot {
+	__u32 index;
+	__u32 id;
+	__u32 x;
+	__u32 y;
+	__u32 pressure;
+	__u32 raw_width_x;
+	__u32 raw_width_y;
+	__u32 width_major;
+	__u32 touch_major;
+	__u32 touch_minor;
+	__u32 status;
+	__u32 previous_status;
+};
+
+struct hbp_report_payload {
+	__u32 mask;
+	__u32 flags;
+	struct hbp_report_slot slots[TOUCH_MAX_FINGERS];
+};
+
+struct hbp_report_dual {
+	__aligned_u64 timestamp_ns;
+	__u32 delay_us;
+	struct hbp_report_payload immediate;
+	struct hbp_report_payload delayed;
+};
+
+struct hbp_device;
+
+int hbp_report_register(struct hbp_device *hbp_dev);
 
 enum hbp_data_type {
 	HBP_REQUEST_SOURCE,

@@ -69,6 +69,7 @@ def define_oplus_local_modules():
             "utils/platform.c",
             "chips/touch_custom.c",
             "hbp_device.c",
+            "hbp_report.c",
             "hbp_power.c",
             "hbp_spi.c",
             "hbp_sysfs.c",

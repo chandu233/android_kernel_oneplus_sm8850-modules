@@ -413,6 +413,7 @@ struct hbp_device *hbp_device_create(void *priv,
 
 	mutex_init(&hbp_dev->mifp);
 	mutex_init(&hbp_dev->mlock);
+	mutex_init(&hbp_dev->mreport);
 	init_waitqueue_head(&hbp_dev->sts_event);
 	init_waitqueue_head(&hbp_dev->drv_event);
 
@@ -857,7 +858,9 @@ static irqreturn_t hbp_irq_threaded_fn(int irq, void *dev_id)
 		if (obj_attention < 0) {
 			hbp_err("failed to get touch points\n");
 		} else {
+			mutex_lock(&hbp_dev->mreport);
 			hbp_touch_points_report(hbp_dev, points, obj_attention);
+			mutex_unlock(&hbp_dev->mreport);
 		}
 		goto exit;
 	}

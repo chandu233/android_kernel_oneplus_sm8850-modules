@@ -189,6 +189,13 @@ int hbp_register_devices(void *priv,
 	hbp->dev_info.device[id].max_y = hbp_dev->hw.resolution.y;
 	hbp->dev_info.panels_attached++;
 
+	/* Publish the report node only after input and IRQ setup have succeeded. */
+	ret = hbp_report_register(hbp_dev);
+	if (ret) {
+		/* Keep the already registered legacy device usable on failure. */
+		hbp_err("Failed to register report device %d: %d\n", id, ret);
+	}
+
 	hbp_info("device %s %s registed, panel attached %d\n",
 		 hbp->dev_info.device[id].ic_name,
 		 hbp->dev_info.device[id].vendor,

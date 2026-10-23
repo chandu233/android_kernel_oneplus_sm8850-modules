@@ -6,6 +6,7 @@ oplus_hbp_core-y += utils/debug.o
 oplus_hbp_core-y += utils/platform.o
 oplus_hbp_core-y += chips/touch_custom.o
 oplus_hbp_core-y += hbp_device.o
+oplus_hbp_core-y += hbp_report.o
 oplus_hbp_core-y += hbp_power.o
 oplus_hbp_core-y += hbp_spi.o
 oplus_hbp_core-y += hbp_sysfs.o
