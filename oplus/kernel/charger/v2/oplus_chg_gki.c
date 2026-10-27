@@ -927,10 +927,12 @@ static int battery_psy_get_prop(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_TIME_TO_FULL_AVG:
 	case POWER_SUPPLY_PROP_TIME_TO_FULL_NOW:
-		if (chip->time_to_full > 0 && oplus_gki_get_ui_soc(chip) == 100)
+		if (oplus_gki_get_ui_soc(chip) == 100)
 			pval->intval = 0;
-		else
+		else if (chip->time_to_full > 0)
 			pval->intval = chip->time_to_full;
+		else
+			return -ENODATA;
 		break;
 	case POWER_SUPPLY_PROP_TIME_TO_EMPTY_AVG:
 		pval->intval = 3600;
